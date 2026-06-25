@@ -130,12 +130,9 @@ controls.target.set(0, 1.1, 0);
 
 const restoreCameraFromUrl = () => {
   const params = new URLSearchParams(window.location.search);
-  const cx = Number(params.get("cx"));
-  const cy = Number(params.get("cy"));
-  const cz = Number(params.get("cz"));
-  const tx = Number(params.get("tx"));
-  const ty = Number(params.get("ty"));
-  const tz = Number(params.get("tz"));
+  const raw = ["cx", "cy", "cz", "tx", "ty", "tz"].map((key) => params.get(key));
+  if (raw.some((value) => value === null || value.trim() === "")) return;
+  const [cx, cy, cz, tx, ty, tz] = raw.map(Number);
   if ([cx, cy, cz, tx, ty, tz].every(Number.isFinite)) {
     camera.position.set(cx, cy, cz);
     controls.target.set(tx, ty, tz);
