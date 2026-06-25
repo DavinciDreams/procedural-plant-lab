@@ -2119,16 +2119,6 @@ const addFlower = (builder: TemplateBuilder, genome: ProcPlantGenome, organ: Org
         .add(right.clone().multiplyScalar(x * radius * 2.18))
         .add(up.clone().multiplyScalar(y * radius * 2.18))
         .add(bloomForward.clone().multiplyScalar(z * radius * 1.45));
-    const apex = toWorld(0, 0, 0.34);
-    const base: THREE.Vector3[] = [];
-    for (let i = 0; i < 3; i++) {
-      const a = i * (Math.PI * 2 / 3) + Math.PI / 2;
-      base.push(toWorld(Math.cos(a) * 0.28, Math.sin(a) * 0.28, 0.04));
-    }
-    builder.addTriangle(apex, base[0], base[1], petalColor, true, 0.6);
-    builder.addTriangle(apex, base[1], base[2], petalColor, true, 0.6);
-    builder.addTriangle(apex, base[2], base[0], petalColor, true, 0.6);
-
     const center = toWorld(0, 0, -0.055);
     const rim: THREE.Vector3[] = [];
     for (let i = 0; i < 12; i++) {
@@ -2141,6 +2131,14 @@ const addFlower = (builder: TemplateBuilder, genome: ProcPlantGenome, organ: Org
     for (let i = 0; i < rim.length; i++) {
       builder.addTriangle(center, rim[i], rim[(i + 1) % rim.length], petalColor, true, 0.6);
     }
+    builder.addTriangle(
+      toWorld(0, -0.3, 0.28),
+      toWorld(-0.18, 0.08, 0.02),
+      toWorld(0.18, 0.08, 0.02),
+      petalColor,
+      true,
+      0.6,
+    );
     builder.addTriangle(
       center.clone().add(right.clone().multiplyScalar(-radius * 0.13)),
       center.clone().add(right.clone().multiplyScalar(radius * 0.13)),
@@ -2865,12 +2863,8 @@ export const createProcPlantDaylilyBloomGeometry = (): THREE.BufferGeometry => {
   const positions: number[] = [];
   const indices: number[] = [];
 
-  positions.push(0, 0, 0.34);
-  for (let i = 0; i < 3; i++) {
-    const a = i * (Math.PI * 2 / 3) + Math.PI / 2;
-    positions.push(Math.cos(a) * 0.28, Math.sin(a) * 0.28, 0.04);
-  }
-  indices.push(0, 1, 2, 0, 2, 3, 0, 3, 1);
+  positions.push(0, -0.3, 0.28, -0.18, 0.08, 0.02, 0.18, 0.08, 0.02);
+  indices.push(0, 2, 1);
 
   const centerIndex = positions.length / 3;
   positions.push(0, 0, -0.055);
