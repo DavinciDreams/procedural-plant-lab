@@ -1654,7 +1654,7 @@ export const buildProcPlantGraph = (
           organs.push({
             kind: "flower",
             position: node.position.clone().add(rotateFromAxis(direction, azimuth, 1.22).multiplyScalar(0.09 + rng() * 0.035)),
-            direction: rotateFromAxis(direction, azimuth, 1.38).add(new THREE.Vector3(0, -0.2, 0)).normalize(),
+            direction: rotateFromAxis(direction, azimuth, 1.38).add(new THREE.Vector3(0, -0.72, 0)).normalize(),
             right: tangentBasis(direction).right.applyAxisAngle(direction, azimuth).normalize(),
             scale: (0.72 + t * 0.24) * (0.9 + rng() * 0.12),
             t,
@@ -2246,6 +2246,7 @@ const leafInstance = (
   const dir = organ.direction.clone().normalize();
   const right = organ.right.clone().normalize();
   const normal = new THREE.Vector3().crossVectors(right, dir).normalize();
+  normal.negate();
   const color = new THREE.Color(genome.leaf.colorA).lerp(new THREE.Color(genome.leaf.colorB), organ.t);
   return {
     kind: organ.kind === "grassBlade" ? "grassBlade" : "leaf",
@@ -2269,6 +2270,7 @@ const grassBladeInstance = (
   const dir = organ.direction.clone().normalize();
   const right = organ.right.clone().normalize();
   const normal = new THREE.Vector3().crossVectors(right, dir).normalize();
+  normal.negate();
   const color = new THREE.Color(genome.leaf.colorA).lerp(new THREE.Color(genome.leaf.colorB), organ.t);
   return {
     kind: "grassBlade",
@@ -2292,6 +2294,7 @@ const coniferSprayInstance = (
   const dir = organ.direction.clone().normalize();
   const right = organ.right.clone().normalize();
   const normal = new THREE.Vector3().crossVectors(right, dir).normalize();
+  normal.negate();
   const color = new THREE.Color(genome.leaf.colorA).lerp(new THREE.Color(genome.leaf.colorB), 0.35 + organ.t * 0.45);
   return {
     kind: "coniferSpray",
@@ -2315,6 +2318,7 @@ const palmFrondInstance = (
   const dir = organ.direction.clone().normalize();
   const right = organ.right.clone().normalize();
   const normal = new THREE.Vector3().crossVectors(right, dir).normalize();
+  normal.negate();
   const color = new THREE.Color(genome.leaf.colorA).lerp(new THREE.Color(genome.leaf.colorB), 0.25 + organ.t * 0.35);
   return {
     kind: "palmFrond",
@@ -2417,7 +2421,7 @@ const flowerInstances = (
         organ.position.clone().add(forward.clone().multiplyScalar(radius * 0.015)),
         right,
         up,
-        forward.clone().negate(),
+        forward,
         new THREE.Vector3(radius * 2.15, radius * 2.15, radius),
       ),
       color: petalColor,
@@ -2477,7 +2481,7 @@ const flowerInstances = (
           organ.position.clone().add(whorlLift).add(radial.clone().multiplyScalar(whorlRadius * 0.16)),
           side,
           petalAxis,
-          isTulip ? petalNormal.clone().negate() : petalNormal,
+          petalNormal.clone().negate(),
           new THREE.Vector3(whorlRadius * widthScale, whorlRadius * lengthScale, whorlRadius),
         ),
         color: petalColor,
