@@ -404,8 +404,8 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       whorls: 2,
       petals: 3,
       radius: 0.24,
-      color: 0xf23d32,
-      centerColor: 0xffc83d,
+      color: 0xff9a66,
+      centerColor: 0xffd56a,
     },
     lightResponse: {
       shadeAvoidance: 0.48,
