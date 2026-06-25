@@ -278,6 +278,210 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       phototropism: 0.22,
     },
   },
+  hibiscusBloom: {
+    id: "hibiscusBloom",
+    habit: "flower",
+    nodeCount: 9,
+    internode: { base: 0.12, tip: 0.08, curve: 0.95 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0.08, tip: 0.02, curve: 1.4 },
+    branchAngle: { mean: 0.48, spread: 0.18, depthDecay: 0.72 },
+    apicalDominance: 0.72,
+    leaf: {
+      shape: "ovate",
+      length: { base: 0.42, tip: 0.24, curve: 1.05 },
+      widthRatio: 0.5,
+      density: { base: 0.82, tip: 0.46, curve: 1.2 },
+      curl: 0.12,
+      serration: 0.08,
+      venation: 0.72,
+      colorA: 0x285b31,
+      colorB: 0x78af55,
+    },
+    flower: {
+      whorls: 1,
+      petals: 5,
+      radius: 0.34,
+      color: 0xff4f6f,
+      centerColor: 0xffd75a,
+    },
+    lightResponse: {
+      shadeAvoidance: 0.52,
+      leafBoostInShade: 0.3,
+      branchSuppressionInShade: 0.24,
+      phototropism: 0.18,
+    },
+  },
+  daylilyFlower: {
+    id: "daylilyFlower",
+    habit: "flower",
+    nodeCount: 10,
+    internode: { base: 0.15, tip: 0.1, curve: 0.92 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0.02, tip: 0.01, curve: 1.35 },
+    branchAngle: { mean: 0.28, spread: 0.1, depthDecay: 0.72 },
+    apicalDominance: 0.9,
+    leaf: {
+      shape: "linear",
+      length: { base: 0.86, tip: 0.48, curve: 1.05 },
+      widthRatio: 0.06,
+      density: { base: 1, tip: 0.3, curve: 1.8 },
+      curl: 0.16,
+      serration: 0,
+      venation: 0.28,
+      colorA: 0x365e2c,
+      colorB: 0xa8bf62,
+    },
+    flower: {
+      whorls: 2,
+      petals: 3,
+      radius: 0.27,
+      color: 0xff8f2f,
+      centerColor: 0xffd158,
+    },
+    lightResponse: {
+      shadeAvoidance: 0.58,
+      leafBoostInShade: 0.12,
+      branchSuppressionInShade: 0.4,
+      phototropism: 0.16,
+    },
+  },
+  foxgloveSpike: {
+    id: "foxgloveSpike",
+    habit: "flower",
+    nodeCount: 13,
+    internode: { base: 0.13, tip: 0.085, curve: 1.05 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0.01, tip: 0, curve: 1.4 },
+    branchAngle: { mean: 0.32, spread: 0.1, depthDecay: 0.72 },
+    apicalDominance: 0.94,
+    leaf: {
+      shape: "ovate",
+      length: { base: 0.34, tip: 0.16, curve: 1.35 },
+      widthRatio: 0.42,
+      density: { base: 0.82, tip: 0.18, curve: 2 },
+      curl: 0.1,
+      serration: 0.18,
+      venation: 0.6,
+      colorA: 0x2d572f,
+      colorB: 0x86aa58,
+    },
+    flower: {
+      whorls: 2,
+      petals: 5,
+      radius: 0.12,
+      color: 0xd06ad8,
+      centerColor: 0xf5d3ef,
+    },
+    lightResponse: {
+      shadeAvoidance: 0.72,
+      leafBoostInShade: 0.16,
+      branchSuppressionInShade: 0.45,
+      phototropism: 0.22,
+    },
+  },
+  tulipCup: {
+    id: "tulipCup",
+    habit: "flower",
+    nodeCount: 8,
+    internode: { base: 0.13, tip: 0.09, curve: 0.95 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0, tip: 0, curve: 1 },
+    branchAngle: { mean: 0.18, spread: 0.08, depthDecay: 0.7 },
+    apicalDominance: 0.96,
+    leaf: {
+      shape: "lanceolate",
+      length: { base: 0.62, tip: 0.34, curve: 1.05 },
+      widthRatio: 0.2,
+      density: { base: 0.9, tip: 0.22, curve: 1.8 },
+      curl: 0.12,
+      serration: 0.01,
+      venation: 0.42,
+      colorA: 0x315f30,
+      colorB: 0x9fbb5f,
+    },
+    flower: {
+      whorls: 2,
+      petals: 3,
+      radius: 0.24,
+      color: 0xf23d32,
+      centerColor: 0xffc83d,
+    },
+    lightResponse: {
+      shadeAvoidance: 0.48,
+      leafBoostInShade: 0.14,
+      branchSuppressionInShade: 0.36,
+      phototropism: 0.14,
+    },
+  },
+  poppyFlower: {
+    id: "poppyFlower",
+    habit: "flower",
+    nodeCount: 9,
+    internode: { base: 0.13, tip: 0.09, curve: 0.95 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0.01, tip: 0, curve: 1.3 },
+    branchAngle: { mean: 0.34, spread: 0.12, depthDecay: 0.72 },
+    apicalDominance: 0.88,
+    leaf: {
+      shape: "frond",
+      length: { base: 0.3, tip: 0.14, curve: 1.25 },
+      widthRatio: 0.26,
+      density: { base: 0.74, tip: 0.18, curve: 2 },
+      curl: 0.08,
+      serration: 0.26,
+      venation: 0.42,
+      colorA: 0x3a612e,
+      colorB: 0x95b661,
+    },
+    flower: {
+      whorls: 1,
+      petals: 4,
+      radius: 0.28,
+      color: 0xf04b2f,
+      centerColor: 0x282414,
+    },
+    lightResponse: {
+      shadeAvoidance: 0.66,
+      leafBoostInShade: 0.14,
+      branchSuppressionInShade: 0.42,
+      phototropism: 0.2,
+    },
+  },
+  sunflowerTower: {
+    id: "sunflowerTower",
+    habit: "flower",
+    nodeCount: 14,
+    internode: { base: 0.16, tip: 0.1, curve: 1 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0.03, tip: 0.01, curve: 1.6 },
+    branchAngle: { mean: 0.4, spread: 0.14, depthDecay: 0.7 },
+    apicalDominance: 0.92,
+    leaf: {
+      shape: "cordate",
+      length: { base: 0.42, tip: 0.24, curve: 1.2 },
+      widthRatio: 0.52,
+      density: { base: 0.7, tip: 0.34, curve: 1.55 },
+      curl: 0.08,
+      serration: 0.14,
+      venation: 0.7,
+      colorA: 0x31572a,
+      colorB: 0x8baa4d,
+    },
+    flower: {
+      whorls: 2,
+      petals: 17,
+      radius: 0.32,
+      color: 0xffd22e,
+      centerColor: 0x5b3b1b,
+    },
+    lightResponse: {
+      shadeAvoidance: 0.78,
+      leafBoostInShade: 0.14,
+      branchSuppressionInShade: 0.42,
+      phototropism: 0.24,
+    },
+  },
   cloverGroundcover: {
     id: "cloverGroundcover",
     habit: "vine",
@@ -1100,8 +1304,210 @@ export const buildProcPlantGraph = (
     return { stems, segments, organs };
   }
 
-  if (genome.id === "irisBulb") {
-    const strapLeaves = 9;
+  if (genome.id === "tulipCup") {
+    const leaves = 5;
+    for (let i = 0; i < leaves; i++) {
+      const t = i / Math.max(1, leaves - 1);
+      const azimuth = i * genome.phyllotaxisAngle + (rng() - 0.5) * 0.2;
+      organs.push({
+        kind: "leaf",
+        position: new THREE.Vector3((rng() - 0.5) * 0.035, 0.018 + i * 0.015, (rng() - 0.5) * 0.035),
+        direction: rotateFromAxis(UP, azimuth, 0.7 + rng() * 0.22),
+        right: new THREE.Vector3(Math.cos(azimuth + Math.PI / 2), 0, -Math.sin(azimuth + Math.PI / 2)).normalize(),
+        scale: curve(genome.leaf.length, t) * (0.86 + rng() * 0.16),
+        t,
+      });
+    }
+    let previous = root;
+    for (let i = 1; i <= genome.nodeCount; i++) {
+      const t = i / genome.nodeCount;
+      const direction = UP.clone()
+        .add(lightVector.clone().multiplyScalar(genome.lightResponse.phototropism * t * (0.2 + shade)))
+        .add(new THREE.Vector3((rng() - 0.5) * 0.018, 0, (rng() - 0.5) * 0.018))
+        .normalize();
+      const node: StemNode = {
+        position: previous.position.clone().add(direction.clone().multiplyScalar(curve(genome.internode, t) * heightStretch)),
+        direction,
+        radius: previous.radius * THREE.MathUtils.lerp(0.92, 0.74, t),
+        depth: 0,
+        t,
+        index: stems.length,
+      };
+      stems.push(node);
+      segments.push([previous.index, node.index]);
+      previous = node;
+    }
+    organs.push({
+      kind: "flower",
+      position: previous.position.clone().add(previous.direction.clone().multiplyScalar(0.04)),
+      direction: previous.direction.clone(),
+      right: tangentBasis(previous.direction).right,
+      scale: 1,
+      t: 1,
+    });
+    return { stems, segments, organs };
+  }
+
+  if (genome.id === "hibiscusBloom") {
+    let previous = root;
+    for (let i = 1; i <= genome.nodeCount; i++) {
+      const t = i / genome.nodeCount;
+      const direction = UP.clone()
+        .add(lightVector.clone().multiplyScalar(genome.lightResponse.phototropism * t * (0.25 + shade)))
+        .add(new THREE.Vector3((rng() - 0.5) * 0.06, 0, (rng() - 0.5) * 0.06))
+        .normalize();
+      const node: StemNode = {
+        position: previous.position.clone().add(direction.clone().multiplyScalar(curve(genome.internode, t) * heightStretch)),
+        direction,
+        radius: previous.radius * THREE.MathUtils.lerp(0.93, 0.74, t),
+        depth: 0,
+        t,
+        index: stems.length,
+      };
+      stems.push(node);
+      segments.push([previous.index, node.index]);
+      previous = node;
+      if (i > 1 && i < genome.nodeCount - 1 && rng() < 0.82) {
+        const azimuth = i * genome.phyllotaxisAngle;
+        const { right } = tangentBasis(direction);
+        organs.push({
+          kind: "leaf",
+          position: node.position.clone(),
+          direction: rotateFromAxis(direction, azimuth, 0.78 + t * 0.18),
+          right: right.applyAxisAngle(direction, azimuth).normalize(),
+          scale: curve(genome.leaf.length, t) * (0.82 + rng() * 0.24),
+          t,
+        });
+      }
+    }
+    const tipRight = tangentBasis(previous.direction).right;
+    organs.push({
+      kind: "flower",
+      position: previous.position.clone().add(previous.direction.clone().multiplyScalar(0.045)),
+      direction: previous.direction.clone().add(lightVector.clone().multiplyScalar(0.12)).normalize(),
+      right: tipRight,
+      scale: 1,
+      t: 1,
+    });
+    if (rng() < 0.6) {
+      const azimuth = genome.phyllotaxisAngle;
+      organs.push({
+        kind: "flower",
+        position: previous.position.clone().add(rotateFromAxis(previous.direction, azimuth, 0.85).multiplyScalar(0.18)),
+        direction: rotateFromAxis(previous.direction, azimuth, 0.34),
+        right: tipRight.clone().applyAxisAngle(previous.direction, azimuth).normalize(),
+        scale: 0.72,
+        t: 1,
+      });
+    }
+    return { stems, segments, organs };
+  }
+
+  if (genome.id === "poppyFlower") {
+    const basalLeaves = 8;
+    for (let i = 0; i < basalLeaves; i++) {
+      const t = i / Math.max(1, basalLeaves - 1);
+      const azimuth = i * genome.phyllotaxisAngle + (rng() - 0.5) * 0.24;
+      organs.push({
+        kind: "leaf",
+        position: new THREE.Vector3((rng() - 0.5) * 0.06, 0.018 + rng() * 0.025, (rng() - 0.5) * 0.06),
+        direction: rotateFromAxis(UP, azimuth, 1.0 + rng() * 0.2),
+        right: new THREE.Vector3(Math.cos(azimuth + Math.PI / 2), 0, -Math.sin(azimuth + Math.PI / 2)).normalize(),
+        scale: curve(genome.leaf.length, t) * (0.82 + rng() * 0.22),
+        t,
+      });
+    }
+    const stemsForPoppy = 1 + Math.round(rng() * 1.2 + env.light * 0.7);
+    for (let s = 0; s < stemsForPoppy; s++) {
+      const azimuth = s * genome.phyllotaxisAngle + rng() * 0.4;
+      const offset = new THREE.Vector3(Math.cos(azimuth), 0, Math.sin(azimuth)).multiplyScalar(s === 0 ? 0 : 0.08 + rng() * 0.08);
+      let previous: StemNode = {
+        position: offset,
+        direction: UP.clone(),
+        radius: root.radius * 0.52,
+        depth: 0,
+        t: 0,
+        index: stems.length,
+      };
+      stems.push(previous);
+      segments.push([root.index, previous.index]);
+      const count = genome.nodeCount - s;
+      for (let i = 1; i <= count; i++) {
+        const t = i / count;
+        const direction = UP.clone()
+          .add(lightVector.clone().multiplyScalar(genome.lightResponse.phototropism * t * (0.3 + shade)))
+          .add(new THREE.Vector3((rng() - 0.5) * 0.035, 0, (rng() - 0.5) * 0.035))
+          .normalize();
+        const node: StemNode = {
+          position: previous.position.clone().add(direction.clone().multiplyScalar(curve(genome.internode, t) * heightStretch * (s === 0 ? 1 : 0.82))),
+          direction,
+          radius: previous.radius * THREE.MathUtils.lerp(0.94, 0.74, t),
+          depth: 0,
+          t,
+          index: stems.length,
+        };
+        stems.push(node);
+        segments.push([previous.index, node.index]);
+        previous = node;
+      }
+      organs.push({
+        kind: "flower",
+        position: previous.position.clone().add(previous.direction.clone().multiplyScalar(0.04)),
+        direction: previous.direction.clone().add(new THREE.Vector3(0, 0.1, 0)).normalize(),
+        right: tangentBasis(previous.direction).right,
+        scale: s === 0 ? 1 : 0.78 + rng() * 0.12,
+        t: 1,
+      });
+    }
+    return { stems, segments, organs };
+  }
+
+  if (genome.id === "sunflowerTower") {
+    let previous = root;
+    for (let i = 1; i <= genome.nodeCount; i++) {
+      const t = i / genome.nodeCount;
+      const direction = UP.clone()
+        .add(lightVector.clone().multiplyScalar(genome.lightResponse.phototropism * t * (0.35 + shade)))
+        .add(new THREE.Vector3((rng() - 0.5) * 0.035, 0, (rng() - 0.5) * 0.035))
+        .normalize();
+      const node: StemNode = {
+        position: previous.position.clone().add(direction.clone().multiplyScalar(curve(genome.internode, t) * heightStretch)),
+        direction,
+        radius: previous.radius * THREE.MathUtils.lerp(0.95, 0.78, t),
+        depth: 0,
+        t,
+        index: stems.length,
+      };
+      stems.push(node);
+      segments.push([previous.index, node.index]);
+      previous = node;
+      if (i > 1 && i < genome.nodeCount - 2 && i % 2 === 0) {
+        const azimuth = i * genome.phyllotaxisAngle;
+        const { right } = tangentBasis(direction);
+        organs.push({
+          kind: "leaf",
+          position: node.position.clone(),
+          direction: rotateFromAxis(direction, azimuth, 0.86 + t * 0.18),
+          right: right.applyAxisAngle(direction, azimuth).normalize(),
+          scale: curve(genome.leaf.length, t) * (0.85 + rng() * 0.2),
+          t,
+        });
+      }
+    }
+    organs.push({
+      kind: "flower",
+      position: previous.position.clone().add(previous.direction.clone().multiplyScalar(0.05)),
+      direction: previous.direction.clone().add(lightVector.clone().multiplyScalar(0.24)).normalize(),
+      right: tangentBasis(previous.direction).right,
+      scale: 1.15,
+      t: 1,
+    });
+    return { stems, segments, organs };
+  }
+
+  if (genome.id === "irisBulb" || genome.id === "daylilyFlower") {
+    const isDaylily = genome.id === "daylilyFlower";
+    const strapLeaves = isDaylily ? 11 : 9;
     for (let i = 0; i < strapLeaves; i++) {
       const t = i / Math.max(1, strapLeaves - 1);
       const azimuth = i * genome.phyllotaxisAngle + (rng() - 0.5) * 0.18;
@@ -1110,7 +1516,7 @@ export const buildProcPlantGraph = (
         position: new THREE.Vector3((rng() - 0.5) * 0.05, 0, (rng() - 0.5) * 0.05),
         direction: rotateFromAxis(UP, azimuth, 0.32 + rng() * 0.28),
         right: new THREE.Vector3(Math.cos(azimuth), 0, -Math.sin(azimuth)).normalize(),
-        scale: curve(genome.leaf.length, t) * heightStretch * (0.84 + rng() * 0.18),
+        scale: curve(genome.leaf.length, t) * heightStretch * (isDaylily ? 0.76 + rng() * 0.2 : 0.84 + rng() * 0.18),
         t,
       });
     }
@@ -1141,6 +1547,84 @@ export const buildProcPlantGraph = (
       scale: 1,
       t: 1,
     });
+    if (isDaylily && rng() < 0.85) {
+      const side = tangentBasis(previous.direction).right;
+      for (let i = 0; i < 2; i++) {
+        const azimuth = (i + 1) * genome.phyllotaxisAngle;
+        organs.push({
+          kind: "flower",
+          position: previous.position
+            .clone()
+            .add(rotateFromAxis(previous.direction, azimuth, 0.72).multiplyScalar(0.13 + i * 0.035))
+            .add(previous.direction.clone().multiplyScalar(-0.04 * i)),
+          direction: rotateFromAxis(previous.direction, azimuth, 0.24),
+          right: side.clone().applyAxisAngle(previous.direction, azimuth).normalize(),
+          scale: 0.72 - i * 0.08,
+          t: 1,
+        });
+      }
+    }
+    return { stems, segments, organs };
+  }
+
+  if (genome.id === "foxgloveSpike") {
+    const basalLeaves = 7;
+    for (let i = 0; i < basalLeaves; i++) {
+      const t = i / Math.max(1, basalLeaves - 1);
+      const azimuth = i * genome.phyllotaxisAngle + (rng() - 0.5) * 0.2;
+      organs.push({
+        kind: "leaf",
+        position: new THREE.Vector3((rng() - 0.5) * 0.055, 0.018 + rng() * 0.025, (rng() - 0.5) * 0.055),
+        direction: rotateFromAxis(UP, azimuth, 0.9 + rng() * 0.24),
+        right: new THREE.Vector3(Math.cos(azimuth + Math.PI / 2), 0, -Math.sin(azimuth + Math.PI / 2)).normalize(),
+        scale: curve(genome.leaf.length, t) * (0.88 + rng() * 0.18),
+        t,
+      });
+    }
+    let previous = root;
+    for (let i = 1; i <= genome.nodeCount; i++) {
+      const t = i / genome.nodeCount;
+      const direction = UP.clone()
+        .add(lightVector.clone().multiplyScalar(genome.lightResponse.phototropism * t * (0.3 + shade)))
+        .add(new THREE.Vector3((rng() - 0.5) * 0.035, 0, (rng() - 0.5) * 0.035))
+        .normalize();
+      const node: StemNode = {
+        position: previous.position.clone().add(direction.clone().multiplyScalar(curve(genome.internode, t) * heightStretch)),
+        direction,
+        radius: previous.radius * THREE.MathUtils.lerp(0.94, 0.76, t),
+        depth: 0,
+        t,
+        index: stems.length,
+      };
+      stems.push(node);
+      segments.push([previous.index, node.index]);
+      previous = node;
+      if (i > 2 && i < genome.nodeCount - 1) {
+        const ringCount = i % 2 === 0 ? 2 : 1;
+        for (let f = 0; f < ringCount; f++) {
+          const azimuth = i * genome.phyllotaxisAngle + f * Math.PI + (rng() - 0.5) * 0.2;
+          organs.push({
+            kind: "flower",
+            position: node.position.clone().add(rotateFromAxis(direction, azimuth, 1.22).multiplyScalar(0.09 + rng() * 0.035)),
+            direction: rotateFromAxis(direction, azimuth, 1.38).add(new THREE.Vector3(0, -0.2, 0)).normalize(),
+            right: tangentBasis(direction).right.applyAxisAngle(direction, azimuth).normalize(),
+            scale: (0.72 + t * 0.24) * (0.9 + rng() * 0.12),
+            t,
+          });
+        }
+      } else if (i === 2 || i === 3) {
+        const azimuth = i * genome.phyllotaxisAngle;
+        const { right } = tangentBasis(direction);
+        organs.push({
+          kind: "leaf",
+          position: node.position.clone(),
+          direction: rotateFromAxis(direction, azimuth, 0.9),
+          right: right.applyAxisAngle(direction, azimuth).normalize(),
+          scale: curve(genome.leaf.length, t) * 0.55,
+          t,
+        });
+      }
+    }
     return { stems, segments, organs };
   }
 
@@ -1722,6 +2206,12 @@ const flowerInstances = (
 ): ProcPlantInstance[] => {
   if (!genome.flower) return [];
   const isEchinacea = genome.id === "echinaceaFlower";
+  const isDaylily = genome.id === "daylilyFlower";
+  const isTulip = genome.id === "tulipCup";
+  const isFoxglove = genome.id === "foxgloveSpike";
+  const isPoppy = genome.id === "poppyFlower";
+  const isSunflower = genome.id === "sunflowerTower";
+  const isHibiscus = genome.id === "hibiscusBloom";
   const forward = organ.direction.clone().normalize();
   const right = organ.right.clone().normalize();
   const up = new THREE.Vector3().crossVectors(right, forward).normalize();
@@ -1745,10 +2235,25 @@ const flowerInstances = (
         .normalize();
       const petalAxis = isEchinacea
         ? radial.clone().multiplyScalar(1.08).add(forward.clone().multiplyScalar(-0.34 - whorlT * 0.08)).normalize()
-        : radial;
-      const petalNormal = isEchinacea
-        ? new THREE.Vector3().crossVectors(petalAxis, side).normalize().lerp(forward, 0.45).normalize()
-        : forward;
+        : isTulip
+          ? radial.clone().multiplyScalar(0.48 + whorlT * 0.1).add(forward.clone().multiplyScalar(0.88 - whorlT * 0.18)).normalize()
+          : isFoxglove
+            ? radial.clone().multiplyScalar(0.44).add(forward.clone().multiplyScalar(0.7 - whorlT * 0.2)).normalize()
+          : isDaylily
+            ? radial.clone().multiplyScalar(1.08).add(forward.clone().multiplyScalar(0.18 - whorlT * 0.08)).normalize()
+            : isPoppy
+              ? radial.clone().multiplyScalar(1.02).add(forward.clone().multiplyScalar(0.08)).normalize()
+            : isSunflower
+              ? radial.clone().multiplyScalar(1.1).add(forward.clone().multiplyScalar(0.04)).normalize()
+              : isHibiscus
+                ? radial.clone().multiplyScalar(1.02).add(forward.clone().multiplyScalar(0.12)).normalize()
+              : radial;
+      const petalNormal =
+        isEchinacea || isDaylily || isTulip || isFoxglove || isPoppy || isSunflower || isHibiscus
+          ? new THREE.Vector3().crossVectors(petalAxis, side).normalize().lerp(forward, isTulip ? 0.7 : 0.45).normalize()
+          : forward;
+      const widthScale = isEchinacea ? 0.78 : isFoxglove ? 0.64 : isTulip ? 0.92 : isPoppy ? 1.35 : isSunflower ? 0.5 : isHibiscus ? 1.28 : 1;
+      const lengthScale = isEchinacea ? 1.18 : isDaylily ? 1.2 : isTulip ? 0.98 : isFoxglove ? 0.82 : isPoppy ? 0.94 : isSunflower ? 1.12 : isHibiscus ? 1.05 : 1;
       out.push({
         kind: "petal",
         matrix: instanceMatrixFromFrame(
@@ -1756,11 +2261,7 @@ const flowerInstances = (
           side,
           petalAxis,
           petalNormal,
-          new THREE.Vector3(
-            whorlRadius * (isEchinacea ? 0.78 : 1),
-            whorlRadius * (isEchinacea ? 1.18 : 1),
-            whorlRadius,
-          ),
+          new THREE.Vector3(whorlRadius * widthScale, whorlRadius * lengthScale, whorlRadius),
         ),
         color: petalColor,
         sway: 0.7,
@@ -1774,7 +2275,11 @@ const flowerInstances = (
       right,
       up,
       forward,
-      new THREE.Vector3(radius * (isEchinacea ? 1.26 : 1), radius * (isEchinacea ? 1.26 : 1), radius),
+      new THREE.Vector3(
+        radius * (isEchinacea ? 1.26 : isTulip ? 0.64 : isPoppy ? 0.72 : isSunflower ? 1.45 : isHibiscus ? 0.42 : 1),
+        radius * (isEchinacea ? 1.26 : isTulip ? 0.64 : isPoppy ? 0.72 : isSunflower ? 1.45 : isHibiscus ? 0.42 : 1),
+        radius,
+      ),
     ),
     color: centerColor,
     sway: 0.25,

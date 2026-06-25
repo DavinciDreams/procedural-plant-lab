@@ -16,7 +16,7 @@ Use the controls to mix plant genomes and tune the biome:
 Good starting experiments:
 
 - Mix `Vinca Vine` with `Meadow Flower` for viny flowering groundcover.
-- Try `Echinacea Flower`, `Lace Umbel`, and `Iris Bulb` for different flower architectures.
+- Try `Echinacea Flower`, `Hibiscus Bloom`, `Daylily Flower`, `Foxglove Spike`, `Tulip Cup`, `Poppy Flower`, `Sunflower Tower`, `Lace Umbel`, and `Iris Bulb` for different flower architectures.
 - Compare `Agave Succulent`, `Folded Palm`, and `Tropical Aroid` for rosette, canopy, and broadleaf forms.
 - Use low light or high crowding to see the growth response change plant shape.
 
@@ -35,7 +35,7 @@ Good starting experiments:
 
 Current presets include:
 
-`furGrass`, `reedSedge`, `bambooClump`, `blueSpruce`, `foldedPalm`, `phiFern`, `meadowFlower`, `echinaceaFlower`, `cloverGroundcover`, `laceUmbel`, `irisBulb`, `agaveSucculent`, `lotusBloom`, `vincaVine`, `roseBush`, `tropicalAroid`, `fanPalmUnderstory`, `desertRosette`, and `understoryShrub`.
+`furGrass`, `reedSedge`, `bambooClump`, `blueSpruce`, `foldedPalm`, `phiFern`, `meadowFlower`, `echinaceaFlower`, `hibiscusBloom`, `daylilyFlower`, `foxgloveSpike`, `tulipCup`, `poppyFlower`, `sunflowerTower`, `cloverGroundcover`, `laceUmbel`, `irisBulb`, `agaveSucculent`, `lotusBloom`, `vincaVine`, `roseBush`, `tropicalAroid`, `fanPalmUnderstory`, `desertRosette`, and `understoryShrub`.
 
 ## Run Locally
 
