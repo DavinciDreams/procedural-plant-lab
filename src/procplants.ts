@@ -96,7 +96,14 @@ export interface ProcPlantStats {
   triangles: number;
 }
 
-export type ProcPlantInstanceKind = "leaf" | "grassBlade" | "petal" | "flowerDisc" | "flowerCenter";
+export type ProcPlantInstanceKind =
+  | "leaf"
+  | "grassBlade"
+  | "petal"
+  | "flowerDisc"
+  | "daylilyBloom"
+  | "foxgloveBloom"
+  | "flowerCenter";
 export type ProcPlantFoliageClusterKind = "coniferSpray" | "palmFrond";
 
 export interface ProcPlantInstance {
@@ -2092,12 +2099,96 @@ const addStemSegment = (
 const addFlower = (builder: TemplateBuilder, genome: ProcPlantGenome, organ: Organ) => {
   if (!genome.flower) return;
   const isEchinacea = genome.id === "echinaceaFlower";
-  const forward = organ.direction.clone().normalize();
-  const right = organ.right.clone().normalize();
-  const up = new THREE.Vector3().crossVectors(right, forward).normalize();
   const petalColor = new THREE.Color(genome.flower.color);
   const centerColor = new THREE.Color(genome.flower.centerColor);
   const radius = genome.flower.radius;
+  const bendVariant =
+    Math.sin(organ.position.x * 41.7 + organ.position.y * 23.1 + organ.position.z * 67.3 + organ.scale * 11.9) *
+      0.5 +
+    0.5;
+  const frame = bendFlowerFrame(
+    organ,
+    organ.bend ?? flowerLoadBend(genome, organ.position, organ.scale, bendVariant),
+  );
+  const { forward, right, up } = frame;
+  if (genome.id === "daylilyFlower") {
+    const bloomForward = forward.clone().negate();
+    const toWorld = (x: number, y: number, z: number) =>
+      organ.position
+        .clone()
+        .add(right.clone().multiplyScalar(x * radius * 2.18))
+        .add(up.clone().multiplyScalar(y * radius * 2.18))
+        .add(bloomForward.clone().multiplyScalar(z * radius * 1.45));
+    const apex = toWorld(0, 0, 0.34);
+    const base: THREE.Vector3[] = [];
+    for (let i = 0; i < 3; i++) {
+      const a = i * (Math.PI * 2 / 3) + Math.PI / 2;
+      base.push(toWorld(Math.cos(a) * 0.28, Math.sin(a) * 0.28, 0.04));
+    }
+    builder.addTriangle(apex, base[0], base[1], petalColor, true, 0.6);
+    builder.addTriangle(apex, base[1], base[2], petalColor, true, 0.6);
+    builder.addTriangle(apex, base[2], base[0], petalColor, true, 0.6);
+
+    const center = toWorld(0, 0, -0.055);
+    const rim: THREE.Vector3[] = [];
+    for (let i = 0; i < 12; i++) {
+      const a = i * (Math.PI / 6) + Math.PI / 2;
+      const isTip = i % 2 === 0;
+      const r = isTip ? 0.54 : 0.2;
+      const fold = Math.sin(a * 3) * 0.025 + (isTip ? 0.015 : 0);
+      rim.push(toWorld(Math.cos(a) * r, Math.sin(a) * r, -0.055 - fold));
+    }
+    for (let i = 0; i < rim.length; i++) {
+      builder.addTriangle(center, rim[i], rim[(i + 1) % rim.length], petalColor, true, 0.6);
+    }
+    builder.addTriangle(
+      center.clone().add(right.clone().multiplyScalar(-radius * 0.13)),
+      center.clone().add(right.clone().multiplyScalar(radius * 0.13)),
+      center.clone().add(up.clone().multiplyScalar(radius * 0.18)),
+      centerColor,
+      false,
+      0.2,
+    );
+    return;
+  }
+  if (genome.id === "foxgloveSpike") {
+    const bloomForward = forward;
+    const toWorld = (x: number, y: number, z: number) =>
+      organ.position
+        .clone()
+        .add(right.clone().multiplyScalar(x * radius * 1.78))
+        .add(up.clone().multiplyScalar(y * radius * 1.78))
+        .add(bloomForward.clone().multiplyScalar(z * radius * 1.95));
+    const apex = toWorld(0, 0, -0.62);
+    const base: THREE.Vector3[] = [];
+    for (let i = 0; i < 3; i++) {
+      const a = i * (Math.PI * 2 / 3) + Math.PI / 2;
+      base.push(toWorld(Math.cos(a) * 0.24, Math.sin(a) * 0.24, -0.04));
+    }
+    builder.addTriangle(apex, base[0], base[1], petalColor, true, 0.48);
+    builder.addTriangle(apex, base[1], base[2], petalColor, true, 0.48);
+    builder.addTriangle(apex, base[2], base[0], petalColor, true, 0.48);
+
+    const center = toWorld(0, 0, 0.045);
+    const diamond = [
+      toWorld(0, 0.4, 0.05),
+      toWorld(0.22, 0, 0.07),
+      toWorld(0, -0.22, 0.04),
+      toWorld(-0.22, 0, 0.07),
+    ];
+    for (let i = 0; i < diamond.length; i++) {
+      builder.addTriangle(center, diamond[(i + 1) % diamond.length], diamond[i], petalColor, true, 0.48);
+    }
+    builder.addTriangle(
+      center.clone().add(right.clone().multiplyScalar(-radius * 0.08)),
+      center.clone().add(right.clone().multiplyScalar(radius * 0.08)),
+      center.clone().add(up.clone().multiplyScalar(radius * 0.11)),
+      centerColor,
+      false,
+      0.16,
+    );
+    return;
+  }
   const petals = Math.max(1, genome.flower.petals);
   for (let w = 0; w < genome.flower.whorls; w++) {
     const whorlT = w / Math.max(1, genome.flower.whorls - 1);
@@ -2267,6 +2358,60 @@ const flowerInstances = (
     organ.bend ?? flowerLoadBend(genome, organ.position, organ.scale, bendVariant),
   );
   const { forward, right, up } = frame;
+  if (isDaylily) {
+    out.push({
+      kind: "daylilyBloom",
+      matrix: instanceMatrixFromFrame(
+        organ.position.clone().add(forward.clone().multiplyScalar(radius * 0.02)),
+        right,
+        up,
+        forward.clone().negate(),
+        new THREE.Vector3(radius * 2.18, radius * 2.18, radius * 1.45),
+      ),
+      color: petalColor,
+      sway: 0.6,
+    });
+    out.push({
+      kind: "flowerCenter",
+      matrix: instanceMatrixFromFrame(
+        organ.position.clone().add(forward.clone().multiplyScalar(radius * 0.12)),
+        right,
+        up,
+        forward,
+        new THREE.Vector3(radius * 0.52, radius * 0.52, radius),
+      ),
+      color: centerColor,
+      sway: 0.2,
+    });
+    return out;
+  }
+  if (isFoxglove) {
+    out.push({
+      kind: "foxgloveBloom",
+      matrix: instanceMatrixFromFrame(
+        organ.position.clone().add(forward.clone().multiplyScalar(radius * 0.02)),
+        right,
+        up,
+        forward,
+        new THREE.Vector3(radius * 1.78, radius * 1.78, radius * 1.95),
+      ),
+      color: petalColor,
+      sway: 0.48,
+    });
+    out.push({
+      kind: "flowerCenter",
+      matrix: instanceMatrixFromFrame(
+        organ.position.clone().add(forward.clone().multiplyScalar(radius * 0.1)),
+        right,
+        up,
+        forward,
+        new THREE.Vector3(radius * 0.38, radius * 0.38, radius),
+      ),
+      color: centerColor,
+      sway: 0.16,
+    });
+    return out;
+  }
   if (isPoppy) {
     out.push({
       kind: "flowerDisc",
@@ -2334,7 +2479,7 @@ const flowerInstances = (
           organ.position.clone().add(whorlLift).add(radial.clone().multiplyScalar(whorlRadius * 0.16)),
           side,
           petalAxis,
-          petalNormal,
+          isTulip ? petalNormal.clone().negate() : petalNormal,
           new THREE.Vector3(whorlRadius * widthScale, whorlRadius * lengthScale, whorlRadius),
         ),
         color: petalColor,
@@ -2712,6 +2857,68 @@ export const createProcPlantFlowerDiscGeometry = (): THREE.BufferGeometry => {
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
   geometry.setIndex(indices);
+  geometry.computeBoundingSphere();
+  return geometry;
+};
+
+export const createProcPlantDaylilyBloomGeometry = (): THREE.BufferGeometry => {
+  const positions: number[] = [];
+  const indices: number[] = [];
+
+  positions.push(0, 0, 0.34);
+  for (let i = 0; i < 3; i++) {
+    const a = i * (Math.PI * 2 / 3) + Math.PI / 2;
+    positions.push(Math.cos(a) * 0.28, Math.sin(a) * 0.28, 0.04);
+  }
+  indices.push(0, 1, 2, 0, 2, 3, 0, 3, 1);
+
+  const centerIndex = positions.length / 3;
+  positions.push(0, 0, -0.055);
+  for (let i = 0; i < 12; i++) {
+    const a = i * (Math.PI / 6) + Math.PI / 2;
+    const isTip = i % 2 === 0;
+    const radius = isTip ? 0.54 : 0.2;
+    const fold = Math.sin(a * 3) * 0.025 + (isTip ? 0.015 : 0);
+    positions.push(Math.cos(a) * radius, Math.sin(a) * radius, -0.055 - fold);
+  }
+  for (let i = 0; i < 12; i++) {
+    const next = i === 11 ? 1 : i + 2;
+    indices.push(centerIndex, centerIndex + i + 1, centerIndex + next);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
+  return geometry;
+};
+
+export const createProcPlantFoxgloveBloomGeometry = (): THREE.BufferGeometry => {
+  const positions: number[] = [];
+  const indices: number[] = [];
+
+  positions.push(0, 0, -0.62);
+  for (let i = 0; i < 3; i++) {
+    const a = i * (Math.PI * 2 / 3) + Math.PI / 2;
+    positions.push(Math.cos(a) * 0.24, Math.sin(a) * 0.24, -0.04);
+  }
+  indices.push(0, 1, 2, 0, 2, 3, 0, 3, 1);
+
+  const centerIndex = positions.length / 3;
+  positions.push(0, 0, 0.045);
+  positions.push(0, 0.4, 0.05, 0.22, 0, 0.07, 0, -0.22, 0.04, -0.22, 0, 0.07);
+  indices.push(
+    centerIndex, centerIndex + 2, centerIndex + 1,
+    centerIndex, centerIndex + 3, centerIndex + 2,
+    centerIndex, centerIndex + 4, centerIndex + 3,
+    centerIndex, centerIndex + 1, centerIndex + 4,
+  );
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
   geometry.computeBoundingSphere();
   return geometry;
 };

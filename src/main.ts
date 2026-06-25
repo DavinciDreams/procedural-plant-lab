@@ -4,8 +4,10 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
   buildProcPlantInstancedParts,
   buildProcPlantTemplate,
+  createProcPlantDaylilyBloomGeometry,
   createProcPlantFlowerCenterGeometry,
   createProcPlantFlowerDiscGeometry,
+  createProcPlantFoxgloveBloomGeometry,
   createProcPlantConiferSprayGeometry,
   createProcPlantGrassBladeGeometry,
   createProcPlantLeafGeometry,
@@ -415,6 +417,8 @@ const geometryForBucket = (bucket: InstanceBucket): THREE.BufferGeometry => {
   if (bucket.kind === "palmFrond") return createProcPlantPalmFrondGeometry();
   if (bucket.kind === "petal") return createProcPlantPetalGeometry();
   if (bucket.kind === "flowerDisc") return createProcPlantFlowerDiscGeometry();
+  if (bucket.kind === "daylilyBloom") return createProcPlantDaylilyBloomGeometry();
+  if (bucket.kind === "foxgloveBloom") return createProcPlantFoxgloveBloomGeometry();
   return createProcPlantFlowerCenterGeometry();
 };
 
@@ -502,7 +506,7 @@ const scatterBiome = (genome: ProcPlantGenome, env: ProcPlantEnvironment): THREE
     const geometry = geometryForBucket(bucket);
     const mesh = new THREE.InstancedMesh(geometry, organMaterial, bucket.instances.length);
     mesh.castShadow = true;
-    mesh.receiveShadow = bucket.kind !== "flowerDisc";
+    mesh.receiveShadow = bucket.kind !== "flowerDisc" && bucket.kind !== "daylilyBloom" && bucket.kind !== "foxgloveBloom";
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     for (let i = 0; i < bucket.instances.length; i++) {
       mesh.setMatrixAt(i, bucket.instances[i].matrix);
