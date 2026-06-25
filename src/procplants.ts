@@ -14,13 +14,18 @@ export type ProcPlantHabit =
   | "fern"
   | "flower"
   | "tropical"
-  | "shrub";
+  | "shrub"
+  | "vine";
 
 export type LeafShapeKind =
   | "lanceolate"
   | "ovate"
   | "cordate"
   | "palmate"
+  | "spatulate"
+  | "fan"
+  | "linear"
+  | "round"
   | "frond"
   | "blade";
 
@@ -278,6 +283,232 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       phototropism: 0.15,
     },
   },
+  reedSedge: {
+    id: "reedSedge",
+    habit: "grass",
+    nodeCount: 11,
+    internode: { base: 0.18, tip: 0.11, curve: 0.85 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0.01, tip: 0, curve: 1 },
+    branchAngle: { mean: 0.16, spread: 0.08, depthDecay: 0.6 },
+    apicalDominance: 0.94,
+    leaf: {
+      shape: "linear",
+      length: { base: 0.75, tip: 1.35, curve: 1.05 },
+      widthRatio: 0.024,
+      density: { base: 1, tip: 0.9, curve: 1 },
+      curl: 0.1,
+      serration: 0,
+      venation: 0.2,
+      colorA: 0x4a612c,
+      colorB: 0xc1bd67,
+    },
+    grass: { blades: 26, furBias: 0.45, heightJitter: 0.22 },
+    flower: {
+      whorls: 1,
+      petals: 1,
+      radius: 0.08,
+      color: 0x8a6336,
+      centerColor: 0x5f3d25,
+    },
+    lightResponse: {
+      shadeAvoidance: 0.62,
+      leafBoostInShade: 0.08,
+      branchSuppressionInShade: 0.5,
+      phototropism: 0.12,
+    },
+  },
+  desertRosette: {
+    id: "desertRosette",
+    habit: "tropical",
+    nodeCount: 7,
+    internode: { base: 0.045, tip: 0.03, curve: 1 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0.01, tip: 0, curve: 1 },
+    branchAngle: { mean: 1.02, spread: 0.18, depthDecay: 0.45 },
+    apicalDominance: 0.88,
+    leaf: {
+      shape: "spatulate",
+      length: { base: 0.62, tip: 0.42, curve: 0.78 },
+      widthRatio: 0.34,
+      density: { base: 1, tip: 0.95, curve: 1 },
+      curl: -0.06,
+      serration: 0.03,
+      venation: 0.25,
+      colorA: 0x5e8567,
+      colorB: 0xb7cf9f,
+    },
+    flower: {
+      whorls: 2,
+      petals: 6,
+      radius: 0.12,
+      color: 0xffa85f,
+      centerColor: 0xffe08a,
+    },
+    lightResponse: {
+      shadeAvoidance: 0.18,
+      leafBoostInShade: 0.05,
+      branchSuppressionInShade: 0.15,
+      phototropism: 0.04,
+    },
+  },
+  lotusBloom: {
+    id: "lotusBloom",
+    habit: "flower",
+    nodeCount: 8,
+    internode: { base: 0.19, tip: 0.12, curve: 0.9 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0.03, tip: 0.01, curve: 1.4 },
+    branchAngle: { mean: 0.92, spread: 0.2, depthDecay: 0.55 },
+    apicalDominance: 0.86,
+    leaf: {
+      shape: "palmate",
+      length: { base: 0.78, tip: 0.44, curve: 0.7 },
+      widthRatio: 0.72,
+      density: { base: 0.7, tip: 0.42, curve: 1.15 },
+      curl: 0.05,
+      serration: 0.02,
+      venation: 0.9,
+      colorA: 0x2e6e45,
+      colorB: 0x78b866,
+    },
+    flower: {
+      whorls: 3,
+      petals: 8,
+      radius: 0.28,
+      color: 0xffd7e8,
+      centerColor: 0xffcf58,
+    },
+    lightResponse: {
+      shadeAvoidance: 0.38,
+      leafBoostInShade: 0.24,
+      branchSuppressionInShade: 0.3,
+      phototropism: 0.18,
+    },
+  },
+  bambooClump: {
+    id: "bambooClump",
+    habit: "grass",
+    nodeCount: 16,
+    internode: { base: 0.22, tip: 0.16, curve: 0.92 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0.02, tip: 0, curve: 1 },
+    branchAngle: { mean: 0.2, spread: 0.08, depthDecay: 0.6 },
+    apicalDominance: 0.96,
+    leaf: {
+      shape: "linear",
+      length: { base: 1.0, tip: 1.8, curve: 1.1 },
+      widthRatio: 0.018,
+      density: { base: 1, tip: 0.95, curve: 1 },
+      curl: 0.04,
+      serration: 0,
+      venation: 0.12,
+      colorA: 0x4b7d35,
+      colorB: 0xb8d46c,
+    },
+    grass: { blades: 18, furBias: 0.12, heightJitter: 0.12 },
+    lightResponse: {
+      shadeAvoidance: 0.7,
+      leafBoostInShade: 0.08,
+      branchSuppressionInShade: 0.38,
+      phototropism: 0.12,
+    },
+  },
+  fanPalmUnderstory: {
+    id: "fanPalmUnderstory",
+    habit: "tropical",
+    nodeCount: 10,
+    internode: { base: 0.11, tip: 0.07, curve: 1.1 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0.04, tip: 0.01, curve: 1.6 },
+    branchAngle: { mean: 0.88, spread: 0.28, depthDecay: 0.55 },
+    apicalDominance: 0.8,
+    leaf: {
+      shape: "fan",
+      length: { base: 0.68, tip: 0.54, curve: 0.9 },
+      widthRatio: 0.82,
+      density: { base: 0.8, tip: 0.68, curve: 1 },
+      curl: 0.14,
+      serration: 0.18,
+      venation: 0.95,
+      colorA: 0x286d37,
+      colorB: 0x79bd4e,
+    },
+    lightResponse: {
+      shadeAvoidance: 0.28,
+      leafBoostInShade: 0.5,
+      branchSuppressionInShade: 0.18,
+      phototropism: 0.16,
+    },
+  },
+  vincaVine: {
+    id: "vincaVine",
+    habit: "vine",
+    nodeCount: 18,
+    internode: { base: 0.17, tip: 0.11, curve: 1.05 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0.24, tip: 0.08, curve: 1.35 },
+    branchAngle: { mean: 0.48, spread: 0.18, depthDecay: 0.72 },
+    apicalDominance: 0.42,
+    leaf: {
+      shape: "round",
+      length: { base: 0.22, tip: 0.16, curve: 0.9 },
+      widthRatio: 0.86,
+      density: { base: 0.95, tip: 0.78, curve: 1 },
+      curl: 0.05,
+      serration: 0.01,
+      venation: 0.5,
+      colorA: 0x244f2d,
+      colorB: 0x78af58,
+    },
+    flower: {
+      whorls: 1,
+      petals: 5,
+      radius: 0.16,
+      color: 0xb7a7ff,
+      centerColor: 0xf5f0ba,
+    },
+    lightResponse: {
+      shadeAvoidance: 0.46,
+      leafBoostInShade: 0.28,
+      branchSuppressionInShade: 0.24,
+      phototropism: 0.1,
+    },
+  },
+  roseBush: {
+    id: "roseBush",
+    habit: "shrub",
+    nodeCount: 16,
+    internode: { base: 0.12, tip: 0.07, curve: 1.22 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0.42, tip: 0.16, curve: 1.45 },
+    branchAngle: { mean: 0.58, spread: 0.22, depthDecay: 0.74 },
+    apicalDominance: 0.34,
+    leaf: {
+      shape: "round",
+      length: { base: 0.2, tip: 0.13, curve: 1 },
+      widthRatio: 0.72,
+      density: { base: 0.92, tip: 0.76, curve: 1 },
+      curl: 0.08,
+      serration: 0.28,
+      venation: 0.65,
+      colorA: 0x2f5b2e,
+      colorB: 0x7fac4d,
+    },
+    flower: {
+      whorls: 4,
+      petals: 9,
+      radius: 0.2,
+      color: 0xd84d63,
+      centerColor: 0xffc76a,
+    },
+    lightResponse: {
+      shadeAvoidance: 0.34,
+      leafBoostInShade: 0.18,
+      branchSuppressionInShade: 0.2,
+      phototropism: 0.16,
+    },
+  },
 };
 
 const curve = (gene: CurveGene, t: number): number => {
@@ -398,10 +629,14 @@ export const buildProcPlantGraph = (
   const heightStretch = 1 + shade * genome.lightResponse.shadeAvoidance;
   const branchShadePenalty = 1 - shade * genome.lightResponse.branchSuppressionInShade;
   const lightVector = new THREE.Vector3(0.25, 1, 0.12).normalize();
+  const rootDirection =
+    genome.habit === "vine"
+      ? new THREE.Vector3(0.62, 0.28, 0.36).normalize()
+      : new THREE.Vector3(0, 1, 0);
   const root: StemNode = {
     position: new THREE.Vector3(0, 0, 0),
-    direction: new THREE.Vector3(0, 1, 0),
-    radius: genome.habit === "shrub" ? 0.035 : 0.018,
+    direction: rootDirection,
+    radius: genome.habit === "shrub" ? 0.035 : genome.habit === "vine" ? 0.012 : 0.018,
     depth: 0,
     t: 0,
     index: 0,
@@ -420,9 +655,14 @@ export const buildProcPlantGraph = (
       const photo = lightVector
         .clone()
         .multiplyScalar(genome.lightResponse.phototropism * t * (0.3 + shade));
+      const vinePull =
+        genome.habit === "vine"
+          ? new THREE.Vector3(0.12, -0.05, 0.08).multiplyScalar(1 - t * 0.35)
+          : new THREE.Vector3();
       const direction = previous.direction
         .clone()
         .add(photo)
+        .add(vinePull)
         .add(new THREE.Vector3(axisNoise, 0, (rng() - 0.5) * 0.1))
         .normalize();
       const len = curve(genome.internode, t) * lengthScale * heightStretch;
@@ -489,11 +729,12 @@ export const buildProcPlantGraph = (
 
   if (genome.habit === "grass") {
     const blades = genome.grass?.blades ?? 30;
+    let tallestBlade: Organ | null = null;
     for (let i = 0; i < blades; i++) {
       const t = i / Math.max(1, blades - 1);
       const azimuth = i * genome.phyllotaxisAngle + (rng() - 0.5) * 0.16;
       const lean = 0.36 + rng() * 0.24;
-      organs.push({
+      const blade: Organ = {
         kind: "grassBlade",
         position: new THREE.Vector3((rng() - 0.5) * 0.2, 0, (rng() - 0.5) * 0.2),
         direction: rotateFromAxis(UP, azimuth, lean),
@@ -503,6 +744,20 @@ export const buildProcPlantGraph = (
           heightStretch *
           (1 - (genome.grass?.heightJitter ?? 0.2) * rng()),
         t,
+      };
+      organs.push(blade);
+      if (!tallestBlade || blade.scale > tallestBlade.scale) tallestBlade = blade;
+    }
+    if (genome.flower && tallestBlade) {
+      organs.push({
+        kind: "flower",
+        position: tallestBlade.position
+          .clone()
+          .add(tallestBlade.direction.clone().multiplyScalar(tallestBlade.scale * 0.92)),
+        direction: tallestBlade.direction.clone(),
+        right: tallestBlade.right.clone(),
+        scale: 0.55,
+        t: 1,
       });
     }
     return { stems, segments, organs };
@@ -607,8 +862,23 @@ const leafWidthAt = (shape: LeafShapeKind, t: number, serration: number): number
   const s = Math.sin(Math.PI * t);
   const notch =
     shape === "cordate" ? 1 - 0.35 * Math.exp(-(((t - 0.12) / 0.12) ** 2)) : 1;
-  const tip = shape === "lanceolate" ? s ** 1.6 : shape === "ovate" ? s ** 0.72 : s;
-  const lobes = shape === "palmate" ? 0.78 + 0.22 * Math.sin(t * Math.PI * 8) : 1;
+  const tip =
+    shape === "lanceolate" || shape === "linear"
+      ? s ** 1.6
+      : shape === "ovate"
+        ? s ** 0.72
+        : shape === "round"
+          ? Math.sin(Math.PI * Math.min(1, t * 0.96)) ** 0.42 *
+            (0.72 + 0.28 * Math.sin(Math.PI * t))
+        : shape === "spatulate"
+          ? Math.sin(Math.PI * Math.min(1, t * 0.82)) ** 0.55 * (0.45 + t * 0.65)
+          : shape === "fan"
+            ? Math.sin(Math.PI * Math.min(1, t * 0.72)) ** 0.45 * (0.3 + t)
+            : s;
+  const lobes =
+    shape === "palmate" || shape === "fan"
+      ? 0.78 + 0.22 * Math.sin(t * Math.PI * (shape === "fan" ? 14 : 8))
+      : 1;
   const teeth = serration > 0 ? 1 + serration * 0.08 * Math.sin(t * Math.PI * 28) : 1;
   return Math.max(0.02, tip * notch * lobes * teeth);
 };
@@ -744,16 +1014,23 @@ const addFlower = (builder: TemplateBuilder, genome: ProcPlantGenome, organ: Org
   const radius = genome.flower.radius;
   const petals = Math.max(1, genome.flower.petals);
   for (let w = 0; w < genome.flower.whorls; w++) {
-    const offset = (w / Math.max(1, genome.flower.whorls)) * Math.PI / petals;
+    const whorlT = w / Math.max(1, genome.flower.whorls - 1);
+    const whorlRadius = radius * (1.08 - whorlT * 0.42);
+    const whorlLift = forward.clone().multiplyScalar(radius * whorlT * 0.1);
+    const offset = (w / Math.max(1, genome.flower.whorls)) * Math.PI / petals + whorlT * 0.38;
     for (let i = 0; i < petals; i++) {
       const a = (i / petals) * Math.PI * 2 + offset;
       const radial = right.clone().multiplyScalar(Math.cos(a)).add(up.clone().multiplyScalar(Math.sin(a)));
-      const base = organ.position.clone().add(radial.clone().multiplyScalar(radius * 0.18));
+      const base = organ.position.clone().add(whorlLift).add(radial.clone().multiplyScalar(whorlRadius * 0.16));
       const tip = organ.position
         .clone()
-        .add(forward.clone().multiplyScalar(radius * 0.05))
-        .add(radial.clone().multiplyScalar(radius * (1.2 - w * 0.24)));
-      const side = up.clone().multiplyScalar(radius * 0.22 * Math.cos(a)).add(right.clone().multiplyScalar(-radius * 0.22 * Math.sin(a)));
+        .add(whorlLift)
+        .add(forward.clone().multiplyScalar(radius * (0.05 + whorlT * 0.24)))
+        .add(radial.clone().multiplyScalar(whorlRadius * 1.08));
+      const side = up
+        .clone()
+        .multiplyScalar(whorlRadius * 0.2 * Math.cos(a))
+        .add(right.clone().multiplyScalar(-whorlRadius * 0.2 * Math.sin(a)));
       builder.addTriangle(base.clone().add(side), base.clone().sub(side), tip, petalColor, true, 0.7);
     }
   }

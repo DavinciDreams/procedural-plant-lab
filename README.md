@@ -4,7 +4,7 @@ Standalone procedural plant lab for Three.js, designed to stay portable enough f
 
 ## What It Builds
 
-- A reusable genome model for grass, ferns, flowers, tropical plants, and shrubs.
+- A reusable genome model for grass, ferns, flowers, tropical plants, reeds, bamboo, succulents, vines, fan palms, and shrubs.
 - Phi/golden-angle phyllotaxis for leaves and biome scatter.
 - Light-responsive growth: shade stretches stems, changes leaf scale, and suppresses branches.
 - Procedural 2D leaf silhouettes with vein strips instead of generic oval cards.
@@ -26,6 +26,8 @@ Open `http://127.0.0.1:5173/`.
 - `src/procplants.ts` is the generator core.
 - `src/main.ts` is the standalone Three.js lab.
 - `src/style.css` is only the lab UI.
+
+Current presets include `furGrass`, `reedSedge`, `bambooClump`, `phiFern`, `meadowFlower`, `lotusBloom`, `vincaVine`, `roseBush`, `tropicalAroid`, `fanPalmUnderstory`, `desertRosette`, and `understoryShrub`.
 
 The generator returns a flat template:
 
