@@ -55,7 +55,7 @@ app.innerHTML = `
   <section class="panel" aria-label="Procedural plant controls">
     <h1>Procplants Lab</h1>
     <p>Deterministic phi-phyllotaxis plants with light-shaped growth, procedural leaf silhouettes, fur grass, ferns, flowers, and hybrid genomes.</p>
-    <a class="source-link" href="https://github.com/DavinciDreams/procplants" target="_blank" rel="noreferrer">GitHub</a>
+    <a class="source-link" href="https://github.com/DavinciDreams/procedural-plant-lab" target="_blank" rel="noreferrer">GitHub</a>
     <div class="control-grid">
       <div class="field">
         <label for="primary"><span>Primary</span></label>
