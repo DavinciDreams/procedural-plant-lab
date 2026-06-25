@@ -10,7 +10,7 @@ Standalone procedural plant lab for Three.js, designed to stay portable enough f
 - Procedural 2D leaf silhouettes with vein strips instead of generic oval cards.
 - Fur-like grass blades as dense, low-triangle cards.
 - Hybridization between plant genomes.
-- A merged-buffer renderer that mirrors Tellus's vegetation performance shape.
+- A split renderer: merged stems plus instanced leaves, grass blades, petals, and flower centers.
 
 ## Run
 
@@ -29,7 +29,7 @@ Open `http://127.0.0.1:5173/`.
 
 Current presets include `furGrass`, `reedSedge`, `bambooClump`, `phiFern`, `meadowFlower`, `lotusBloom`, `vincaVine`, `roseBush`, `tropicalAroid`, `fanPalmUnderstory`, `desertRosette`, and `understoryShrub`.
 
-The generator returns a flat template:
+The generator still returns a flat template for compatibility:
 
 ```ts
 {
@@ -42,4 +42,12 @@ The generator returns a flat template:
 }
 ```
 
-That shape is intentionally close to Tellus's existing vegetation template buffers, so later wiring should be an adapter/import decision rather than a renderer rewrite.
+That shape is intentionally close to Tellus's existing vegetation template buffers, so later wiring can preserve the current stamped-buffer path.
+
+For the instanced path, `buildProcPlantInstancedParts()` returns:
+
+- merged stem geometry as a flat template
+- per-organ instance matrices and colors
+- separate organ kinds for leaves, grass blades, petals, and flower centers
+
+That is the path intended for chunk-ring LOD and future Tellus biome integration.

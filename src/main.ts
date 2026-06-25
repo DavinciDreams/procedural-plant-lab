@@ -2,12 +2,18 @@ import "./style.css";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
+  buildProcPlantInstancedParts,
   buildProcPlantTemplate,
+  createProcPlantFlowerCenterGeometry,
+  createProcPlantGrassBladeGeometry,
+  createProcPlantLeafGeometry,
+  createProcPlantPetalGeometry,
   defaultPlantEnvironment,
   GOLDEN_ANGLE_RADIANS,
   hybridizePlantGenomes,
   procPlantPresetIds,
   procPlantPresets,
+  type ProcPlantInstance,
   type ProcPlantEnvironment,
   type ProcPlantGenome,
   type ProcPlantTemplate,
@@ -140,9 +146,14 @@ const plantMaterial = new THREE.MeshLambertMaterial({
   side: THREE.DoubleSide,
 });
 
-let biomeMesh: THREE.Mesh | null = null;
+const organMaterial = new THREE.MeshLambertMaterial({
+  color: 0xffffff,
+  side: THREE.DoubleSide,
+});
+
+let biomeGroup: THREE.Group | null = null;
 let heroMesh: THREE.Mesh | null = null;
-let currentStats = { triangles: 0, plants: 0, leaves: 0 };
+let currentStats = { triangles: 0, plants: 0, leaves: 0, draws: 0 };
 
 const speciesLabel = (id: string) =>
   id
@@ -221,6 +232,16 @@ const geometryFromBuffers = (buffers: {
   return geometry;
 };
 
+const templateToGeometry = (template: ProcPlantTemplate) => {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(template.pos.slice(), 3));
+  geometry.setAttribute("normal", new THREE.BufferAttribute(template.nrm.slice(), 3));
+  geometry.setAttribute("color", new THREE.BufferAttribute(template.col.slice(), 3));
+  geometry.setIndex(new THREE.BufferAttribute(template.idx.slice(), 1));
+  geometry.computeBoundingSphere();
+  return geometry;
+};
+
 const rand = (seed: number) => {
   let a = seed >>> 0;
   return () => {
@@ -231,12 +252,72 @@ const rand = (seed: number) => {
   };
 };
 
-const scatterBiome = (genome: ProcPlantGenome, env: ProcPlantEnvironment) => {
+type InstanceBucket = {
+  key: string;
+  kind: ProcPlantInstance["kind"];
+  genome: ProcPlantGenome;
+  instances: ProcPlantInstance[];
+};
+
+const instanceKey = (kind: ProcPlantInstance["kind"], genome: ProcPlantGenome) => {
+  if (kind === "leaf") {
+    return [
+      kind,
+      genome.leaf.shape,
+      genome.leaf.widthRatio.toFixed(3),
+      genome.leaf.serration.toFixed(3),
+      genome.leaf.curl.toFixed(3),
+    ].join(":");
+  }
+  if (kind === "grassBlade") {
+    return [kind, genome.leaf.widthRatio.toFixed(3), genome.leaf.curl.toFixed(3)].join(":");
+  }
+  return kind;
+};
+
+const geometryForBucket = (bucket: InstanceBucket): THREE.BufferGeometry => {
+  if (bucket.kind === "leaf") {
+    return createProcPlantLeafGeometry(
+      bucket.genome.leaf.shape,
+      bucket.genome.leaf.widthRatio,
+      bucket.genome.leaf.serration,
+      bucket.genome.leaf.curl,
+    );
+  }
+  if (bucket.kind === "grassBlade") {
+    return createProcPlantGrassBladeGeometry(bucket.genome.leaf.widthRatio, bucket.genome.leaf.curl);
+  }
+  if (bucket.kind === "petal") return createProcPlantPetalGeometry();
+  return createProcPlantFlowerCenterGeometry();
+};
+
+const addInstanceToBucket = (
+  buckets: Map<string, InstanceBucket>,
+  kindGenome: ProcPlantGenome,
+  instance: ProcPlantInstance,
+  worldMatrix: THREE.Matrix4,
+) => {
+  const key = instanceKey(instance.kind, kindGenome);
+  let bucket = buckets.get(key);
+  if (!bucket) {
+    bucket = { key, kind: instance.kind, genome: kindGenome, instances: [] };
+    buckets.set(key, bucket);
+  }
+  bucket.instances.push({
+    ...instance,
+    matrix: worldMatrix.clone().multiply(instance.matrix),
+    color: instance.color.clone(),
+  });
+};
+
+const scatterBiome = (genome: ProcPlantGenome, env: ProcPlantEnvironment): THREE.Group => {
   const rng = rand(state.seed ^ 0x5151);
   const buffers = { positions: [] as number[], normals: [] as number[], colors: [] as number[], indices: [] as number[] };
+  const buckets = new Map<string, InstanceBucket>();
   const plantCount = Math.round(25 + state.density * 130);
   let leaves = 0;
   let plants = 0;
+  let triangles = 0;
   for (let i = 0; i < plantCount; i++) {
     const ring = Math.sqrt(rng()) * 6.8;
     const angle = i * GOLDEN_ANGLE_RADIANS + rng() * 0.18;
@@ -257,7 +338,7 @@ const scatterBiome = (genome: ProcPlantGenome, env: ProcPlantEnvironment) => {
       genome.habit === "grass" || i % 5 !== 0
         ? genome
         : hybridizePlantGenomes(genome, procPlantPresets.furGrass, 0.12, state.seed + i);
-    const built = buildProcPlantTemplate(species, state.seed + i * 101, localEnv);
+    const built = buildProcPlantInstancedParts(species, state.seed + i * 101, localEnv);
     const scale =
       species.habit === "grass"
         ? 0.72 + rng() * 0.42
@@ -269,18 +350,50 @@ const scatterBiome = (genome: ProcPlantGenome, env: ProcPlantEnvironment) => {
       new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rng() * Math.PI * 2, 0)),
       new THREE.Vector3(scale, scale, scale),
     );
-    pushTemplate(buffers, built.template, matrix, new THREE.Matrix3().getNormalMatrix(matrix));
+    pushTemplate(buffers, built.stems, matrix, new THREE.Matrix3().getNormalMatrix(matrix));
+    for (const instance of built.instances) addInstanceToBucket(buckets, species, instance, matrix);
     leaves += built.stats.leaves + built.stats.flowers;
+    triangles += built.stats.stemTriangles;
     plants++;
   }
   currentStats.plants = plants;
   currentStats.leaves = leaves;
-  return geometryFromBuffers(buffers);
+  const group = new THREE.Group();
+  group.name = "procplants-instanced-biome";
+  const stemGeometry = geometryFromBuffers(buffers);
+  if ((stemGeometry.index?.count ?? 0) > 0) {
+    const stems = new THREE.Mesh(stemGeometry, plantMaterial);
+    stems.castShadow = true;
+    stems.receiveShadow = true;
+    group.add(stems);
+    currentStats.draws += 1;
+  } else {
+    stemGeometry.dispose();
+  }
+
+  for (const bucket of buckets.values()) {
+    const geometry = geometryForBucket(bucket);
+    const mesh = new THREE.InstancedMesh(geometry, organMaterial, bucket.instances.length);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    for (let i = 0; i < bucket.instances.length; i++) {
+      mesh.setMatrixAt(i, bucket.instances[i].matrix);
+      mesh.setColorAt(i, bucket.instances[i].color);
+    }
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    mesh.instanceMatrix.needsUpdate = true;
+    group.add(mesh);
+    triangles += ((geometry.index?.count ?? geometry.getAttribute("position").count) / 3) * bucket.instances.length;
+    currentStats.draws += 1;
+  }
+
+  currentStats.triangles = Math.round(triangles);
+  return group;
 };
 
 const buildHero = (genome: ProcPlantGenome, env: ProcPlantEnvironment) => {
   const built = buildProcPlantTemplate(genome, state.seed, env);
-  currentStats.triangles = built.stats.triangles;
   const buffers = { positions: [] as number[], normals: [] as number[], colors: [] as number[], indices: [] as number[] };
   const scale =
     genome.habit === "grass" ? 2.4 : genome.habit === "flower" ? 2.2 : genome.habit === "fern" ? 2.0 : 1.7;
@@ -299,6 +412,14 @@ const disposeMesh = (mesh: THREE.Mesh | null) => {
   scene.remove(mesh);
 };
 
+const disposeGroup = (group: THREE.Group | null) => {
+  if (!group) return;
+  group.traverse((object) => {
+    if (object instanceof THREE.Mesh) object.geometry.dispose();
+  });
+  scene.remove(group);
+};
+
 const regenerate = () => {
   const genome = selectedGenome();
   const env = envFromState();
@@ -306,20 +427,19 @@ const regenerate = () => {
   scene.background = new THREE.Color(0xb9d7ee).lerp(new THREE.Color(0x6f7d8d), 1 - state.light);
   scene.fog = new THREE.Fog(scene.background as THREE.Color, 18, 64);
 
-  disposeMesh(biomeMesh);
+  disposeGroup(biomeGroup);
   disposeMesh(heroMesh);
 
-  biomeMesh = new THREE.Mesh(scatterBiome(genome, env), plantMaterial);
-  biomeMesh.castShadow = true;
-  biomeMesh.receiveShadow = true;
-  scene.add(biomeMesh);
+  currentStats = { triangles: 0, plants: 0, leaves: 0, draws: 0 };
+  biomeGroup = scatterBiome(genome, env);
+  scene.add(biomeGroup);
 
   heroMesh = new THREE.Mesh(buildHero(genome, env), plantMaterial);
   heroMesh.castShadow = true;
   heroMesh.receiveShadow = true;
   scene.add(heroMesh);
 
-  currentStats.triangles += Math.round((biomeMesh.geometry.index?.count ?? 0) / 3);
+  currentStats.triangles += Math.round((heroMesh.geometry.index?.count ?? 0) / 3);
   setText("triangles", currentStats.triangles.toLocaleString());
   setText("plants", currentStats.plants.toLocaleString());
   setText("leaves", currentStats.leaves.toLocaleString());

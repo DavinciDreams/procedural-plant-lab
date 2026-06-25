@@ -94,6 +94,25 @@ export interface ProcPlantStats {
   triangles: number;
 }
 
+export type ProcPlantInstanceKind = "leaf" | "grassBlade" | "petal" | "flowerCenter";
+
+export interface ProcPlantInstance {
+  kind: ProcPlantInstanceKind;
+  matrix: THREE.Matrix4;
+  color: THREE.Color;
+  sway: number;
+}
+
+export interface ProcPlantInstancedParts {
+  stems: ProcPlantTemplate;
+  instances: ProcPlantInstance[];
+  graph: ProcPlantGraph;
+  stats: ProcPlantStats & {
+    instances: number;
+    stemTriangles: number;
+  };
+}
+
 interface StemNode {
   position: THREE.Vector3;
   direction: THREE.Vector3;
@@ -1043,6 +1062,255 @@ const addFlower = (builder: TemplateBuilder, genome: ProcPlantGenome, organ: Org
     false,
     0.3,
   );
+};
+
+const instanceMatrixFromFrame = (
+  position: THREE.Vector3,
+  right: THREE.Vector3,
+  up: THREE.Vector3,
+  forward: THREE.Vector3,
+  scale: THREE.Vector3,
+) => {
+  const basis = new THREE.Matrix4().makeBasis(
+    right.clone().normalize(),
+    up.clone().normalize(),
+    forward.clone().normalize(),
+  );
+  basis.scale(scale);
+  basis.setPosition(position);
+  return basis;
+};
+
+const leafInstance = (
+  genome: ProcPlantGenome,
+  organ: Organ,
+  shade: number,
+): ProcPlantInstance => {
+  const length = organ.scale * (1 + shade * genome.lightResponse.leafBoostInShade);
+  const dir = organ.direction.clone().normalize();
+  const right = organ.right.clone().normalize();
+  const normal = new THREE.Vector3().crossVectors(right, dir).normalize();
+  const color = new THREE.Color(genome.leaf.colorA).lerp(new THREE.Color(genome.leaf.colorB), organ.t);
+  return {
+    kind: organ.kind === "grassBlade" ? "grassBlade" : "leaf",
+    matrix: instanceMatrixFromFrame(
+      organ.position,
+      right,
+      dir,
+      normal,
+      new THREE.Vector3(length, length, length),
+    ),
+    color,
+    sway: 0.35 + organ.t * 0.65,
+  };
+};
+
+const grassBladeInstance = (
+  genome: ProcPlantGenome,
+  organ: Organ,
+): ProcPlantInstance => {
+  const length = organ.scale;
+  const dir = organ.direction.clone().normalize();
+  const right = organ.right.clone().normalize();
+  const normal = new THREE.Vector3().crossVectors(right, dir).normalize();
+  const color = new THREE.Color(genome.leaf.colorA).lerp(new THREE.Color(genome.leaf.colorB), organ.t);
+  return {
+    kind: "grassBlade",
+    matrix: instanceMatrixFromFrame(
+      organ.position,
+      right,
+      dir,
+      normal,
+      new THREE.Vector3(length, length, length),
+    ),
+    color,
+    sway: 1,
+  };
+};
+
+const flowerInstances = (
+  genome: ProcPlantGenome,
+  organ: Organ,
+): ProcPlantInstance[] => {
+  if (!genome.flower) return [];
+  const forward = organ.direction.clone().normalize();
+  const right = organ.right.clone().normalize();
+  const up = new THREE.Vector3().crossVectors(right, forward).normalize();
+  const petalColor = new THREE.Color(genome.flower.color);
+  const centerColor = new THREE.Color(genome.flower.centerColor);
+  const radius = genome.flower.radius * organ.scale;
+  const petals = Math.max(1, genome.flower.petals);
+  const out: ProcPlantInstance[] = [];
+  for (let w = 0; w < genome.flower.whorls; w++) {
+    const whorlT = w / Math.max(1, genome.flower.whorls - 1);
+    const whorlRadius = radius * (1.08 - whorlT * 0.42);
+    const whorlLift = forward.clone().multiplyScalar(radius * whorlT * 0.1);
+    const offset = (w / Math.max(1, genome.flower.whorls)) * Math.PI / petals + whorlT * 0.38;
+    for (let i = 0; i < petals; i++) {
+      const a = (i / petals) * Math.PI * 2 + offset;
+      const radial = right.clone().multiplyScalar(Math.cos(a)).add(up.clone().multiplyScalar(Math.sin(a))).normalize();
+      const side = up
+        .clone()
+        .multiplyScalar(Math.cos(a))
+        .add(right.clone().multiplyScalar(-Math.sin(a)))
+        .normalize();
+      out.push({
+        kind: "petal",
+        matrix: instanceMatrixFromFrame(
+          organ.position.clone().add(whorlLift).add(radial.clone().multiplyScalar(whorlRadius * 0.16)),
+          side,
+          radial,
+          forward,
+          new THREE.Vector3(whorlRadius, whorlRadius, whorlRadius),
+        ),
+        color: petalColor,
+        sway: 0.7,
+      });
+    }
+  }
+  out.push({
+    kind: "flowerCenter",
+    matrix: instanceMatrixFromFrame(
+      organ.position.clone().add(forward.clone().multiplyScalar(radius * 0.04)),
+      right,
+      up,
+      forward,
+      new THREE.Vector3(radius, radius, radius),
+    ),
+    color: centerColor,
+    sway: 0.25,
+  });
+  return out;
+};
+
+export const buildProcPlantInstancedParts = (
+  genome: ProcPlantGenome,
+  seed = 1,
+  env: ProcPlantEnvironment = defaultPlantEnvironment(),
+): ProcPlantInstancedParts => {
+  const graph = buildProcPlantGraph(genome, seed, env);
+  const stemBuilder = new TemplateBuilder();
+  const shade = 1 - THREE.MathUtils.clamp(env.light, 0, 1);
+  const stemColor = new THREE.Color(
+    genome.habit === "grass" || genome.habit === "fern" ? 0x3f6d2d : 0x6d5135,
+  );
+  for (const [ai, bi] of graph.segments) {
+    addStemSegment(stemBuilder, graph.stems[ai], graph.stems[bi], stemColor);
+  }
+  const instances: ProcPlantInstance[] = [];
+  let leafCount = 0;
+  let flowerCount = 0;
+  for (const organ of graph.organs) {
+    if (organ.kind === "grassBlade") {
+      instances.push(grassBladeInstance(genome, organ));
+      leafCount++;
+    } else if (organ.kind === "flower") {
+      const petals = flowerInstances(genome, organ);
+      instances.push(...petals);
+      flowerCount++;
+    } else {
+      instances.push(leafInstance(genome, organ, shade));
+      leafCount++;
+    }
+  }
+  const stems = stemBuilder.build();
+  return {
+    stems,
+    instances,
+    graph,
+    stats: {
+      stems: graph.segments.length,
+      leaves: leafCount,
+      flowers: flowerCount,
+      stemTriangles: stems.idx.length / 3,
+      instances: instances.length,
+      triangles: stems.idx.length / 3 + instances.length,
+    },
+  };
+};
+
+export const createProcPlantLeafGeometry = (
+  shape: LeafShapeKind,
+  widthRatio: number,
+  serration = 0,
+  curl = 0,
+): THREE.BufferGeometry => {
+  const segments = shape === "cordate" || shape === "palmate" || shape === "fan" ? 10 : 7;
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const indices: number[] = [];
+  const spine: THREE.Vector3[] = [];
+  const points: THREE.Vector3[] = [];
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    spine.push(new THREE.Vector3(0, t - 0.08, Math.sin(t * Math.PI) * curl));
+  }
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    const w = leafWidthAt(shape, t, serration) * widthRatio * 0.5;
+    points.push(spine[i].clone().add(new THREE.Vector3(-w, 0, 0)));
+  }
+  for (let i = segments; i >= 0; i--) {
+    const t = i / segments;
+    const w = leafWidthAt(shape, t, serration) * widthRatio * 0.5;
+    points.push(spine[i].clone().add(new THREE.Vector3(w, 0, 0)));
+  }
+  const base = spine[Math.max(0, Math.floor(segments * 0.18))];
+  positions.push(base.x, base.y, base.z);
+  normals.push(0, 0, 1);
+  for (const point of points) {
+    positions.push(point.x, point.y, point.z);
+    normals.push(0, 0, 1);
+  }
+  for (let i = 1; i <= points.length; i++) {
+    const next = i === points.length ? 1 : i + 1;
+    indices.push(0, i, next);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setIndex(indices);
+  geometry.computeBoundingSphere();
+  return geometry;
+};
+
+export const createProcPlantGrassBladeGeometry = (widthRatio: number, curl = 0): THREE.BufferGeometry => {
+  const width = widthRatio;
+  const positions = new Float32Array([
+    -width, 0, 0,
+    width, 0, 0,
+    width * 0.42, 0.54, 0,
+    -width, 0, 0,
+    width * 0.42, 0.54, 0,
+    0, 1, -curl * 0.18,
+  ]);
+  const normals = new Float32Array(positions.length);
+  for (let i = 0; i < normals.length; i += 3) normals[i + 2] = 1;
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
+  geometry.computeBoundingSphere();
+  return geometry;
+};
+
+export const createProcPlantPetalGeometry = (): THREE.BufferGeometry => {
+  const positions = new Float32Array([
+    -0.2, 0, 0,
+    0.2, 0, 0,
+    0, 1, 0.12,
+  ]);
+  const normals = new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
+  geometry.computeBoundingSphere();
+  return geometry;
+};
+
+export const createProcPlantFlowerCenterGeometry = (): THREE.BufferGeometry => {
+  const geometry = new THREE.CircleGeometry(0.16, 10);
+  geometry.computeBoundingSphere();
+  return geometry;
 };
 
 export const buildProcPlantTemplate = (
