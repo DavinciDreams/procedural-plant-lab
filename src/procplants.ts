@@ -2287,7 +2287,7 @@ const flowerInstances = (
         right,
         up,
         forward,
-        new THREE.Vector3(radius * 0.68, radius * 0.68, radius),
+        new THREE.Vector3(radius * 0.86, radius * 0.86, radius),
       ),
       color: centerColor,
       sway: 0.22,
