@@ -2132,9 +2132,9 @@ const addFlower = (builder: TemplateBuilder, genome: ProcPlantGenome, organ: Org
       builder.addTriangle(center, rim[i], rim[(i + 1) % rim.length], petalColor, true, 0.6);
     }
     builder.addTriangle(
-      toWorld(0, -0.3, 0.28),
-      toWorld(-0.18, 0.08, 0.02),
-      toWorld(0.18, 0.08, 0.02),
+      toWorld(0, -0.42, 0.32),
+      toWorld(-0.24, 0.1, 0.02),
+      toWorld(0.24, 0.1, 0.02),
       petalColor,
       true,
       0.6,
@@ -2863,7 +2863,7 @@ export const createProcPlantDaylilyBloomGeometry = (): THREE.BufferGeometry => {
   const positions: number[] = [];
   const indices: number[] = [];
 
-  positions.push(0, -0.3, 0.28, -0.18, 0.08, 0.02, 0.18, 0.08, 0.02);
+  positions.push(0, -0.42, 0.32, -0.24, 0.1, 0.02, 0.24, 0.1, 0.02);
   indices.push(0, 2, 1);
 
   const centerIndex = positions.length / 3;
