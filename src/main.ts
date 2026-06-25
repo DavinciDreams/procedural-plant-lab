@@ -5,8 +5,10 @@ import {
   buildProcPlantInstancedParts,
   buildProcPlantTemplate,
   createProcPlantFlowerCenterGeometry,
+  createProcPlantConiferSprayGeometry,
   createProcPlantGrassBladeGeometry,
   createProcPlantLeafGeometry,
+  createProcPlantPalmFrondGeometry,
   createProcPlantPetalGeometry,
   defaultPlantEnvironment,
   GOLDEN_ANGLE_RADIANS,
@@ -53,6 +55,7 @@ app.innerHTML = `
   <section class="panel" aria-label="Procedural plant controls">
     <h1>Procplants Lab</h1>
     <p>Deterministic phi-phyllotaxis plants with light-shaped growth, procedural leaf silhouettes, fur grass, ferns, flowers, and hybrid genomes.</p>
+    <a class="source-link" href="https://github.com/DavinciDreams/procplants" target="_blank" rel="noreferrer">GitHub</a>
     <div class="control-grid">
       <div class="field">
         <label for="primary"><span>Primary</span></label>
@@ -86,6 +89,15 @@ app.innerHTML = `
         <button id="randomSeed" type="button">Random Seed</button>
         <button id="regenerate" type="button">Regenerate</button>
       </div>
+      <div class="button-row">
+        <button id="rollDice" type="button">Roll Dice</button>
+        <button id="autoDemo" type="button" aria-pressed="false">Auto Demo</button>
+      </div>
+      <div class="button-row">
+        <button id="saveLink" type="button">Save Link</button>
+        <button id="exportJson" type="button">Export JSON</button>
+      </div>
+      <output id="saveStatus" class="save-status" aria-live="polite"></output>
     </div>
     <div class="stats" aria-live="polite">
       <div class="stat"><strong id="triangles">0</strong><span>triangles</span></div>
@@ -115,6 +127,23 @@ camera.position.set(5.5, 4.2, 8.5);
 const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
 controls.target.set(0, 1.1, 0);
+
+const restoreCameraFromUrl = () => {
+  const params = new URLSearchParams(window.location.search);
+  const cx = Number(params.get("cx"));
+  const cy = Number(params.get("cy"));
+  const cz = Number(params.get("cz"));
+  const tx = Number(params.get("tx"));
+  const ty = Number(params.get("ty"));
+  const tz = Number(params.get("tz"));
+  if ([cx, cy, cz, tx, ty, tz].every(Number.isFinite)) {
+    camera.position.set(cx, cy, cz);
+    controls.target.set(tx, ty, tz);
+    controls.update();
+  }
+};
+
+restoreCameraFromUrl();
 
 const sun = new THREE.DirectionalLight(0xfff0c7, 4);
 sun.position.set(7, 9, 5);
@@ -154,6 +183,7 @@ const organMaterial = new THREE.MeshLambertMaterial({
 let biomeGroup: THREE.Group | null = null;
 let heroMesh: THREE.Mesh | null = null;
 let currentStats = { triangles: 0, plants: 0, leaves: 0, draws: 0 };
+let autoDemoTimer: number | null = null;
 
 const speciesLabel = (id: string) =>
   id
@@ -162,6 +192,48 @@ const speciesLabel = (id: string) =>
 
 const primarySelect = document.querySelector<HTMLSelectElement>("#primary")!;
 const secondarySelect = document.querySelector<HTMLSelectElement>("#secondary")!;
+const rangeInputs = {
+  hybrid: document.querySelector<HTMLInputElement>("#hybrid")!,
+  light: document.querySelector<HTMLInputElement>("#light")!,
+  moisture: document.querySelector<HTMLInputElement>("#moisture")!,
+  crowding: document.querySelector<HTMLInputElement>("#crowding")!,
+  density: document.querySelector<HTMLInputElement>("#density")!,
+};
+const rangeLabels = {
+  hybrid: "hybridValue",
+  light: "lightValue",
+  moisture: "moistureValue",
+  crowding: "crowdingValue",
+  density: "densityValue",
+};
+
+const isSpeciesId = (value: string | null): value is SpeciesId =>
+  !!value && Object.prototype.hasOwnProperty.call(procPlantPresets, value);
+
+const readNumberParam = (params: URLSearchParams, key: string, fallback: number, min = -Infinity, max = Infinity) => {
+  const raw = params.get(key);
+  if (raw === null || raw.trim() === "") return fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) ? THREE.MathUtils.clamp(value, min, max) : fallback;
+};
+
+const restoreStateFromUrl = () => {
+  const params = new URLSearchParams(window.location.search);
+  const primary = params.get("p");
+  const secondary = params.get("s");
+  if (isSpeciesId(primary)) state.primary = primary;
+  if (isSpeciesId(secondary)) state.secondary = secondary;
+  state.hybrid = readNumberParam(params, "h", state.hybrid, 0, 1);
+  state.seed = Math.round(readNumberParam(params, "seed", state.seed, 0, 1_000_000_000));
+  state.light = readNumberParam(params, "l", state.light, 0.08, 1);
+  state.moisture = readNumberParam(params, "m", state.moisture, 0, 1);
+  state.crowding = readNumberParam(params, "c", state.crowding, 0, 1);
+  state.warmth = readNumberParam(params, "w", state.warmth, 0, 1);
+  state.density = readNumberParam(params, "d", state.density, 0.15, 1);
+};
+
+restoreStateFromUrl();
+
 for (const id of procPlantPresetIds) {
   for (const select of [primarySelect, secondarySelect]) {
     const option = document.createElement("option");
@@ -175,6 +247,57 @@ secondarySelect.value = state.secondary;
 
 const setText = (id: string, text: string) => {
   document.querySelector<HTMLElement>(`#${id}`)!.textContent = text;
+};
+
+const syncControlsFromState = () => {
+  primarySelect.value = state.primary;
+  secondarySelect.value = state.secondary;
+  for (const key of Object.keys(rangeInputs) as Array<keyof typeof rangeInputs>) {
+    rangeInputs[key].value = String(state[key]);
+    setText(rangeLabels[key], state[key].toFixed(2));
+  }
+};
+
+syncControlsFromState();
+
+const setSaveStatus = (text: string) => {
+  const status = document.querySelector<HTMLOutputElement>("#saveStatus")!;
+  status.textContent = text;
+  window.setTimeout(() => {
+    if (status.textContent === text) status.textContent = "";
+  }, 3200);
+};
+
+const stateParams = (includeCamera = false) => {
+  const params = new URLSearchParams();
+  params.set("p", state.primary);
+  params.set("s", state.secondary);
+  params.set("h", state.hybrid.toFixed(2));
+  params.set("seed", String(state.seed));
+  params.set("l", state.light.toFixed(2));
+  params.set("m", state.moisture.toFixed(2));
+  params.set("c", state.crowding.toFixed(2));
+  params.set("w", state.warmth.toFixed(2));
+  params.set("d", state.density.toFixed(2));
+  if (includeCamera) {
+    params.set("cx", camera.position.x.toFixed(3));
+    params.set("cy", camera.position.y.toFixed(3));
+    params.set("cz", camera.position.z.toFixed(3));
+    params.set("tx", controls.target.x.toFixed(3));
+    params.set("ty", controls.target.y.toFixed(3));
+    params.set("tz", controls.target.z.toFixed(3));
+  }
+  return params;
+};
+
+const currentShareUrl = (includeCamera = false) => {
+  const url = new URL(window.location.href);
+  url.search = stateParams(includeCamera).toString();
+  return url.toString();
+};
+
+const updateAddressState = () => {
+  window.history.replaceState(null, "", currentShareUrl(false));
 };
 
 const envFromState = (): ProcPlantEnvironment => ({
@@ -272,6 +395,9 @@ const instanceKey = (kind: ProcPlantInstance["kind"], genome: ProcPlantGenome) =
   if (kind === "grassBlade") {
     return [kind, genome.leaf.widthRatio.toFixed(3), genome.leaf.curl.toFixed(3)].join(":");
   }
+  if (kind === "coniferSpray" || kind === "palmFrond") {
+    return [kind, genome.id, genome.leaf.widthRatio.toFixed(3), genome.leaf.curl.toFixed(3)].join(":");
+  }
   return kind;
 };
 
@@ -287,6 +413,8 @@ const geometryForBucket = (bucket: InstanceBucket): THREE.BufferGeometry => {
   if (bucket.kind === "grassBlade") {
     return createProcPlantGrassBladeGeometry(bucket.genome.leaf.widthRatio, bucket.genome.leaf.curl);
   }
+  if (bucket.kind === "coniferSpray") return createProcPlantConiferSprayGeometry();
+  if (bucket.kind === "palmFrond") return createProcPlantPalmFrondGeometry();
   if (bucket.kind === "petal") return createProcPlantPetalGeometry();
   return createProcPlantFlowerCenterGeometry();
 };
@@ -423,6 +551,7 @@ const disposeGroup = (group: THREE.Group | null) => {
 const regenerate = () => {
   const genome = selectedGenome();
   const env = envFromState();
+  updateAddressState();
   sun.intensity = 1.4 + state.light * 3.4;
   scene.background = new THREE.Color(0xb9d7ee).lerp(new THREE.Color(0x6f7d8d), 1 - state.light);
   scene.fog = new THREE.Fog(scene.background as THREE.Color, 18, 64);
@@ -446,7 +575,9 @@ const regenerate = () => {
 };
 
 const bindRange = (id: keyof LabState, labelId: string) => {
-  const input = document.querySelector<HTMLInputElement>(`#${id}`)!;
+  const input = rangeInputs[id as keyof typeof rangeInputs];
+  if (!input) return;
+  input.value = String(state[id]);
   const sync = () => {
     state[id] = Number(input.value) as never;
     setText(labelId, Number(input.value).toFixed(2));
@@ -477,6 +608,81 @@ document.querySelector<HTMLButtonElement>("#randomSeed")!.addEventListener("clic
 });
 
 document.querySelector<HTMLButtonElement>("#regenerate")!.addEventListener("click", regenerate);
+
+const weightedRandomSpecies = (rng: () => number): SpeciesId => {
+  const id = procPlantPresetIds[Math.floor(rng() * procPlantPresetIds.length)] as SpeciesId;
+  return id;
+};
+
+const rollBiomeDice = () => {
+  const dice = Math.floor(Math.random() * 1_000_000_000);
+  const rng = rand(dice);
+  state.seed = Math.floor(rng() * 1_000_000);
+  state.primary = weightedRandomSpecies(rng);
+  state.secondary = weightedRandomSpecies(rng);
+  state.hybrid = rng() < 0.22 ? 0 : THREE.MathUtils.clamp(0.18 + rng() * 0.72, 0, 1);
+  state.light = THREE.MathUtils.clamp(0.22 + rng() * 0.78, 0.08, 1);
+  state.moisture = THREE.MathUtils.clamp(rng() ** 0.72, 0, 1);
+  state.crowding = THREE.MathUtils.clamp(rng() ** 1.35, 0, 1);
+  state.warmth = THREE.MathUtils.clamp(0.18 + rng() * 0.82, 0, 1);
+  state.density = THREE.MathUtils.clamp(0.42 + rng() * 0.58, 0.15, 1);
+  syncControlsFromState();
+  regenerate();
+  setSaveStatus(`${speciesLabel(state.primary)} x ${speciesLabel(state.secondary)} rolled.`);
+};
+
+document.querySelector<HTMLButtonElement>("#rollDice")!.addEventListener("click", rollBiomeDice);
+
+document.querySelector<HTMLButtonElement>("#autoDemo")!.addEventListener("click", () => {
+  const button = document.querySelector<HTMLButtonElement>("#autoDemo")!;
+  if (autoDemoTimer !== null) {
+    window.clearInterval(autoDemoTimer);
+    autoDemoTimer = null;
+    button.textContent = "Auto Demo";
+    button.setAttribute("aria-pressed", "false");
+    setSaveStatus("Auto demo paused.");
+    return;
+  }
+  rollBiomeDice();
+  autoDemoTimer = window.setInterval(rollBiomeDice, 5200);
+  button.textContent = "Pause Demo";
+  button.setAttribute("aria-pressed", "true");
+});
+
+document.querySelector<HTMLButtonElement>("#saveLink")!.addEventListener("click", async () => {
+  const url = currentShareUrl(true);
+  window.history.replaceState(null, "", url);
+  try {
+    await navigator.clipboard.writeText(url);
+    setSaveStatus("Link copied with seed, sliders, species, and camera.");
+  } catch {
+    setSaveStatus("Link saved in the address bar.");
+  }
+});
+
+document.querySelector<HTMLButtonElement>("#exportJson")!.addEventListener("click", () => {
+  const genome = selectedGenome();
+  const payload = {
+    version: 1,
+    savedAt: new Date().toISOString(),
+    state: { ...state },
+    camera: {
+      position: camera.position.toArray(),
+      target: controls.target.toArray(),
+    },
+    stats: { ...currentStats },
+    genome,
+    url: currentShareUrl(true),
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const link = document.createElement("a");
+  const slug = `${state.primary}-${state.secondary}-${state.seed}`.replace(/[^a-z0-9-]+/gi, "-");
+  link.href = URL.createObjectURL(blob);
+  link.download = `procplant-${slug}.json`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+  setSaveStatus("JSON exported.");
+});
 
 const resize = () => {
   const w = window.innerWidth;

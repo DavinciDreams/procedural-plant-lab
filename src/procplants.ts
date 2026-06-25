@@ -15,7 +15,9 @@ export type ProcPlantHabit =
   | "flower"
   | "tropical"
   | "shrub"
-  | "vine";
+  | "vine"
+  | "conifer"
+  | "palm";
 
 export type LeafShapeKind =
   | "lanceolate"
@@ -95,9 +97,10 @@ export interface ProcPlantStats {
 }
 
 export type ProcPlantInstanceKind = "leaf" | "grassBlade" | "petal" | "flowerCenter";
+export type ProcPlantFoliageClusterKind = "coniferSpray" | "palmFrond";
 
 export interface ProcPlantInstance {
-  kind: ProcPlantInstanceKind;
+  kind: ProcPlantInstanceKind | ProcPlantFoliageClusterKind;
   matrix: THREE.Matrix4;
   color: THREE.Color;
   sway: number;
@@ -123,7 +126,7 @@ interface StemNode {
 }
 
 interface Organ {
-  kind: "leaf" | "flower" | "grassBlade" | "fernLeaflet";
+  kind: "leaf" | "flower" | "grassBlade" | "fernLeaflet" | ProcPlantFoliageClusterKind;
   position: THREE.Vector3;
   direction: THREE.Vector3;
   right: THREE.Vector3;
@@ -239,6 +242,169 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       leafBoostInShade: 0.18,
       branchSuppressionInShade: 0.45,
       phototropism: 0.28,
+    },
+  },
+  echinaceaFlower: {
+    id: "echinaceaFlower",
+    habit: "flower",
+    nodeCount: 11,
+    internode: { base: 0.14, tip: 0.1, curve: 0.95 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0.01, tip: 0, curve: 1.4 },
+    branchAngle: { mean: 0.36, spread: 0.12, depthDecay: 0.7 },
+    apicalDominance: 0.9,
+    leaf: {
+      shape: "lanceolate",
+      length: { base: 0.48, tip: 0.18, curve: 1.25 },
+      widthRatio: 0.32,
+      density: { base: 0.92, tip: 0.16, curve: 2.1 },
+      curl: 0.08,
+      serration: 0.22,
+      venation: 0.7,
+      colorA: 0x31572a,
+      colorB: 0x86ad59,
+    },
+    flower: {
+      whorls: 1,
+      petals: 13,
+      radius: 0.25,
+      color: 0xf08ae0,
+      centerColor: 0xd09239,
+    },
+    lightResponse: {
+      shadeAvoidance: 0.68,
+      leafBoostInShade: 0.16,
+      branchSuppressionInShade: 0.42,
+      phototropism: 0.22,
+    },
+  },
+  cloverGroundcover: {
+    id: "cloverGroundcover",
+    habit: "vine",
+    nodeCount: 12,
+    internode: { base: 0.11, tip: 0.08, curve: 1.05 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0.18, tip: 0.08, curve: 1.25 },
+    branchAngle: { mean: 0.42, spread: 0.2, depthDecay: 0.72 },
+    apicalDominance: 0.28,
+    leaf: {
+      shape: "round",
+      length: { base: 0.14, tip: 0.1, curve: 0.9 },
+      widthRatio: 0.82,
+      density: { base: 0.95, tip: 0.8, curve: 1 },
+      curl: 0.035,
+      serration: 0.01,
+      venation: 0.48,
+      colorA: 0x25562d,
+      colorB: 0x79b853,
+    },
+    flower: {
+      whorls: 1,
+      petals: 9,
+      radius: 0.09,
+      color: 0xf4e8ff,
+      centerColor: 0xd8c4ee,
+    },
+    lightResponse: {
+      shadeAvoidance: 0.18,
+      leafBoostInShade: 0.32,
+      branchSuppressionInShade: 0.18,
+      phototropism: 0.06,
+    },
+  },
+  laceUmbel: {
+    id: "laceUmbel",
+    habit: "flower",
+    nodeCount: 12,
+    internode: { base: 0.14, tip: 0.09, curve: 1 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0.03, tip: 0.01, curve: 1.7 },
+    branchAngle: { mean: 0.6, spread: 0.24, depthDecay: 0.72 },
+    apicalDominance: 0.88,
+    leaf: {
+      shape: "frond",
+      length: { base: 0.24, tip: 0.12, curve: 1.25 },
+      widthRatio: 0.2,
+      density: { base: 0.62, tip: 0.2, curve: 1.9 },
+      curl: 0.12,
+      serration: 0.2,
+      venation: 0.44,
+      colorA: 0x2b6234,
+      colorB: 0x91bd64,
+    },
+    flower: {
+      whorls: 1,
+      petals: 5,
+      radius: 0.055,
+      color: 0xfff7e8,
+      centerColor: 0xf1df8c,
+    },
+    lightResponse: {
+      shadeAvoidance: 0.82,
+      leafBoostInShade: 0.16,
+      branchSuppressionInShade: 0.46,
+      phototropism: 0.26,
+    },
+  },
+  irisBulb: {
+    id: "irisBulb",
+    habit: "flower",
+    nodeCount: 10,
+    internode: { base: 0.16, tip: 0.1, curve: 0.92 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0.01, tip: 0, curve: 1.3 },
+    branchAngle: { mean: 0.22, spread: 0.08, depthDecay: 0.7 },
+    apicalDominance: 0.92,
+    leaf: {
+      shape: "linear",
+      length: { base: 0.92, tip: 0.52, curve: 1.05 },
+      widthRatio: 0.075,
+      density: { base: 1, tip: 0.32, curve: 1.8 },
+      curl: 0.1,
+      serration: 0,
+      venation: 0.32,
+      colorA: 0x315d36,
+      colorB: 0x9dbb68,
+    },
+    flower: {
+      whorls: 2,
+      petals: 3,
+      radius: 0.24,
+      color: 0xb79cff,
+      centerColor: 0xffd26a,
+    },
+    lightResponse: {
+      shadeAvoidance: 0.58,
+      leafBoostInShade: 0.12,
+      branchSuppressionInShade: 0.4,
+      phototropism: 0.16,
+    },
+  },
+  agaveSucculent: {
+    id: "agaveSucculent",
+    habit: "tropical",
+    nodeCount: 8,
+    internode: { base: 0.04, tip: 0.025, curve: 1 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0, tip: 0, curve: 1 },
+    branchAngle: { mean: 1.1, spread: 0.18, depthDecay: 0.5 },
+    apicalDominance: 0.94,
+    leaf: {
+      shape: "spatulate",
+      length: { base: 0.72, tip: 0.42, curve: 0.85 },
+      widthRatio: 0.22,
+      density: { base: 1, tip: 1, curve: 1 },
+      curl: -0.12,
+      serration: 0.08,
+      venation: 0.18,
+      colorA: 0x536f62,
+      colorB: 0xb5c9a9,
+    },
+    lightResponse: {
+      shadeAvoidance: 0.08,
+      leafBoostInShade: 0.04,
+      branchSuppressionInShade: 0.1,
+      phototropism: 0.03,
     },
   },
   tropicalAroid: {
@@ -528,6 +694,60 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       phototropism: 0.16,
     },
   },
+  blueSpruce: {
+    id: "blueSpruce",
+    habit: "conifer",
+    nodeCount: 15,
+    internode: { base: 0.2, tip: 0.09, curve: 1.25 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0.12, tip: 0.04, curve: 1.25 },
+    branchAngle: { mean: 0.72, spread: 0.18, depthDecay: 0.7 },
+    apicalDominance: 0.78,
+    leaf: {
+      shape: "linear",
+      length: { base: 0.7, tip: 0.36, curve: 1.1 },
+      widthRatio: 0.22,
+      density: { base: 0.78, tip: 0.58, curve: 1 },
+      curl: 0.12,
+      serration: 0,
+      venation: 0.08,
+      colorA: 0x263f32,
+      colorB: 0x6f8f74,
+    },
+    lightResponse: {
+      shadeAvoidance: 0.28,
+      leafBoostInShade: 0.12,
+      branchSuppressionInShade: 0.18,
+      phototropism: 0.08,
+    },
+  },
+  foldedPalm: {
+    id: "foldedPalm",
+    habit: "palm",
+    nodeCount: 15,
+    internode: { base: 0.2, tip: 0.14, curve: 0.9 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0.01, tip: 0, curve: 1 },
+    branchAngle: { mean: 0.95, spread: 0.18, depthDecay: 0.55 },
+    apicalDominance: 0.95,
+    leaf: {
+      shape: "fan",
+      length: { base: 0.85, tip: 0.62, curve: 0.85 },
+      widthRatio: 0.58,
+      density: { base: 1, tip: 1, curve: 1 },
+      curl: 0.18,
+      serration: 0.08,
+      venation: 0.95,
+      colorA: 0x2e7438,
+      colorB: 0xa4c760,
+    },
+    lightResponse: {
+      shadeAvoidance: 0.42,
+      leafBoostInShade: 0.2,
+      branchSuppressionInShade: 0.12,
+      phototropism: 0.12,
+    },
+  },
 };
 
 const curve = (gene: CurveGene, t: number): number => {
@@ -652,10 +872,20 @@ export const buildProcPlantGraph = (
     genome.habit === "vine"
       ? new THREE.Vector3(0.62, 0.28, 0.36).normalize()
       : new THREE.Vector3(0, 1, 0);
+  const rootRadius =
+    genome.habit === "palm"
+      ? 0.055
+      : genome.habit === "conifer"
+        ? 0.045
+        : genome.habit === "shrub"
+          ? 0.035
+          : genome.habit === "vine"
+            ? 0.012
+            : 0.018;
   const root: StemNode = {
     position: new THREE.Vector3(0, 0, 0),
     direction: rootDirection,
-    radius: genome.habit === "shrub" ? 0.035 : genome.habit === "vine" ? 0.012 : 0.018,
+    radius: rootRadius,
     depth: 0,
     t: 0,
     index: 0,
@@ -706,7 +936,17 @@ export const buildProcPlantGraph = (
       const organDir = rotateFromAxis(direction, azimuth, Math.PI / 2.6);
       const organRight = right.applyAxisAngle(direction, azimuth).normalize();
       const density = curve(genome.leaf.density, t) * (1 + shade * genome.lightResponse.leafBoostInShade);
-      if (rng() < density || genome.habit === "tropical") {
+      if (genome.habit === "conifer" && t > 0.16 && rng() < density) {
+        const downSweep = Math.PI / 2.15 + t * 0.34;
+        organs.push({
+          kind: "coniferSpray",
+          position,
+          direction: rotateFromAxis(direction, azimuth, downSweep),
+          right: organRight,
+          scale: curve(genome.leaf.length, t) * (1.15 - t * 0.35) * (0.9 + rng() * 0.22),
+          t,
+        });
+      } else if (genome.habit !== "palm" && rng() < density || genome.habit === "tropical") {
         organs.push({
           kind: "leaf",
           position,
@@ -782,7 +1022,308 @@ export const buildProcPlantGraph = (
     return { stems, segments, organs };
   }
 
+  if (genome.id === "cloverGroundcover") {
+    const runners = 3;
+    for (let r = 0; r < runners; r++) {
+      const yaw = r * genome.phyllotaxisAngle + rng() * 0.35;
+      const start: StemNode = {
+        position: new THREE.Vector3((rng() - 0.5) * 0.08, 0.018, (rng() - 0.5) * 0.08),
+        direction: rotateFromAxis(UP, yaw, 1.35),
+        radius: root.radius * 0.42,
+        depth: 0,
+        t: 0,
+        index: stems.length,
+      };
+      stems.push(start);
+      segments.push([root.index, start.index]);
+      let previous = start;
+      const nodes = 3 + Math.round(rng() * 1.4);
+      for (let i = 1; i <= nodes; i++) {
+        const t = i / nodes;
+        const wander = yaw + Math.sin(i * 1.7 + seed) * 0.25 + (rng() - 0.5) * 0.22;
+        const direction = new THREE.Vector3(Math.cos(wander), 0.05 + shade * 0.08, Math.sin(wander)).normalize();
+        const position = previous.position
+          .clone()
+          .add(direction.clone().multiplyScalar(curve(genome.internode, t) * (1.1 + rng() * 0.35)));
+        const node: StemNode = {
+          position,
+          direction,
+          radius: previous.radius * 0.86,
+          depth: 0,
+          t,
+          index: stems.length,
+        };
+        stems.push(node);
+        segments.push([previous.index, node.index]);
+        previous = node;
+        for (let leaf = 0; leaf < 3; leaf++) {
+          const leafYaw = yaw + leaf * (Math.PI * 2 / 3) + i * 0.18;
+          organs.push({
+            kind: "leaf",
+            position: position.clone().add(new THREE.Vector3(0, 0.025 + leaf * 0.004, 0)),
+            direction: rotateFromAxis(UP, leafYaw, 1.22 + rng() * 0.12),
+            right: new THREE.Vector3(Math.cos(leafYaw + Math.PI / 2), 0, Math.sin(leafYaw + Math.PI / 2)).normalize(),
+            scale: curve(genome.leaf.length, t) * (0.92 + rng() * 0.18),
+            t,
+          });
+        }
+        if (genome.flower && i === nodes && rng() < 0.62 + env.moisture * 0.2) {
+          organs.push({
+            kind: "flower",
+            position: position.clone().add(new THREE.Vector3(0, 0.13 + rng() * 0.04, 0)),
+            direction: UP.clone(),
+            right: tangentBasis(UP).right,
+            scale: 0.68 + rng() * 0.16,
+            t: 1,
+          });
+        }
+      }
+    }
+    return { stems, segments, organs };
+  }
+
+  if (genome.id === "agaveSucculent") {
+    const leaves = 18;
+    for (let i = 0; i < leaves; i++) {
+      const t = i / Math.max(1, leaves - 1);
+      const azimuth = i * genome.phyllotaxisAngle + (rng() - 0.5) * 0.08;
+      const lower = i < leaves * 0.45;
+      organs.push({
+        kind: "leaf",
+        position: new THREE.Vector3(0, 0.018 + t * 0.018, 0),
+        direction: rotateFromAxis(UP, azimuth, lower ? 1.18 + rng() * 0.16 : 0.78 + rng() * 0.18),
+        right: new THREE.Vector3(Math.cos(azimuth + Math.PI / 2), 0, -Math.sin(azimuth + Math.PI / 2)).normalize(),
+        scale: curve(genome.leaf.length, t) * (1.08 - t * 0.16) * (0.92 + rng() * 0.16),
+        t,
+      });
+    }
+    return { stems, segments, organs };
+  }
+
+  if (genome.id === "irisBulb") {
+    const strapLeaves = 9;
+    for (let i = 0; i < strapLeaves; i++) {
+      const t = i / Math.max(1, strapLeaves - 1);
+      const azimuth = i * genome.phyllotaxisAngle + (rng() - 0.5) * 0.18;
+      organs.push({
+        kind: "grassBlade",
+        position: new THREE.Vector3((rng() - 0.5) * 0.05, 0, (rng() - 0.5) * 0.05),
+        direction: rotateFromAxis(UP, azimuth, 0.32 + rng() * 0.28),
+        right: new THREE.Vector3(Math.cos(azimuth), 0, -Math.sin(azimuth)).normalize(),
+        scale: curve(genome.leaf.length, t) * heightStretch * (0.84 + rng() * 0.18),
+        t,
+      });
+    }
+    let previous = root;
+    for (let i = 1; i <= genome.nodeCount; i++) {
+      const t = i / genome.nodeCount;
+      const direction = UP.clone()
+        .add(lightVector.clone().multiplyScalar(genome.lightResponse.phototropism * t * (0.25 + shade)))
+        .add(new THREE.Vector3((rng() - 0.5) * 0.025, 0, (rng() - 0.5) * 0.025))
+        .normalize();
+      const node: StemNode = {
+        position: previous.position.clone().add(direction.clone().multiplyScalar(curve(genome.internode, t) * heightStretch)),
+        direction,
+        radius: previous.radius * THREE.MathUtils.lerp(0.93, 0.76, t),
+        depth: 0,
+        t,
+        index: stems.length,
+      };
+      stems.push(node);
+      segments.push([previous.index, node.index]);
+      previous = node;
+    }
+    organs.push({
+      kind: "flower",
+      position: previous.position.clone().add(previous.direction.clone().multiplyScalar(0.04)),
+      direction: previous.direction.clone(),
+      right: tangentBasis(previous.direction).right,
+      scale: 1,
+      t: 1,
+    });
+    return { stems, segments, organs };
+  }
+
+  if (genome.id === "laceUmbel") {
+    let previous = root;
+    for (let i = 1; i <= genome.nodeCount; i++) {
+      const t = i / genome.nodeCount;
+      const direction = UP.clone()
+        .add(lightVector.clone().multiplyScalar(genome.lightResponse.phototropism * t * (0.35 + shade)))
+        .add(new THREE.Vector3((rng() - 0.5) * 0.045, 0, (rng() - 0.5) * 0.045))
+        .normalize();
+      const node: StemNode = {
+        position: previous.position.clone().add(direction.clone().multiplyScalar(curve(genome.internode, t) * heightStretch)),
+        direction,
+        radius: previous.radius * THREE.MathUtils.lerp(0.93, 0.75, t),
+        depth: 0,
+        t,
+        index: stems.length,
+      };
+      stems.push(node);
+      segments.push([previous.index, node.index]);
+      previous = node;
+      if (i % 3 === 1 && i < genome.nodeCount - 2) {
+        const azimuth = i * genome.phyllotaxisAngle;
+        const { right } = tangentBasis(direction);
+        organs.push({
+          kind: "leaf",
+          position: node.position.clone(),
+          direction: rotateFromAxis(direction, azimuth, 0.95),
+          right: right.applyAxisAngle(direction, azimuth).normalize(),
+          scale: curve(genome.leaf.length, t) * (0.8 + rng() * 0.25),
+          t,
+        });
+      }
+    }
+    const tip = previous;
+    const spokes = 9;
+    for (let i = 0; i < spokes; i++) {
+      const t = i / Math.max(1, spokes - 1);
+      const azimuth = i * genome.phyllotaxisAngle;
+      const spokeDir = rotateFromAxis(tip.direction, azimuth, 0.82 + rng() * 0.12);
+      const spokeStart: StemNode = {
+        position: tip.position.clone(),
+        direction: spokeDir,
+        radius: tip.radius * 0.38,
+        depth: 1,
+        t,
+        index: stems.length,
+      };
+      stems.push(spokeStart);
+      segments.push([tip.index, spokeStart.index]);
+      const spokeEnd: StemNode = {
+        position: tip.position.clone().add(spokeDir.clone().multiplyScalar(0.24 + rng() * 0.08)),
+        direction: spokeDir,
+        radius: tip.radius * 0.22,
+        depth: 1,
+        t,
+        index: stems.length,
+      };
+      stems.push(spokeEnd);
+      segments.push([spokeStart.index, spokeEnd.index]);
+      const right = tangentBasis(spokeDir).right;
+      for (let f = 0; f < 3; f++) {
+        const floretYaw = azimuth + (f - 1) * 0.46;
+        const floretOffset = rotateFromAxis(UP, floretYaw, 1.45).multiplyScalar(0.035 + f * 0.006);
+        organs.push({
+          kind: "flower",
+          position: spokeEnd.position.clone().add(floretOffset),
+          direction: UP.clone().add(spokeDir.clone().multiplyScalar(0.18)).normalize(),
+          right,
+          scale: 0.46 + rng() * 0.08,
+          t: 1,
+        });
+      }
+    }
+    return { stems, segments, organs };
+  }
+
+  if (genome.id === "echinaceaFlower") {
+    const basalLeaves = 11;
+    for (let i = 0; i < basalLeaves; i++) {
+      const t = i / Math.max(1, basalLeaves - 1);
+      const azimuth = i * genome.phyllotaxisAngle + (rng() - 0.5) * 0.22;
+      const lowAngle = 1.02 + rng() * 0.22;
+      const direction = rotateFromAxis(UP, azimuth, lowAngle)
+        .add(new THREE.Vector3(0, -0.05 * rng(), 0))
+        .normalize();
+      organs.push({
+        kind: "leaf",
+        position: new THREE.Vector3((rng() - 0.5) * 0.06, 0.015 + rng() * 0.025, (rng() - 0.5) * 0.06),
+        direction,
+        right: new THREE.Vector3(Math.cos(azimuth + Math.PI / 2), 0, -Math.sin(azimuth + Math.PI / 2)).normalize(),
+        scale: curve(genome.leaf.length, t) * (0.9 + rng() * 0.28),
+        t: Math.min(0.72, t * 0.55),
+      });
+    }
+
+    const floweringStems = 1 + Math.round(env.moisture * 1.6 + rng() * 0.65);
+    for (let s = 0; s < floweringStems; s++) {
+      const azimuth = s * genome.phyllotaxisAngle + rng() * 0.4;
+      const baseOffset = new THREE.Vector3(Math.cos(azimuth), 0, Math.sin(azimuth)).multiplyScalar(s === 0 ? 0 : 0.08 + rng() * 0.08);
+      const start: StemNode = {
+        position: baseOffset.clone(),
+        direction: UP.clone(),
+        radius: root.radius * (s === 0 ? 0.82 : 0.62),
+        depth: 0,
+        t: 0,
+        index: stems.length,
+      };
+      stems.push(start);
+      segments.push([root.index, start.index]);
+      let previous = start;
+      const count = Math.max(6, genome.nodeCount - s * 2);
+      const stemLean = new THREE.Vector3(Math.cos(azimuth), 0, Math.sin(azimuth)).multiplyScalar(0.08 + rng() * 0.06);
+      for (let i = 1; i <= count; i++) {
+        const t = i / count;
+        const photo = lightVector
+          .clone()
+          .multiplyScalar(genome.lightResponse.phototropism * t * (0.25 + shade));
+        const direction = UP.clone()
+          .add(stemLean.clone().multiplyScalar(t))
+          .add(photo)
+          .add(new THREE.Vector3((rng() - 0.5) * 0.035, 0, (rng() - 0.5) * 0.035))
+          .normalize();
+        const position = previous.position
+          .clone()
+          .add(direction.clone().multiplyScalar(curve(genome.internode, t) * heightStretch * (s === 0 ? 1 : 0.82)));
+        const node: StemNode = {
+          position,
+          direction,
+          radius: previous.radius * THREE.MathUtils.lerp(0.92, 0.76, t),
+          depth: 0,
+          t,
+          index: stems.length,
+        };
+        stems.push(node);
+        segments.push([previous.index, node.index]);
+        previous = node;
+
+        if (i > 1 && i < count - 2 && i % 3 === 0 && rng() < 0.65 - t * 0.28) {
+          const leafAzimuth = azimuth + i * genome.phyllotaxisAngle;
+          const { right } = tangentBasis(direction);
+          organs.push({
+            kind: "leaf",
+            position,
+            direction: rotateFromAxis(direction, leafAzimuth, 0.82 + t * 0.24),
+            right: right.applyAxisAngle(direction, leafAzimuth).normalize(),
+            scale: curve(genome.leaf.length, t) * (0.46 - t * 0.12) * (0.85 + rng() * 0.2),
+            t: 0.55 + t * 0.35,
+          });
+        }
+      }
+      organs.push({
+        kind: "flower",
+        position: previous.position.clone().add(previous.direction.clone().multiplyScalar(0.045)),
+        direction: previous.direction.clone().add(new THREE.Vector3(0, 0.18, 0)).normalize(),
+        right: tangentBasis(previous.direction).right,
+        scale: s === 0 ? 1 : 0.76 + rng() * 0.12,
+        t: 1,
+      });
+    }
+    return { stems, segments, organs };
+  }
+
   growAxis(0, 0, genome.nodeCount, 1);
+
+  if (genome.habit === "palm") {
+    const tip = stems.reduce((best, node) => (node.position.y > best.position.y ? node : best), stems[0]);
+    const fronds = 11;
+    for (let i = 0; i < fronds; i++) {
+      const t = i / Math.max(1, fronds - 1);
+      const azimuth = i * genome.phyllotaxisAngle;
+      const umbrellaAngle = 1.72 + Math.sin(t * Math.PI) * 0.16 + (i % 2) * 0.05;
+      organs.push({
+        kind: "palmFrond",
+        position: tip.position.clone().add(tip.direction.clone().multiplyScalar(0.08)),
+        direction: rotateFromAxis(tip.direction, azimuth, umbrellaAngle),
+        right: tangentBasis(tip.direction).right.applyAxisAngle(tip.direction, azimuth).normalize(),
+        scale: curve(genome.leaf.length, t) * (1.05 + (i % 3) * 0.05),
+        t,
+      });
+    }
+  }
 
   if (genome.habit === "fern" && genome.fern) {
     const fronds = Math.max(3, Math.round(genome.fern.pinnae / 3));
@@ -1025,6 +1566,7 @@ const addStemSegment = (
 
 const addFlower = (builder: TemplateBuilder, genome: ProcPlantGenome, organ: Organ) => {
   if (!genome.flower) return;
+  const isEchinacea = genome.id === "echinaceaFlower";
   const forward = organ.direction.clone().normalize();
   const right = organ.right.clone().normalize();
   const up = new THREE.Vector3().crossVectors(right, forward).normalize();
@@ -1044,8 +1586,8 @@ const addFlower = (builder: TemplateBuilder, genome: ProcPlantGenome, organ: Org
       const tip = organ.position
         .clone()
         .add(whorlLift)
-        .add(forward.clone().multiplyScalar(radius * (0.05 + whorlT * 0.24)))
-        .add(radial.clone().multiplyScalar(whorlRadius * 1.08));
+        .add(forward.clone().multiplyScalar(radius * (isEchinacea ? -0.18 - whorlT * 0.06 : 0.05 + whorlT * 0.24)))
+        .add(radial.clone().multiplyScalar(whorlRadius * (isEchinacea ? 1.18 : 1.08)));
       const side = up
         .clone()
         .multiplyScalar(whorlRadius * 0.2 * Math.cos(a))
@@ -1055,9 +1597,9 @@ const addFlower = (builder: TemplateBuilder, genome: ProcPlantGenome, organ: Org
   }
   const c = organ.position.clone().add(forward.clone().multiplyScalar(radius * 0.04));
   builder.addTriangle(
-    c.clone().add(right.clone().multiplyScalar(-radius * 0.16)),
-    c.clone().add(right.clone().multiplyScalar(radius * 0.16)),
-    c.clone().add(up.clone().multiplyScalar(radius * 0.18)),
+    c.clone().add(right.clone().multiplyScalar(-radius * (isEchinacea ? 0.24 : 0.16))),
+    c.clone().add(right.clone().multiplyScalar(radius * (isEchinacea ? 0.24 : 0.16))),
+    c.clone().add(up.clone().multiplyScalar(radius * (isEchinacea ? 0.28 : 0.18))),
     centerColor,
     false,
     0.3,
@@ -1128,11 +1670,58 @@ const grassBladeInstance = (
   };
 };
 
+const coniferSprayInstance = (
+  genome: ProcPlantGenome,
+  organ: Organ,
+): ProcPlantInstance => {
+  const length = organ.scale;
+  const dir = organ.direction.clone().normalize();
+  const right = organ.right.clone().normalize();
+  const normal = new THREE.Vector3().crossVectors(right, dir).normalize();
+  const color = new THREE.Color(genome.leaf.colorA).lerp(new THREE.Color(genome.leaf.colorB), 0.35 + organ.t * 0.45);
+  return {
+    kind: "coniferSpray",
+    matrix: instanceMatrixFromFrame(
+      organ.position,
+      right,
+      dir,
+      normal,
+      new THREE.Vector3(length, length, length),
+    ),
+    color,
+    sway: 0.45 + organ.t * 0.35,
+  };
+};
+
+const palmFrondInstance = (
+  genome: ProcPlantGenome,
+  organ: Organ,
+): ProcPlantInstance => {
+  const length = organ.scale;
+  const dir = organ.direction.clone().normalize();
+  const right = organ.right.clone().normalize();
+  const normal = new THREE.Vector3().crossVectors(right, dir).normalize();
+  const color = new THREE.Color(genome.leaf.colorA).lerp(new THREE.Color(genome.leaf.colorB), 0.25 + organ.t * 0.35);
+  return {
+    kind: "palmFrond",
+    matrix: instanceMatrixFromFrame(
+      organ.position,
+      right,
+      dir,
+      normal,
+      new THREE.Vector3(length, length, length),
+    ),
+    color,
+    sway: 0.85,
+  };
+};
+
 const flowerInstances = (
   genome: ProcPlantGenome,
   organ: Organ,
 ): ProcPlantInstance[] => {
   if (!genome.flower) return [];
+  const isEchinacea = genome.id === "echinaceaFlower";
   const forward = organ.direction.clone().normalize();
   const right = organ.right.clone().normalize();
   const up = new THREE.Vector3().crossVectors(right, forward).normalize();
@@ -1154,14 +1743,24 @@ const flowerInstances = (
         .multiplyScalar(Math.cos(a))
         .add(right.clone().multiplyScalar(-Math.sin(a)))
         .normalize();
+      const petalAxis = isEchinacea
+        ? radial.clone().multiplyScalar(1.08).add(forward.clone().multiplyScalar(-0.34 - whorlT * 0.08)).normalize()
+        : radial;
+      const petalNormal = isEchinacea
+        ? new THREE.Vector3().crossVectors(petalAxis, side).normalize().lerp(forward, 0.45).normalize()
+        : forward;
       out.push({
         kind: "petal",
         matrix: instanceMatrixFromFrame(
           organ.position.clone().add(whorlLift).add(radial.clone().multiplyScalar(whorlRadius * 0.16)),
           side,
-          radial,
-          forward,
-          new THREE.Vector3(whorlRadius, whorlRadius, whorlRadius),
+          petalAxis,
+          petalNormal,
+          new THREE.Vector3(
+            whorlRadius * (isEchinacea ? 0.78 : 1),
+            whorlRadius * (isEchinacea ? 1.18 : 1),
+            whorlRadius,
+          ),
         ),
         color: petalColor,
         sway: 0.7,
@@ -1175,7 +1774,7 @@ const flowerInstances = (
       right,
       up,
       forward,
-      new THREE.Vector3(radius, radius, radius),
+      new THREE.Vector3(radius * (isEchinacea ? 1.26 : 1), radius * (isEchinacea ? 1.26 : 1), radius),
     ),
     color: centerColor,
     sway: 0.25,
@@ -1203,6 +1802,12 @@ export const buildProcPlantInstancedParts = (
   for (const organ of graph.organs) {
     if (organ.kind === "grassBlade") {
       instances.push(grassBladeInstance(genome, organ));
+      leafCount++;
+    } else if (organ.kind === "coniferSpray") {
+      instances.push(coniferSprayInstance(genome, organ));
+      leafCount++;
+    } else if (organ.kind === "palmFrond") {
+      instances.push(palmFrondInstance(genome, organ));
       leafCount++;
     } else if (organ.kind === "flower") {
       const petals = flowerInstances(genome, organ);
@@ -1293,16 +1898,215 @@ export const createProcPlantGrassBladeGeometry = (widthRatio: number, curl = 0):
   return geometry;
 };
 
+export const createProcPlantConiferSprayGeometry = (): THREE.BufferGeometry => {
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const indices: number[] = [];
+  const addQuad = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3) => {
+    const base = positions.length / 3;
+    const normal = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a)).normalize();
+    for (const p of [a, b, c, d]) {
+      positions.push(p.x, p.y, p.z);
+      normals.push(normal.x, normal.y, normal.z);
+    }
+    indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  };
+
+  const widthAt = (t: number, width: number) => {
+    const lobe = Math.sin(Math.PI * Math.min(1, t * 0.92 + 0.04)) ** 0.55;
+    return Math.max(0.006, lobe * width * (1 - t * 0.42));
+  };
+
+  const addMidrib = (
+    yOffset: number,
+    length: number,
+    xOffset: number,
+    zOffset: number,
+    lean: number,
+    ridge: number,
+  ) => {
+    const rows = 5;
+    for (let i = 0; i < rows; i++) {
+      const t0 = i / rows;
+      const t1 = (i + 1) / rows;
+      const y0 = yOffset + t0 * length;
+      const y1 = yOffset + t1 * length;
+      const x0 = xOffset + (t0 - 0.4) * lean;
+      const x1 = xOffset + (t1 - 0.4) * lean;
+      const w0 = 0.012 * (1 - t0 * 0.72);
+      const w1 = 0.012 * (1 - t1 * 0.72);
+      const z0 = zOffset + Math.sin(t0 * Math.PI) * ridge - t0 * t0 * 0.075 + 0.01;
+      const z1 = zOffset + Math.sin(t1 * Math.PI) * ridge - t1 * t1 * 0.075 + 0.01;
+      addQuad(
+        new THREE.Vector3(x0 - w0, y0, z0),
+        new THREE.Vector3(x0 + w0, y0, z0),
+        new THREE.Vector3(x1 + w1, y1, z1),
+        new THREE.Vector3(x1 - w1, y1, z1),
+      );
+    }
+  };
+
+  const addVeins = (
+    yOffset: number,
+    length: number,
+    width: number,
+    xOffset: number,
+    zOffset: number,
+    lean: number,
+    ridge: number,
+    side = 1,
+  ) => {
+    const veinCount = 4;
+    for (let i = 1; i <= veinCount; i++) {
+      const t0 = (i + 0.25) / (veinCount + 1);
+      const t1 = Math.min(0.96, t0 + 0.12);
+      const sweep0 = xOffset + (t0 - 0.4) * lean;
+      const sweep1 = xOffset + (t1 - 0.4) * lean;
+      const spread0 = widthAt(t0, width) * 0.22 * side;
+      const spread1 = widthAt(t1, width) * (0.72 + (i % 2) * 0.12) * side;
+      const y0 = yOffset + t0 * length;
+      const y1 = yOffset + t1 * length;
+      const z0 = zOffset + Math.sin(t0 * Math.PI) * ridge - t0 * t0 * 0.075 + 0.013;
+      const z1 = zOffset + Math.sin(t1 * Math.PI) * ridge * 0.34 - t1 * t1 * 0.075 - 0.004;
+      const thickness = 0.006 * (1 - t0 * 0.45);
+      addQuad(
+        new THREE.Vector3(sweep0 + spread0, y0 - thickness, z0),
+        new THREE.Vector3(sweep0 + spread0 + thickness * side, y0 + thickness, z0),
+        new THREE.Vector3(sweep1 + spread1 + thickness * side, y1 + thickness * 0.7, z1),
+        new THREE.Vector3(sweep1 + spread1, y1 - thickness * 0.7, z1),
+      );
+    }
+  };
+
+  const addFoldedBlade = (
+    width: number,
+    length: number,
+    yOffset: number,
+    xOffset: number,
+    zOffset: number,
+    lean: number,
+    ridge: number,
+  ) => {
+    const rows = 8;
+    const left: THREE.Vector3[] = [];
+    const center: THREE.Vector3[] = [];
+    const right: THREE.Vector3[] = [];
+    for (let i = 0; i <= rows; i++) {
+      const t = i / rows;
+      const y = yOffset + t * length;
+      const widthNow = widthAt(t, width);
+      const sweep = (t - 0.4) * lean;
+      const edgeSag = zOffset - t * t * 0.075;
+      const centerRise = zOffset + Math.sin(t * Math.PI) * ridge - t * t * 0.075;
+      left.push(new THREE.Vector3(xOffset + sweep - widthNow, y, edgeSag));
+      center.push(new THREE.Vector3(xOffset + sweep, y, centerRise));
+      right.push(new THREE.Vector3(xOffset + sweep + widthNow, y, edgeSag));
+    }
+    for (let i = 0; i < rows; i++) {
+      addQuad(left[i], center[i], center[i + 1], left[i + 1]);
+      addQuad(center[i], right[i], right[i + 1], center[i + 1]);
+    }
+    addMidrib(yOffset, length, xOffset, zOffset, lean, ridge);
+    addVeins(yOffset, length, width, xOffset, zOffset, lean, ridge, -1);
+    addVeins(yOffset, length, width, xOffset, zOffset, lean, ridge, 1);
+  };
+
+  addFoldedBlade(0.38, 1.08, 0, 0, 0, 0.035, 0.09);
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setIndex(indices);
+  geometry.computeBoundingSphere();
+  return geometry;
+};
+
+export const createProcPlantPalmFrondGeometry = (): THREE.BufferGeometry => {
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const indices: number[] = [];
+  const addQuad = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3) => {
+    const base = positions.length / 3;
+    const normal = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a)).normalize();
+    for (const p of [a, b, c, d]) {
+      positions.push(p.x, p.y, p.z);
+      normals.push(normal.x, normal.y, normal.z);
+    }
+    indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  };
+  const cuts = 13;
+  for (let i = 0; i < cuts; i++) {
+    const y0 = i / cuts + 0.006;
+    const y1 = (i + 0.76) / cuts;
+    const sag0 = -(y0 * y0) * 0.16;
+    const sag1 = -(y1 * y1) * 0.16;
+    const m0 = Math.sin(Math.PI * y0);
+    const m1 = Math.sin(Math.PI * Math.min(1, y1));
+    const w0 = m0 ** 0.62 * 0.42;
+    const w1 = m1 ** 0.62 * 0.42;
+    const fold0 = (i % 2 === 0 ? 1 : -1) * 0.035;
+    const fold1 = -fold0;
+    addQuad(
+      new THREE.Vector3(0, y0, sag0),
+      new THREE.Vector3(-w0, y0, fold0 + sag0),
+      new THREE.Vector3(-w1, y1, fold1 + sag1),
+      new THREE.Vector3(0, y1, sag1),
+    );
+    addQuad(
+      new THREE.Vector3(0, y0, sag0),
+      new THREE.Vector3(0, y1, sag1),
+      new THREE.Vector3(w1, y1, -fold1 + sag1),
+      new THREE.Vector3(w0, y0, -fold0 + sag0),
+    );
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setIndex(indices);
+  geometry.computeBoundingSphere();
+  return geometry;
+};
+
+const addTransformedGeometry = (
+  builder: TemplateBuilder,
+  geometry: THREE.BufferGeometry,
+  matrix: THREE.Matrix4,
+  color: THREE.Color,
+  sway = 1,
+) => {
+  const source = geometry.index ? geometry.toNonIndexed() : geometry;
+  const pos = source.getAttribute("position");
+  const p = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i += 3) {
+    const a = p.fromBufferAttribute(pos, i).clone().applyMatrix4(matrix);
+    const b = p.fromBufferAttribute(pos, i + 1).clone().applyMatrix4(matrix);
+    const c = p.fromBufferAttribute(pos, i + 2).clone().applyMatrix4(matrix);
+    builder.addTriangle(a, b, c, color, true, sway);
+  }
+  if (source !== geometry) source.dispose();
+};
+
 export const createProcPlantPetalGeometry = (): THREE.BufferGeometry => {
   const positions = new Float32Array([
-    -0.2, 0, 0,
-    0.2, 0, 0,
-    0, 1, 0.12,
+    0, 0, 0,
+    -0.16, 0.24, 0.015,
+    -0.2, 0.62, 0.04,
+    0, 1, 0.1,
+    0.2, 0.62, 0.04,
+    0.16, 0.24, 0.015,
   ]);
-  const normals = new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]);
+  const normals = new Float32Array(positions.length);
+  for (let i = 0; i < normals.length; i += 3) normals[i + 2] = 1;
+  const indices = new Uint16Array([
+    0, 1, 2,
+    0, 2, 3,
+    0, 3, 4,
+    0, 4, 5,
+  ]);
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
+  geometry.setIndex(new THREE.BufferAttribute(indices, 1));
   geometry.computeBoundingSphere();
   return geometry;
 };
@@ -1330,6 +2134,18 @@ export const buildProcPlantTemplate = (
   for (const organ of graph.organs) {
     if (organ.kind === "grassBlade") {
       addGrassBlade(builder, genome, organ);
+      leafCount++;
+    } else if (organ.kind === "coniferSpray") {
+      const inst = coniferSprayInstance(genome, organ);
+      const geo = createProcPlantConiferSprayGeometry();
+      addTransformedGeometry(builder, geo, inst.matrix, inst.color, inst.sway);
+      geo.dispose();
+      leafCount++;
+    } else if (organ.kind === "palmFrond") {
+      const inst = palmFrondInstance(genome, organ);
+      const geo = createProcPlantPalmFrondGeometry();
+      addTransformedGeometry(builder, geo, inst.matrix, inst.color, inst.sway);
+      geo.dispose();
       leafCount++;
     } else if (organ.kind === "flower") {
       addFlower(builder, genome, organ);
