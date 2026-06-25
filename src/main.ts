@@ -5,6 +5,7 @@ import {
   buildProcPlantInstancedParts,
   buildProcPlantTemplate,
   createProcPlantFlowerCenterGeometry,
+  createProcPlantFlowerDiscGeometry,
   createProcPlantConiferSprayGeometry,
   createProcPlantGrassBladeGeometry,
   createProcPlantLeafGeometry,
@@ -413,6 +414,7 @@ const geometryForBucket = (bucket: InstanceBucket): THREE.BufferGeometry => {
   if (bucket.kind === "coniferSpray") return createProcPlantConiferSprayGeometry();
   if (bucket.kind === "palmFrond") return createProcPlantPalmFrondGeometry();
   if (bucket.kind === "petal") return createProcPlantPetalGeometry();
+  if (bucket.kind === "flowerDisc") return createProcPlantFlowerDiscGeometry();
   return createProcPlantFlowerCenterGeometry();
 };
 
@@ -500,7 +502,7 @@ const scatterBiome = (genome: ProcPlantGenome, env: ProcPlantEnvironment): THREE
     const geometry = geometryForBucket(bucket);
     const mesh = new THREE.InstancedMesh(geometry, organMaterial, bucket.instances.length);
     mesh.castShadow = true;
-    mesh.receiveShadow = true;
+    mesh.receiveShadow = bucket.kind !== "flowerDisc";
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     for (let i = 0; i < bucket.instances.length; i++) {
       mesh.setMatrixAt(i, bucket.instances[i].matrix);

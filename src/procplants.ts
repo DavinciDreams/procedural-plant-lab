@@ -96,7 +96,7 @@ export interface ProcPlantStats {
   triangles: number;
 }
 
-export type ProcPlantInstanceKind = "leaf" | "grassBlade" | "petal" | "flowerCenter";
+export type ProcPlantInstanceKind = "leaf" | "grassBlade" | "petal" | "flowerDisc" | "flowerCenter";
 export type ProcPlantFoliageClusterKind = "coniferSpray" | "palmFrond";
 
 export interface ProcPlantInstance {
@@ -132,6 +132,7 @@ interface Organ {
   right: THREE.Vector3;
   scale: number;
   t: number;
+  bend?: number;
 }
 
 export interface ProcPlantGraph {
@@ -438,7 +439,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       whorls: 1,
       petals: 4,
       radius: 0.28,
-      color: 0xf04b2f,
+      color: 0xff2f1f,
       centerColor: 0x282414,
     },
     lightResponse: {
@@ -1057,6 +1058,46 @@ const rotateFromAxis = (axis: THREE.Vector3, azimuth: number, elevation: number)
     .multiplyScalar(Math.cos(elevation))
     .add(lateral.multiplyScalar(Math.sin(elevation)))
     .normalize();
+};
+
+const flowerLoadBend = (
+  genome: ProcPlantGenome,
+  position: THREE.Vector3,
+  scale: number,
+  variant: number,
+) => {
+  if (!genome.flower) return 0;
+  const showyLoad = THREE.MathUtils.clamp((genome.flower.radius * scale - 0.16) / 0.22, 0, 1);
+  const stemLeverage = THREE.MathUtils.clamp(position.y / 1.25, 0, 1);
+  const slenderness =
+    genome.id === "sunflowerTower"
+      ? 0.68
+      : genome.id === "poppyFlower"
+        ? 1
+        : genome.id === "hibiscusBloom"
+          ? 0.78
+          : genome.id === "daylilyFlower"
+            ? 0.72
+            : genome.id === "tulipCup"
+              ? 0.52
+              : 0.38;
+  return THREE.MathUtils.clamp(showyLoad * stemLeverage * slenderness * (0.72 + variant * 0.56), 0, 0.72);
+};
+
+const bendFlowerFrame = (organ: Organ, bend: number) => {
+  const forward = organ.direction.clone().normalize();
+  const right = organ.right.clone().normalize();
+  if (bend <= 0.001) {
+    return { forward, right, up: new THREE.Vector3().crossVectors(right, forward).normalize() };
+  }
+  const awayFromUp = forward.clone().projectOnPlane(UP);
+  const leanAxis = awayFromUp.lengthSq() > 0.0001 ? awayFromUp.normalize() : right;
+  const droopAxis = new THREE.Vector3().crossVectors(leanAxis, UP).normalize();
+  const angle = THREE.MathUtils.degToRad(8 + bend * 38);
+  const droopedForward = forward.clone().applyAxisAngle(droopAxis, angle).normalize();
+  const droopedRight = right.clone().applyAxisAngle(droopAxis, angle).normalize();
+  const up = new THREE.Vector3().crossVectors(droopedRight, droopedForward).normalize();
+  return { forward: droopedForward, right: droopedRight, up };
 };
 
 export const buildProcPlantGraph = (
@@ -2212,14 +2253,47 @@ const flowerInstances = (
   const isPoppy = genome.id === "poppyFlower";
   const isSunflower = genome.id === "sunflowerTower";
   const isHibiscus = genome.id === "hibiscusBloom";
-  const forward = organ.direction.clone().normalize();
-  const right = organ.right.clone().normalize();
-  const up = new THREE.Vector3().crossVectors(right, forward).normalize();
   const petalColor = new THREE.Color(genome.flower.color);
   const centerColor = new THREE.Color(genome.flower.centerColor);
   const radius = genome.flower.radius * organ.scale;
   const petals = Math.max(1, genome.flower.petals);
   const out: ProcPlantInstance[] = [];
+  const bendVariant =
+    Math.sin(organ.position.x * 41.7 + organ.position.y * 23.1 + organ.position.z * 67.3 + organ.scale * 11.9) *
+      0.5 +
+    0.5;
+  const frame = bendFlowerFrame(
+    organ,
+    organ.bend ?? flowerLoadBend(genome, organ.position, organ.scale, bendVariant),
+  );
+  const { forward, right, up } = frame;
+  if (isPoppy) {
+    out.push({
+      kind: "flowerDisc",
+      matrix: instanceMatrixFromFrame(
+        organ.position.clone().add(forward.clone().multiplyScalar(radius * 0.015)),
+        right,
+        up,
+        forward.clone().negate(),
+        new THREE.Vector3(radius * 2.15, radius * 2.15, radius),
+      ),
+      color: petalColor,
+      sway: 0.62,
+    });
+    out.push({
+      kind: "flowerCenter",
+      matrix: instanceMatrixFromFrame(
+        organ.position.clone().add(forward.clone().multiplyScalar(radius * 0.06)),
+        right,
+        up,
+        forward,
+        new THREE.Vector3(radius * 0.68, radius * 0.68, radius),
+      ),
+      color: centerColor,
+      sway: 0.22,
+    });
+    return out;
+  }
   for (let w = 0; w < genome.flower.whorls; w++) {
     const whorlT = w / Math.max(1, genome.flower.whorls - 1);
     const whorlRadius = radius * (1.08 - whorlT * 0.42);
@@ -2612,6 +2686,32 @@ export const createProcPlantPetalGeometry = (): THREE.BufferGeometry => {
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
   geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+  geometry.computeBoundingSphere();
+  return geometry;
+};
+
+export const createProcPlantFlowerDiscGeometry = (): THREE.BufferGeometry => {
+  const segments = 18;
+  const positions: number[] = [0, 0, 0.035];
+  const normals: number[] = [0, 0, 1];
+  const indices: number[] = [];
+  for (let i = 0; i < segments; i++) {
+    const a = (i / segments) * Math.PI * 2;
+    const x = Math.cos(a) * 0.5;
+    const y = Math.sin(a) * 0.5;
+    const fold = Math.abs(y) * 0.22;
+    const ripple = Math.sin(a * 2 + 0.4) * 0.008;
+    positions.push(x, y, fold + ripple);
+    normals.push(0, 0, 1);
+  }
+  for (let i = 1; i <= segments; i++) {
+    const next = i === segments ? 1 : i + 1;
+    indices.push(0, i, next);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setIndex(indices);
   geometry.computeBoundingSphere();
   return geometry;
 };
