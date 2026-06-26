@@ -2918,8 +2918,8 @@ export const createProcPlantConiferSprayGeometry = (): THREE.BufferGeometry => {
   const indices: number[] = [];
   const addQuad = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3) => {
     const base = positions.length / 3;
-    const normal = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a)).normalize();
-    for (const p of [a, b, c, d]) {
+    const normal = new THREE.Vector3().subVectors(d, a).cross(new THREE.Vector3().subVectors(c, a)).normalize();
+    for (const p of [a, d, c, b]) {
       positions.push(p.x, p.y, p.z);
       normals.push(normal.x, normal.y, normal.z);
     }
@@ -2945,8 +2945,8 @@ export const createProcPlantConiferSprayGeometry = (): THREE.BufferGeometry => {
       const y = yOffset + t * length;
       const widthNow = Math.max(0.004, width * Math.sin(Math.PI * Math.min(1, t * 0.94 + 0.03)) * (1 - t * 0.56));
       const sweep = (t - 0.4) * lean;
-      const edgeSag = zOffset - t * t * droop;
-      const centerRise = zOffset + Math.sin(t * Math.PI) * ridge - t * t * droop;
+      const edgeSag = -(zOffset - t * t * droop);
+      const centerRise = -(zOffset + Math.sin(t * Math.PI) * ridge - t * t * droop);
       left.push(new THREE.Vector3(xOffset + sweep - widthNow, y, edgeSag));
       center.push(new THREE.Vector3(xOffset + sweep, y, centerRise));
       right.push(new THREE.Vector3(xOffset + sweep + widthNow, y, edgeSag));
