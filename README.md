@@ -18,11 +18,12 @@ Good starting experiments:
 - Mix `Vinca Vine` with `Meadow Flower` for viny flowering groundcover.
 - Try `Echinacea Flower`, `Hibiscus Bloom`, `Daylily Flower`, `Foxglove Spike`, `Tulip Cup`, `Poppy Flower`, `Sunflower Tower`, `Lace Umbel`, and `Iris Bulb` for different flower architectures.
 - Compare `Agave Succulent`, `Folded Palm`, and `Tropical Aroid` for rosette, canopy, and broadleaf forms.
+- Try `Blue Spruce`, `Alpine Fir`, and `Redwood Spire` for cold-biome conifer sprays, or `Oak Canopy`, `Birch Grove`, `Acacia Umbrella`, and `Mangrove Roots` for biome tree genomes.
 - Use low light or high crowding to see the growth response change plant shape.
 
 ## Features
 
-- Reusable genome model for grasses, ferns, flowers, tropical plants, reeds, bamboo, succulents, vines, conifers, palms, fan palms, groundcovers, umbels, bulbs, and shrubs.
+- Reusable genome model for grasses, ferns, flowers, tropical plants, reeds, bamboo, succulents, vines, conifers, palms, fan palms, groundcovers, umbels, bulbs, shrubs, and biome trees.
 - Golden-angle phyllotaxis for leaves, flowers, stems, and biome scatter.
 - Light-responsive growth: shade stretches stems, changes leaf scale, and suppresses branches.
 - Procedural leaf silhouettes with curl, serration, folds, and vein relief.
@@ -35,7 +36,7 @@ Good starting experiments:
 
 Current presets include:
 
-`furGrass`, `reedSedge`, `bambooClump`, `blueSpruce`, `foldedPalm`, `phiFern`, `meadowFlower`, `echinaceaFlower`, `hibiscusBloom`, `daylilyFlower`, `foxgloveSpike`, `tulipCup`, `poppyFlower`, `sunflowerTower`, `cloverGroundcover`, `laceUmbel`, `irisBulb`, `agaveSucculent`, `lotusBloom`, `vincaVine`, `roseBush`, `tropicalAroid`, `fanPalmUnderstory`, `desertRosette`, and `understoryShrub`.
+`furGrass`, `reedSedge`, `bambooClump`, `blueSpruce`, `alpineFir`, `redwoodSpire`, `foldedPalm`, `oakCanopy`, `birchGrove`, `acaciaUmbrella`, `mangroveRoots`, `phiFern`, `meadowFlower`, `echinaceaFlower`, `hibiscusBloom`, `daylilyFlower`, `foxgloveSpike`, `tulipCup`, `poppyFlower`, `sunflowerTower`, `cloverGroundcover`, `laceUmbel`, `irisBulb`, `agaveSucculent`, `lotusBloom`, `vincaVine`, `roseBush`, `tropicalAroid`, `fanPalmUnderstory`, `desertRosette`, and `understoryShrub`.
 
 ## Run Locally
 

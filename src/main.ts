@@ -445,7 +445,10 @@ const scatterBiome = (genome: ProcPlantGenome, env: ProcPlantEnvironment): THREE
   const rng = rand(state.seed ^ 0x5151);
   const buffers = { positions: [] as number[], normals: [] as number[], colors: [] as number[], indices: [] as number[] };
   const buckets = new Map<string, InstanceBucket>();
-  const plantCount = Math.round(25 + state.density * 130);
+  const plantCount =
+    genome.habit === "tree" || genome.habit === "conifer" || genome.habit === "palm"
+      ? Math.round(8 + state.density * 26)
+      : Math.round(25 + state.density * 130);
   let leaves = 0;
   let plants = 0;
   let triangles = 0;
@@ -473,9 +476,15 @@ const scatterBiome = (genome: ProcPlantGenome, env: ProcPlantEnvironment): THREE
     const scale =
       species.habit === "grass"
         ? 0.72 + rng() * 0.42
-        : species.habit === "tropical"
-          ? 0.9 + rng() * 0.5
-          : 0.8 + rng() * 0.55;
+        : species.habit === "tree"
+          ? 1.55 + rng() * 0.8
+          : species.habit === "conifer"
+            ? 1.3 + rng() * 0.62
+            : species.habit === "palm"
+              ? 1.3 + rng() * 0.62
+              : species.habit === "tropical"
+                ? 0.9 + rng() * 0.5
+                : 0.8 + rng() * 0.55;
     const matrix = new THREE.Matrix4().compose(
       new THREE.Vector3(x, 0, z),
       new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rng() * Math.PI * 2, 0)),
@@ -527,7 +536,15 @@ const buildHero = (genome: ProcPlantGenome, env: ProcPlantEnvironment) => {
   const built = buildProcPlantTemplate(genome, state.seed, env);
   const buffers = { positions: [] as number[], normals: [] as number[], colors: [] as number[], indices: [] as number[] };
   const scale =
-    genome.habit === "grass" ? 2.4 : genome.habit === "flower" ? 2.2 : genome.habit === "fern" ? 2.0 : 1.7;
+    genome.habit === "grass"
+      ? 2.4
+      : genome.habit === "flower"
+        ? 2.2
+        : genome.habit === "fern"
+          ? 2.0
+          : genome.habit === "tree" || genome.habit === "conifer" || genome.habit === "palm"
+            ? 1.35
+            : 1.7;
   const matrix = new THREE.Matrix4().compose(
     new THREE.Vector3(0, 0.02, 0),
     new THREE.Quaternion(),
