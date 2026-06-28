@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
   buildProcPlantInstancedParts,
+  buildProcPlantRuntimePackage,
   buildProcPlantTemplate,
   createProcPlantDaylilyBloomGeometry,
   createProcPlantFlowerCenterGeometry,
@@ -682,6 +683,7 @@ document.querySelector<HTMLButtonElement>("#saveLink")!.addEventListener("click"
 
 document.querySelector<HTMLButtonElement>("#exportJson")!.addEventListener("click", () => {
   const genome = selectedGenome();
+  const env = envFromState();
   const payload = {
     version: 1,
     savedAt: new Date().toISOString(),
@@ -692,6 +694,7 @@ document.querySelector<HTMLButtonElement>("#exportJson")!.addEventListener("clic
     },
     stats: { ...currentStats },
     genome,
+    runtime: buildProcPlantRuntimePackage(genome, state.seed, env),
     url: currentShareUrl(true),
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
