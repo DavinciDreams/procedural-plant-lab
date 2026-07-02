@@ -17,15 +17,21 @@ import {
   defaultPlantEnvironment,
   GOLDEN_ANGLE_RADIANS,
   hybridizePlantGenomes,
-  procPlantPresetIds,
   procPlantPresets,
   type ProcPlantInstance,
   type ProcPlantEnvironment,
   type ProcPlantGenome,
   type ProcPlantTemplate,
 } from "./procplants";
+import {
+  allProcPlantPresetIds,
+  installSavedProcPlantPresets,
+  labelForPresetId,
+  saveProcPlantPreset,
+  savedPresetLabelMap,
+} from "./saved-presets";
 
-type SpeciesId = keyof typeof procPlantPresets;
+type SpeciesId = string;
 
 interface LabState {
   primary: SpeciesId;
@@ -60,6 +66,7 @@ app.innerHTML = `
     <h1>Procplants Lab</h1>
     <p>Deterministic phi-phyllotaxis plants with light-shaped growth, procedural leaf silhouettes, fur grass, ferns, flowers, and hybrid genomes.</p>
     <a class="source-link" href="https://github.com/DavinciDreams/procedural-plant-lab" target="_blank" rel="noreferrer">GitHub</a>
+    <a class="source-link" href="/biome-mixer.html">Biome Mixer</a>
     <div class="control-grid">
       <div class="field">
         <label for="primary"><span>Primary</span></label>
@@ -100,6 +107,7 @@ app.innerHTML = `
       <div class="button-row">
         <button id="saveLink" type="button">Save Link</button>
         <button id="exportJson" type="button">Export JSON</button>
+        <button id="savePreset" type="button">Save Preset</button>
       </div>
       <output id="saveStatus" class="save-status" aria-live="polite"></output>
     </div>
@@ -187,9 +195,7 @@ let currentStats = { triangles: 0, plants: 0, leaves: 0, draws: 0 };
 let autoDemoTimer: number | null = null;
 
 const speciesLabel = (id: string) =>
-  id
-    .replace(/([A-Z])/g, " $1")
-    .replace(/^./, (c) => c.toUpperCase());
+  savedPresetLabelMap()[id] ?? labelForPresetId(id);
 
 const primarySelect = document.querySelector<HTMLSelectElement>("#primary")!;
 const secondarySelect = document.querySelector<HTMLSelectElement>("#secondary")!;
@@ -233,18 +239,29 @@ const restoreStateFromUrl = () => {
   state.density = readNumberParam(params, "d", state.density, 0.15, 1);
 };
 
+installSavedProcPlantPresets();
 restoreStateFromUrl();
 
-for (const id of procPlantPresetIds) {
+const renderPresetSelectOptions = () => {
   for (const select of [primarySelect, secondarySelect]) {
-    const option = document.createElement("option");
-    option.value = id;
-    option.textContent = speciesLabel(id);
-    select.appendChild(option);
+    select.innerHTML = "";
   }
-}
+  for (const id of allProcPlantPresetIds()) {
+    for (const select of [primarySelect, secondarySelect]) {
+      const option = document.createElement("option");
+      option.value = id;
+      option.textContent = speciesLabel(id);
+      select.appendChild(option);
+    }
+  }
+};
+
+renderPresetSelectOptions();
+if (!isSpeciesId(state.primary)) state.primary = "tropicalAroid";
+if (!isSpeciesId(state.secondary)) state.secondary = "phiFern";
 primarySelect.value = state.primary;
 secondarySelect.value = state.secondary;
+
 
 const setText = (id: string, text: string) => {
   document.querySelector<HTMLElement>(`#${id}`)!.textContent = text;
@@ -267,6 +284,20 @@ const setSaveStatus = (text: string) => {
   window.setTimeout(() => {
     if (status.textContent === text) status.textContent = "";
   }, 3200);
+};
+
+const askPresetName = (fallback: string): string | null => {
+  const name = window.prompt("Save preset as", fallback);
+  if (name === null) return null;
+  return name.trim() || null;
+};
+
+const flashButtonText = (button: HTMLButtonElement, text: string) => {
+  const original = button.textContent ?? "";
+  button.textContent = text;
+  window.setTimeout(() => {
+    if (button.textContent === text) button.textContent = original;
+  }, 1800);
 };
 
 const stateParams = (includeCamera = false) => {
@@ -631,7 +662,8 @@ document.querySelector<HTMLButtonElement>("#randomSeed")!.addEventListener("clic
 document.querySelector<HTMLButtonElement>("#regenerate")!.addEventListener("click", regenerate);
 
 const weightedRandomSpecies = (rng: () => number): SpeciesId => {
-  const id = procPlantPresetIds[Math.floor(rng() * procPlantPresetIds.length)] as SpeciesId;
+  const ids = allProcPlantPresetIds();
+  const id = ids[Math.floor(rng() * ids.length)] as SpeciesId;
   return id;
 };
 
@@ -705,6 +737,26 @@ document.querySelector<HTMLButtonElement>("#exportJson")!.addEventListener("clic
   link.click();
   URL.revokeObjectURL(link.href);
   setSaveStatus("JSON exported.");
+});
+
+document.querySelector<HTMLButtonElement>("#savePreset")!.addEventListener("click", (event) => {
+  const genome = selectedGenome();
+  const defaultLabel = state.hybrid > 0.001
+    ? `${speciesLabel(state.primary)} ${speciesLabel(state.secondary)} Mix`
+    : `${speciesLabel(state.primary)} Mutation`;
+  const label = askPresetName(defaultLabel);
+  if (!label) {
+    setSaveStatus("Preset save canceled.");
+    return;
+  }
+  const preset = saveProcPlantPreset(label, genome);
+  renderPresetSelectOptions();
+  state.primary = preset.id;
+  state.hybrid = 0;
+  syncControlsFromState();
+  regenerate();
+  setSaveStatus(`${preset.label} saved to preset lists.`);
+  flashButtonText(event.currentTarget as HTMLButtonElement, "Saved");
 });
 
 const resize = () => {
