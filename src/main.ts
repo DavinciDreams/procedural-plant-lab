@@ -8,7 +8,11 @@ import {
   createProcPlantDaylilyBloomGeometry,
   createProcPlantFlowerCenterGeometry,
   createProcPlantFlowerDiscGeometry,
+  createProcPlantFlobotCupBloomGeometry,
+  createProcPlantFlobotPetal2BloomGeometry,
+  createProcPlantFlobotPinkBloomGeometry,
   createProcPlantFoxgloveBloomGeometry,
+  createProcPlantHibiscusBloomGeometry,
   createProcPlantConiferSprayGeometry,
   createProcPlantGrassBladeGeometry,
   createProcPlantLeafGeometry,
@@ -45,6 +49,8 @@ interface LabState {
   density: number;
   foliage: number;
   leafSize: number;
+  bloomSize: number;
+  flowerDensity: number;
   clumpCount: number;
   clumpSpread: number;
   clumpLean: number;
@@ -66,6 +72,8 @@ const state: LabState = {
   // so a slider at 1 is a no-op and moving it scales foliage/leaf/clump live.
   foliage: 1,
   leafSize: 1,
+  bloomSize: 1,
+  flowerDensity: 1,
   clumpCount: 1,
   clumpSpread: 1,
   clumpLean: 1,
@@ -119,6 +127,14 @@ app.innerHTML = `
       <div class="field">
         <label for="leafSize"><span>Leaf Size</span><span id="leafSizeValue"></span></label>
         <input id="leafSize" type="range" min="0.4" max="2.5" value="1" step="0.05" />
+      </div>
+      <div class="field">
+        <label for="bloomSize"><span>Bloom Size</span><span id="bloomSizeValue"></span></label>
+        <input id="bloomSize" type="range" min="0.35" max="2.8" value="1" step="0.05" />
+      </div>
+      <div class="field">
+        <label for="flowerDensity"><span>Flower Density</span><span id="flowerDensityValue"></span></label>
+        <input id="flowerDensity" type="range" min="0" max="2.5" value="1" step="0.05" />
       </div>
       <div class="field">
         <label for="clumpCount"><span>Clump Count</span><span id="clumpCountValue"></span></label>
@@ -251,6 +267,8 @@ const rangeInputs = {
   density: document.querySelector<HTMLInputElement>("#density")!,
   foliage: document.querySelector<HTMLInputElement>("#foliage")!,
   leafSize: document.querySelector<HTMLInputElement>("#leafSize")!,
+  bloomSize: document.querySelector<HTMLInputElement>("#bloomSize")!,
+  flowerDensity: document.querySelector<HTMLInputElement>("#flowerDensity")!,
   clumpCount: document.querySelector<HTMLInputElement>("#clumpCount")!,
   clumpSpread: document.querySelector<HTMLInputElement>("#clumpSpread")!,
   clumpLean: document.querySelector<HTMLInputElement>("#clumpLean")!,
@@ -265,6 +283,8 @@ const rangeLabels = {
   density: "densityValue",
   foliage: "foliageValue",
   leafSize: "leafSizeValue",
+  bloomSize: "bloomSizeValue",
+  flowerDensity: "flowerDensityValue",
   clumpCount: "clumpCountValue",
   clumpSpread: "clumpSpreadValue",
   clumpLean: "clumpLeanValue",
@@ -297,6 +317,8 @@ const restoreStateFromUrl = () => {
   state.density = readNumberParam(params, "d", state.density, 0.15, 1);
   state.foliage = readNumberParam(params, "f", state.foliage, 0, 2.5);
   state.leafSize = readNumberParam(params, "ls", state.leafSize, 0.4, 2.5);
+  state.bloomSize = readNumberParam(params, "bs", state.bloomSize, 0.35, 2.8);
+  state.flowerDensity = readNumberParam(params, "fd", state.flowerDensity, 0, 2.5);
   state.clumpCount = readNumberParam(params, "cc", state.clumpCount, 0, 3);
   state.clumpSpread = readNumberParam(params, "cs", state.clumpSpread, 0.3, 3);
   state.clumpLean = readNumberParam(params, "cl", state.clumpLean, 0, 2.5);
@@ -378,6 +400,8 @@ const stateParams = (includeCamera = false) => {
   params.set("d", state.density.toFixed(2));
   params.set("f", state.foliage.toFixed(2));
   params.set("ls", state.leafSize.toFixed(2));
+  params.set("bs", state.bloomSize.toFixed(2));
+  params.set("fd", state.flowerDensity.toFixed(2));
   params.set("cc", state.clumpCount.toFixed(2));
   params.set("cs", state.clumpSpread.toFixed(2));
   params.set("cl", state.clumpLean.toFixed(2));
@@ -418,6 +442,8 @@ const envFromState = (): ProcPlantEnvironment => ({
 const overridesActive = () =>
   Math.abs(state.foliage - 1) > 0.001 ||
   Math.abs(state.leafSize - 1) > 0.001 ||
+  Math.abs(state.bloomSize - 1) > 0.001 ||
+  Math.abs(state.flowerDensity - 1) > 0.001 ||
   Math.abs(state.clumpCount - 1) > 0.001 ||
   Math.abs(state.clumpSpread - 1) > 0.001 ||
   Math.abs(state.clumpLean - 1) > 0.001 ||
@@ -429,6 +455,7 @@ const applyOverrides = (genome: ProcPlantGenome): ProcPlantGenome => {
   const next: ProcPlantGenome = {
     ...genome,
     leaf: { ...genome.leaf, length: { ...genome.leaf.length } },
+    flower: genome.flower ? { ...genome.flower } : undefined,
     internode: { ...genome.internode },
     branchAngle: { ...genome.branchAngle },
     lightResponse: { ...genome.lightResponse },
@@ -449,6 +476,13 @@ const applyOverrides = (genome: ProcPlantGenome): ProcPlantGenome => {
       ...genome.foliage,
       mass: genome.foliage.mass * state.foliage,
       size: (genome.foliage.size ?? (genome.habit === "conifer" ? 0.34 : 0.56)) * state.leafSize,
+    };
+  }
+
+  if (genome.flower && Math.abs(state.bloomSize - 1) > 0.001) {
+    next.flower = {
+      ...genome.flower,
+      radius: clamped(genome.flower.radius * state.bloomSize, 0.03, 2.2),
     };
   }
 
@@ -500,9 +534,10 @@ const applyOverrides = (genome: ProcPlantGenome): ProcPlantGenome => {
     Math.abs(state.clumpCount - 1) > 0.001 ||
     Math.abs(state.clumpSpread - 1) > 0.001 ||
     Math.abs(state.clumpLean - 1) > 0.001 ||
+    Math.abs(state.flowerDensity - 1) > 0.001 ||
     Math.abs(state.habitSpread - 1) > 0.001
   )) {
-    const baseClump = genome.clump ?? { count: 1, radius: 0.28, jitter: 0.5, scaleVar: 0.28, lean: 0.35 };
+    const baseClump = genome.clump ?? { count: 1, radius: 0.28, jitter: 0.5, scaleVar: 0.28, lean: 0.35, flowerDensity: 0.45 };
     const count = Math.max(1, Math.round(baseClump.count * state.clumpCount));
     if (count > 1) {
       next.clump = {
@@ -510,6 +545,7 @@ const applyOverrides = (genome: ProcPlantGenome): ProcPlantGenome => {
         count,
         radius: baseClump.radius * state.clumpSpread * (0.8 + state.habitSpread * 0.2),
         lean: (baseClump.lean ?? 0.18) * state.clumpLean * (2 - state.habitUpright * 0.35),
+        flowerDensity: clamped((baseClump.flowerDensity ?? 0.45) * state.flowerDensity, 0, 1.5),
       };
     } else {
       next.clump = undefined;
@@ -630,6 +666,10 @@ const geometryForBucket = (bucket: InstanceBucket): THREE.BufferGeometry => {
   if (bucket.kind === "petal") return createProcPlantPetalGeometry();
   if (bucket.kind === "flowerDisc") return createProcPlantFlowerDiscGeometry();
   if (bucket.kind === "daylilyBloom") return createProcPlantDaylilyBloomGeometry();
+  if (bucket.kind === "hibiscusBloom") return createProcPlantHibiscusBloomGeometry();
+  if (bucket.kind === "flobotCupBloom") return createProcPlantFlobotCupBloomGeometry();
+  if (bucket.kind === "flobotPetal2Bloom") return createProcPlantFlobotPetal2BloomGeometry();
+  if (bucket.kind === "flobotPinkBloom") return createProcPlantFlobotPinkBloomGeometry();
   if (bucket.kind === "foxgloveBloom") return createProcPlantFoxgloveBloomGeometry();
   return createProcPlantFlowerCenterGeometry();
 };
@@ -820,7 +860,14 @@ const scatterBiome = (genome: ProcPlantGenome, env: ProcPlantEnvironment): THREE
     const geometry = geometryForBucket(bucket);
     const mesh = new THREE.InstancedMesh(geometry, organMaterial, bucket.instances.length);
     mesh.castShadow = true;
-    mesh.receiveShadow = bucket.kind !== "flowerDisc" && bucket.kind !== "daylilyBloom" && bucket.kind !== "foxgloveBloom";
+    mesh.receiveShadow =
+      bucket.kind !== "flowerDisc" &&
+      bucket.kind !== "daylilyBloom" &&
+      bucket.kind !== "hibiscusBloom" &&
+      bucket.kind !== "flobotCupBloom" &&
+      bucket.kind !== "flobotPetal2Bloom" &&
+      bucket.kind !== "flobotPinkBloom" &&
+      bucket.kind !== "foxgloveBloom";
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     for (let i = 0; i < bucket.instances.length; i++) {
       mesh.setMatrixAt(i, bucket.instances[i].matrix);

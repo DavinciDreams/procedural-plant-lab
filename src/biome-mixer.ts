@@ -1855,6 +1855,33 @@ const renderEntryEditor = () => {
             </label>
           </div>
         </details>
+        ${previewGenome!.flower ? `
+        <details open>
+          <summary>Flowers</summary>
+          <div class="inline">
+            <label>
+              Bloom size
+              <input id="plant-bloom-size" type="range" min="0.04" max="1.2" value="${previewGenome!.flower.radius}" step="0.01" />
+              <output>${previewGenome!.flower.radius.toFixed(2)}</output>
+            </label>
+            <label>
+              Flower density
+              <input id="clump-flower-density" type="range" min="0" max="1.5" value="${clump?.flowerDensity ?? 0.45}" step="0.01" />
+              <output>${(clump?.flowerDensity ?? 0.45).toFixed(2)}</output>
+            </label>
+          </div>
+          <div class="inline">
+            <label>
+              Petal color
+              <input id="plant-flower-color" type="color" value="${toHexColor(previewGenome!.flower.color, 0xff7d68)}" />
+            </label>
+            <label>
+              Center color
+              <input id="plant-center-color" type="color" value="${toHexColor(previewGenome!.flower.centerColor, 0xffd35c)}" />
+            </label>
+          </div>
+        </details>
+        ` : ""}
         <details open>
           <summary>Clumps</summary>
           <div class="inline">
@@ -1994,7 +2021,7 @@ const renderEntryEditor = () => {
   });
   if (groundPlant) {
     const ensureClump = (genome: ProcPlantGenome) => {
-      genome.clump = genome.clump ?? { count: 1, radius: 0.28, jitter: 0.5, scaleVar: 0.28, lean: 0.35 };
+      genome.clump = genome.clump ?? { count: 1, radius: 0.28, jitter: 0.5, scaleVar: 0.28, lean: 0.35, flowerDensity: 0.45 };
       return genome.clump;
     };
     bindGenomeNumber("#plant-branch-angle", (v) => v.toFixed(2), (genome, value) => { genome.branchAngle.mean = value; });
@@ -2005,11 +2032,25 @@ const renderEntryEditor = () => {
       genome.internode.tip = Math.max(0.01, value * ratio);
     });
     bindGenomeNumber("#plant-branch-spread", (v) => v.toFixed(2), (genome, value) => { genome.branchAngle.spread = value; });
+    bindGenomeNumber("#plant-bloom-size", (v) => v.toFixed(2), (genome, value) => {
+      if (genome.flower) genome.flower.radius = value;
+    });
+    bindGenomeNumber("#clump-flower-density", (v) => v.toFixed(2), (genome, value) => { ensureClump(genome).flowerDensity = value; });
     bindGenomeNumber("#clump-count", (v) => String(Math.round(v)), (genome, value) => { ensureClump(genome).count = Math.round(value); });
     bindGenomeNumber("#clump-radius", (v) => v.toFixed(2), (genome, value) => { ensureClump(genome).radius = value; });
     bindGenomeNumber("#clump-jitter", (v) => v.toFixed(2), (genome, value) => { ensureClump(genome).jitter = value; });
     bindGenomeNumber("#clump-lean", (v) => v.toFixed(2), (genome, value) => { ensureClump(genome).lean = value; });
     bindGenomeNumber("#clump-scale-var", (v) => v.toFixed(2), (genome, value) => { ensureClump(genome).scaleVar = value; });
+    entryEditor.querySelector<HTMLInputElement>("#plant-flower-color")?.addEventListener("input", (event) => {
+      updateGenome((genome) => {
+        if (genome.flower) genome.flower.color = fromHexColor((event.currentTarget as HTMLInputElement).value, genome.flower.color);
+      }, { renderList: true });
+    });
+    entryEditor.querySelector<HTMLInputElement>("#plant-center-color")?.addEventListener("input", (event) => {
+      updateGenome((genome) => {
+        if (genome.flower) genome.flower.centerColor = fromHexColor((event.currentTarget as HTMLInputElement).value, genome.flower.centerColor);
+      });
+    });
   }
   if (isEzTreeEntry && entry.ezTree) {
     entryEditor.querySelector<HTMLSelectElement>("#ez-entry-preset")?.addEventListener("change", (event) => {

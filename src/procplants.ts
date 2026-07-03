@@ -73,6 +73,7 @@ export interface ProcPlantGenome {
     radius: number;
     color: number;
     centerColor: number;
+    mesh?: ProcPlantFlowerMeshKind;
   };
   grass?: {
     blades: number;
@@ -109,6 +110,8 @@ export interface ProcPlantGenome {
     scaleVar?: number;
     /** Outward lean of peripheral shoots in radians (arching mound look). */
     lean?: number;
+    /** Flowering scapes per leaf crown [0..1.5], used by ground flowers such as daylily. */
+    flowerDensity?: number;
   };
   treeRealism?: {
     crownSpread: number;
@@ -164,6 +167,8 @@ export interface ProcPlantGenome {
     phototropism: number;
   };
 }
+
+export type ProcPlantFlowerMeshKind = "flobot-daylily" | "flobot-cup" | "flobot-petal-2" | "flobot-pink-flower";
 
 export interface ProcPlantEnvironment {
   light: number;
@@ -276,6 +281,10 @@ export type ProcPlantInstanceKind =
   | "petal"
   | "flowerDisc"
   | "daylilyBloom"
+  | "hibiscusBloom"
+  | "flobotCupBloom"
+  | "flobotPetal2Bloom"
+  | "flobotPinkBloom"
   | "foxgloveBloom"
   | "flowerCenter";
 export type ProcPlantFoliageClusterKind = "coniferSpray" | "palmFrond";
@@ -498,6 +507,114 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       phototropism: 0.18,
     },
   },
+  flobotCupFlower: {
+    id: "flobotCupFlower",
+    habit: "flower",
+    nodeCount: 8,
+    internode: { base: 0.11, tip: 0.075, curve: 0.98 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0.04, tip: 0.015, curve: 1.35 },
+    branchAngle: { mean: 0.34, spread: 0.14, depthDecay: 0.7 },
+    apicalDominance: 0.82,
+    leaf: {
+      shape: "spatulate",
+      length: { base: 0.36, tip: 0.18, curve: 1.12 },
+      widthRatio: 0.38,
+      density: { base: 0.9, tip: 0.32, curve: 1.65 },
+      curl: 0.1,
+      serration: 0.04,
+      venation: 0.48,
+      colorA: 0x2f6432,
+      colorB: 0x82b85a,
+    },
+    flower: {
+      whorls: 1,
+      petals: 1,
+      radius: 0.32,
+      color: 0xff7d68,
+      centerColor: 0xffd35c,
+      mesh: "flobot-cup",
+    },
+    clump: { count: 4, radius: 0.24, jitter: 0.55, scaleVar: 0.22, lean: 0.24 },
+    lightResponse: {
+      shadeAvoidance: 0.55,
+      leafBoostInShade: 0.22,
+      branchSuppressionInShade: 0.28,
+      phototropism: 0.18,
+    },
+  },
+  flobotPetal2Flower: {
+    id: "flobotPetal2Flower",
+    habit: "flower",
+    nodeCount: 9,
+    internode: { base: 0.12, tip: 0.08, curve: 0.96 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0.05, tip: 0.02, curve: 1.4 },
+    branchAngle: { mean: 0.38, spread: 0.16, depthDecay: 0.7 },
+    apicalDominance: 0.82,
+    leaf: {
+      shape: "ovate",
+      length: { base: 0.4, tip: 0.2, curve: 1.08 },
+      widthRatio: 0.46,
+      density: { base: 0.84, tip: 0.36, curve: 1.45 },
+      curl: 0.12,
+      serration: 0.06,
+      venation: 0.6,
+      colorA: 0x2b5c33,
+      colorB: 0x83b45e,
+    },
+    flower: {
+      whorls: 1,
+      petals: 5,
+      radius: 0.33,
+      color: 0xff6aa8,
+      centerColor: 0xffcf5f,
+      mesh: "flobot-petal-2",
+    },
+    clump: { count: 4, radius: 0.28, jitter: 0.5, scaleVar: 0.22, lean: 0.26 },
+    lightResponse: {
+      shadeAvoidance: 0.58,
+      leafBoostInShade: 0.2,
+      branchSuppressionInShade: 0.3,
+      phototropism: 0.18,
+    },
+  },
+  flobotPinkFlower: {
+    id: "flobotPinkFlower",
+    habit: "flower",
+    nodeCount: 8,
+    internode: { base: 0.1, tip: 0.07, curve: 1 },
+    phyllotaxisAngle: GOLDEN_ANGLE,
+    branchChance: { base: 0.035, tip: 0.012, curve: 1.35 },
+    branchAngle: { mean: 0.34, spread: 0.14, depthDecay: 0.7 },
+    apicalDominance: 0.84,
+    leaf: {
+      shape: "round",
+      length: { base: 0.32, tip: 0.17, curve: 1.1 },
+      widthRatio: 0.55,
+      density: { base: 0.86, tip: 0.34, curve: 1.5 },
+      curl: 0.08,
+      serration: 0.02,
+      venation: 0.42,
+      colorA: 0x306332,
+      colorB: 0x8fc45f,
+    },
+    flower: {
+      whorls: 1,
+      petals: 5,
+      radius: 0.3,
+      color: 0xff8bc6,
+      centerColor: 0xffd94f,
+      mesh: "flobot-pink-flower",
+    },
+    clump: { count: 5, radius: 0.3, jitter: 0.58, scaleVar: 0.25, lean: 0.22 },
+    lightResponse: {
+      shadeAvoidance: 0.55,
+      leafBoostInShade: 0.2,
+      branchSuppressionInShade: 0.28,
+      phototropism: 0.16,
+    },
+  },
   daylilyFlower: {
     id: "daylilyFlower",
     habit: "flower",
@@ -524,8 +641,9 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       radius: 0.27,
       color: 0xff8f2f,
       centerColor: 0xffd158,
+      mesh: "flobot-daylily",
     },
-    clump: { count: 7, radius: 0.32, jitter: 0.5, scaleVar: 0.28, lean: 0.42 },
+    clump: { count: 10, radius: 0.42, jitter: 0.62, scaleVar: 0.24, lean: 0.46, flowerDensity: 0.32 },
     lightResponse: {
       shadeAvoidance: 0.58,
       leafBoostInShade: 0.12,
@@ -2741,6 +2859,20 @@ const addStemSegment = (
   }
 };
 
+function geometryForFlobotFlowerMesh(mesh: ProcPlantFlowerMeshKind): THREE.BufferGeometry {
+  if (mesh === "flobot-daylily") return createProcPlantDaylilyBloomGeometry();
+  if (mesh === "flobot-cup") return createProcPlantFlobotCupBloomGeometry();
+  if (mesh === "flobot-petal-2") return createProcPlantFlobotPetal2BloomGeometry();
+  return createProcPlantFlobotPinkBloomGeometry();
+}
+
+const instanceKindForFlobotFlowerMesh = (mesh: ProcPlantFlowerMeshKind): ProcPlantInstanceKind => {
+  if (mesh === "flobot-daylily") return "daylilyBloom";
+  if (mesh === "flobot-cup") return "flobotCupBloom";
+  if (mesh === "flobot-petal-2") return "flobotPetal2Bloom";
+  return "flobotPinkBloom";
+};
+
 const addFlower = (builder: TemplateBuilder, genome: ProcPlantGenome, organ: Organ) => {
   if (!genome.flower) return;
   const isEchinacea = genome.id === "echinaceaFlower";
@@ -2756,6 +2888,37 @@ const addFlower = (builder: TemplateBuilder, genome: ProcPlantGenome, organ: Org
     organ.bend ?? flowerLoadBend(genome, organ.position, organ.scale, bendVariant),
   );
   const { forward, right, up } = frame;
+  const flobotBloomGeometry = genome.flower.mesh ? geometryForFlobotFlowerMesh(genome.flower.mesh) : null;
+  if (flobotBloomGeometry) {
+    const bloomForward =
+      genome.flower.mesh === "flobot-daylily" || (genome.flower.mesh === undefined && genome.id === "hibiscusBloom")
+        ? forward.clone().negate()
+        : forward;
+    addTransformedGeometry(
+      builder,
+      flobotBloomGeometry,
+      instanceMatrixFromFrame(
+        organ.position.clone().add(forward.clone().multiplyScalar(radius * 0.04)),
+        right,
+        up,
+        bloomForward,
+        new THREE.Vector3(radius * 2.25, radius * 2.25, radius * 2.25),
+      ),
+      petalColor,
+      0.62,
+    );
+    flobotBloomGeometry.dispose();
+    const c = organ.position.clone().add(forward.clone().multiplyScalar(-radius * 0.08));
+    builder.addTriangle(
+      c.clone().add(right.clone().multiplyScalar(-radius * 0.1)),
+      c.clone().add(right.clone().multiplyScalar(radius * 0.1)),
+      c.clone().add(up.clone().multiplyScalar(radius * 0.13)),
+      centerColor,
+      false,
+      0.22,
+    );
+    return;
+  }
   if (genome.id === "daylilyFlower") {
     const bloomForward = forward.clone().negate();
     const toWorld = (x: number, y: number, z: number) =>
@@ -2791,6 +2954,33 @@ const addFlower = (builder: TemplateBuilder, genome: ProcPlantGenome, organ: Org
       centerColor,
       false,
       0.2,
+    );
+    return;
+  }
+  if (genome.id === "hibiscusBloom") {
+    const bloomGeometry = createProcPlantHibiscusBloomGeometry();
+    addTransformedGeometry(
+      builder,
+      bloomGeometry,
+      instanceMatrixFromFrame(
+        organ.position.clone().add(forward.clone().multiplyScalar(radius * 0.04)),
+        right,
+        up,
+        forward.clone().negate(),
+        new THREE.Vector3(radius * 2.25, radius * 2.25, radius * 2.25),
+      ),
+      petalColor,
+      0.66,
+    );
+    bloomGeometry.dispose();
+    const c = organ.position.clone().add(forward.clone().multiplyScalar(radius * 0.08));
+    builder.addTriangle(
+      c.clone().add(right.clone().multiplyScalar(-radius * 0.11)),
+      c.clone().add(right.clone().multiplyScalar(radius * 0.11)),
+      c.clone().add(up.clone().multiplyScalar(radius * 0.14)),
+      centerColor,
+      false,
+      0.22,
     );
     return;
   }
@@ -3005,6 +3195,37 @@ const flowerInstances = (
     organ.bend ?? flowerLoadBend(genome, organ.position, organ.scale, bendVariant),
   );
   const { forward, right, up } = frame;
+  if (genome.flower.mesh) {
+    const bloomForward =
+      genome.flower.mesh === "flobot-daylily" || (genome.flower.mesh === undefined && genome.id === "hibiscusBloom")
+        ? forward.clone().negate()
+        : forward;
+    out.push({
+      kind: instanceKindForFlobotFlowerMesh(genome.flower.mesh),
+      matrix: instanceMatrixFromFrame(
+        organ.position.clone().add(forward.clone().multiplyScalar(radius * 0.04)),
+        right,
+        up,
+        bloomForward,
+        new THREE.Vector3(radius * 2.25, radius * 2.25, radius * 2.25),
+      ),
+      color: petalColor,
+      sway: 0.62,
+    });
+    out.push({
+      kind: "flowerCenter",
+      matrix: instanceMatrixFromFrame(
+        organ.position.clone().add(forward.clone().multiplyScalar(radius * 0.08)),
+        right,
+        up,
+        forward.clone().negate(),
+        new THREE.Vector3(radius * 0.38, radius * 0.38, radius),
+      ),
+      color: centerColor,
+      sway: 0.22,
+    });
+    return out;
+  }
   if (isDaylily) {
     out.push({
       kind: "daylilyBloom",
@@ -3080,6 +3301,33 @@ const flowerInstances = (
         up,
         forward,
         new THREE.Vector3(radius * 0.86, radius * 0.86, radius),
+      ),
+      color: centerColor,
+      sway: 0.22,
+    });
+    return out;
+  }
+  if (isHibiscus) {
+    out.push({
+      kind: "hibiscusBloom",
+      matrix: instanceMatrixFromFrame(
+        organ.position.clone().add(forward.clone().multiplyScalar(radius * 0.04)),
+        right,
+        up,
+        forward.clone().negate(),
+        new THREE.Vector3(radius * 2.25, radius * 2.25, radius * 2.25),
+      ),
+      color: petalColor,
+      sway: 0.66,
+    });
+    out.push({
+      kind: "flowerCenter",
+      matrix: instanceMatrixFromFrame(
+        organ.position.clone().add(forward.clone().multiplyScalar(-radius * 0.08)),
+        right,
+        up,
+        forward.clone().negate(),
+        new THREE.Vector3(radius * 0.42, radius * 0.42, radius),
       ),
       color: centerColor,
       sway: 0.22,
@@ -3186,6 +3434,7 @@ export const buildProcPlantInstancedParts = (
   }
   const clump = genome.clump;
   if (clump && clump.count > 1) {
+    if (genome.id === "daylilyFlower") return buildDaylilyClumpParts(genome, seed, env, clump);
     return buildProcPlantClumpParts(genome, seed, env, clump);
   }
   return buildProcPlantSingleShootParts(genome, seed, env);
@@ -3237,6 +3486,118 @@ const buildProcPlantSingleShootParts = (
       stems: graph.segments.length,
       leaves: leafCount,
       flowers: flowerCount,
+      stemTriangles: stems.idx.length / 3,
+      instances: instances.length,
+      triangles: stems.idx.length / 3 + instances.length,
+    },
+  };
+};
+
+const buildDaylilyClumpParts = (
+  genome: ProcPlantGenome,
+  seed: number,
+  env: ProcPlantEnvironment,
+  clump: NonNullable<ProcPlantGenome["clump"]>,
+): ProcPlantInstancedParts => {
+  const crownCount = Math.max(1, Math.min(36, Math.round(clump.count)));
+  const radius = Math.max(0.02, clump.radius);
+  const jitter = THREE.MathUtils.clamp(clump.jitter ?? 0.55, 0, 1);
+  const scaleVar = THREE.MathUtils.clamp(clump.scaleVar ?? 0.24, 0, 1);
+  const lean = THREE.MathUtils.clamp(clump.lean ?? 0.42, 0, 1.4);
+  const flowerDensity = THREE.MathUtils.clamp(clump.flowerDensity ?? 0.32, 0, 1.5);
+  const rng = rngFromSeed((seed ^ 0x9e3779b9) >>> 0);
+  const shade = 1 - THREE.MathUtils.clamp(env.light, 0, 1);
+  const instances: ProcPlantInstance[] = [];
+  const stemBuilder = new TemplateBuilder();
+  const stemColor = new THREE.Color(0x6d5135);
+
+  const crownPositions: THREE.Vector3[] = [];
+  for (let c = 0; c < crownCount; c++) {
+    const ringT = crownCount > 1 ? c / (crownCount - 1) : 0;
+    const angle = c * GOLDEN_ANGLE + (rng() - 0.5) * jitter * 1.2;
+    const spread = c === 0 ? 0 : radius * (0.25 + Math.sqrt(ringT) * 0.75) * (1 + (rng() - 0.5) * jitter * 0.45);
+    const crown = new THREE.Vector3(Math.cos(angle) * spread, 0, Math.sin(angle) * spread);
+    crownPositions.push(crown);
+    const crownScale = 1 + (rng() - 0.5) * scaleVar;
+    const leafCount = Math.max(8, Math.round(10 + env.moisture * 4 + rng() * 4));
+    for (let i = 0; i < leafCount; i++) {
+      const t = i / Math.max(1, leafCount - 1);
+      const yaw = i * genome.phyllotaxisAngle + angle * 0.37 + (rng() - 0.5) * 0.35;
+      const radial = new THREE.Vector3(Math.cos(yaw), 0, Math.sin(yaw));
+      const outward = crown.lengthSq() > 0.0001 ? crown.clone().normalize() : radial;
+      const dir = UP.clone()
+        .add(radial.clone().multiplyScalar(0.34 + rng() * 0.24))
+        .add(outward.multiplyScalar(lean * (0.22 + ringT * 0.32)))
+        .normalize();
+      const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw)).normalize();
+      const organ: Organ = {
+        kind: "grassBlade",
+        position: crown.clone().add(radial.clone().multiplyScalar((rng() - 0.5) * 0.05)),
+        direction: dir,
+        right,
+        scale:
+          curve(genome.leaf.length, t) *
+          crownScale *
+          (1 + shade * genome.lightResponse.leafBoostInShade * 0.28) *
+          (0.76 + rng() * 0.24),
+        t,
+      };
+      instances.push(grassBladeInstance(genome, organ));
+    }
+  }
+
+  const scapeCount = Math.max(1, Math.min(18, Math.round(crownCount * flowerDensity)));
+  for (let s = 0; s < scapeCount; s++) {
+    const crown = crownPositions[Math.floor(rng() * crownPositions.length)]?.clone() ?? new THREE.Vector3();
+    const heightScale = 0.78 + rng() * 0.38;
+    const bend = new THREE.Vector3((rng() - 0.5) * 0.08, 0, (rng() - 0.5) * 0.08);
+    const nodes = Math.max(4, Math.round(genome.nodeCount * (0.72 + rng() * 0.22)));
+    let previous: StemNode = {
+      position: crown.clone(),
+      direction: UP.clone(),
+      radius: 0.018 * heightScale,
+      depth: 0,
+      t: 0,
+      index: 0,
+    };
+    for (let i = 1; i <= nodes; i++) {
+      const t = i / nodes;
+      const direction = UP.clone()
+        .add(bend.clone().multiplyScalar(t))
+        .add(new THREE.Vector3((rng() - 0.5) * 0.02, 0, (rng() - 0.5) * 0.02))
+        .normalize();
+      const node: StemNode = {
+        position: previous.position.clone().add(direction.clone().multiplyScalar(curve(genome.internode, t) * heightScale)),
+        direction,
+        radius: previous.radius * THREE.MathUtils.lerp(0.92, 0.72, t),
+        depth: 0,
+        t,
+        index: i,
+      };
+      addStemSegment(stemBuilder, previous, node, stemColor);
+      previous = node;
+    }
+    const basis = tangentBasis(previous.direction);
+    const flowerOrgan: Organ = {
+      kind: "flower",
+      position: previous.position.clone().add(previous.direction.clone().multiplyScalar(0.04)),
+      direction: previous.direction.clone(),
+      right: basis.right,
+      scale: 0.86 + rng() * 0.26,
+      t: 1,
+    };
+    instances.push(...flowerInstances(genome, flowerOrgan));
+  }
+
+  const stems = stemBuilder.build();
+  return {
+    stems,
+    instances,
+    graph: { stems: [], segments: [], organs: [] },
+    stats: {
+      stems: scapeCount * Math.max(1, genome.nodeCount - 1),
+      leaves: instances.filter((inst) => inst.kind === "grassBlade").length,
+      flowers: scapeCount,
       stemTriangles: stems.idx.length / 3,
       instances: instances.length,
       triangles: stems.idx.length / 3 + instances.length,
@@ -4404,24 +4765,73 @@ export const createProcPlantFlowerDiscGeometry = (): THREE.BufferGeometry => {
 };
 
 export const createProcPlantDaylilyBloomGeometry = (): THREE.BufferGeometry => {
+  const petalPositions = [
+    [-0.05571, 0.19624, 0.06851],
+    [0.09955, 0.24579, 0.11406],
+    [0.0491, 0.19692, 0.08176],
+    [0.04399, 0.04169, -0.04736],
+    [-0.03204, 0.25022, -0.1223],
+    [0.07267, 0.04101, -0.0065],
+    [0.12147, 0.20031, -0.00863],
+    [0.1857, 0.24988, 0.00733],
+    [-0.03243, 0.2001, -0.07229],
+    [0.0297, 0.03939, 0.05386],
+    [-0.08814, 0.19748, 0.01044],
+    [-0.04162, 0.0389, 0.04471],
+    [-0.10529, 0.24409, 0.09995],
+    [-0.06554, 0.03953, 0.00571],
+    [0.08084, 0.20144, -0.0692],
+    [-0.02883, 0.04116, -0.05018],
+    [0, 0, 0],
+    [-0.12526, 0.24646, -0.00392],
+    [-0.06692, 0.24911, -0.09233],
+    [0.17775, 0.25075, -0.02858],
+    [0.04945, 0.24491, 0.12216],
+    [-0.06327, 0.24415, 0.10804],
+    [0.10381, 0.25206, -0.11907],
+    [-0.14339, 0.24557, 0.03145],
+    [0.13327, 0.25186, -0.09332],
+  ] as const;
+  const petalIndices = [
+    3, 16, 15, 11, 9, 2, 11, 2, 0, 5, 3, 14, 5, 14, 6, 0, 2, 20, 0, 20, 21,
+    13, 11, 0, 13, 0, 10, 5, 9, 16, 13, 15, 16, 15, 13, 10, 15, 10, 8, 9, 5,
+    6, 9, 6, 2, 14, 8, 4, 14, 4, 22, 3, 5, 16, 9, 11, 16, 2, 6, 7, 2, 7, 1,
+    10, 0, 12, 10, 12, 23, 3, 15, 8, 3, 8, 14, 11, 13, 16, 6, 14, 24, 6, 24,
+    19, 8, 10, 17, 8, 17, 18,
+  ] as const;
   const positions: number[] = [];
   const indices: number[] = [];
 
-  positions.push(0, -0.42, 0.32, -0.24, 0.1, 0.02, 0.24, 0.1, 0.02);
-  indices.push(0, 2, 1);
+  const lengthScale = 0.54 / 0.25206;
+  const xCenter = 0.02115;
+  const petalCount = 6;
+  for (let petal = 0; petal < petalCount; petal++) {
+    const start = positions.length / 3;
+    const angle = petal * (Math.PI * 2 / petalCount) + Math.PI / 2;
+    const forwardX = Math.cos(angle);
+    const forwardY = Math.sin(angle);
+    const rightX = -forwardY;
+    const rightY = forwardX;
+    const outer = petal % 2 === 0;
+    const widthScale = lengthScale * (outer ? 0.92 : 0.7);
+    const depthScale = lengthScale * (outer ? 0.72 : 0.54);
+    const reachScale = lengthScale * (outer ? 1 : 0.84);
+    const basePull = outer ? 0.035 : 0.012;
+    const whorlLift = outer ? -0.018 : 0.022;
 
-  const centerIndex = positions.length / 3;
-  positions.push(0, 0, -0.055);
-  for (let i = 0; i < 12; i++) {
-    const a = i * (Math.PI / 6) + Math.PI / 2;
-    const isTip = i % 2 === 0;
-    const radius = isTip ? 0.54 : 0.2;
-    const fold = Math.sin(a * 3) * 0.025 + (isTip ? 0.015 : 0);
-    positions.push(Math.cos(a) * radius, Math.sin(a) * radius, -0.055 - fold);
-  }
-  for (let i = 0; i < 12; i++) {
-    const next = i === 11 ? 1 : i + 2;
-    indices.push(centerIndex, centerIndex + i + 1, centerIndex + next);
+    for (const [x, y, z] of petalPositions) {
+      const localX = (x - xCenter) * widthScale;
+      const localY = y * reachScale - basePull;
+      const localZ = z * depthScale + whorlLift;
+      positions.push(
+        rightX * localX + forwardX * localY,
+        rightY * localX + forwardY * localY,
+        localZ,
+      );
+    }
+    for (let i = 0; i < petalIndices.length; i += 3) {
+      indices.push(start + petalIndices[i], start + petalIndices[i + 1], start + petalIndices[i + 2]);
+    }
   }
 
   const geometry = new THREE.BufferGeometry();
@@ -4431,6 +4841,151 @@ export const createProcPlantDaylilyBloomGeometry = (): THREE.BufferGeometry => {
   geometry.computeBoundingSphere();
   return geometry;
 };
+
+export const createProcPlantHibiscusBloomGeometry = (): THREE.BufferGeometry => {
+  const sourcePositions = [
+    [-0.08791, 0.1633, 0.3243],
+    [-0.31499, 0.1718, 0.15172],
+    [-0.16167, 0.16933, 0.19214],
+    [0.29381, 0.16596, 0.21903],
+    [0.03464, 0.16234, 0.33292],
+    [0.12151, 0.16691, 0.21649],
+    [0.30449, 0.1724, 0.06775],
+    [0.24145, 0.186, -0.24232],
+    [0.22823, 0.17713, -0.03397],
+    [0.11299, 0.18701, -0.25135],
+    [-0.05936, 0.18837, -0.26346],
+    [0.02074, 0.1855, -0.2057],
+    [-0.3032, 0.17891, -0.01535],
+    [-0.20151, 0.18949, -0.27345],
+    [-0.21636, 0.18234, -0.10524],
+    [0, 0, 0],
+  ] as const;
+  const sourceIndices = [
+    12, 1, 15, 7, 9, 15, 1, 2, 15, 9, 11, 15, 2, 0, 15, 11, 10, 15, 3, 6, 15,
+    10, 13, 15, 4, 5, 15, 13, 14, 15, 5, 3, 15, 14, 12, 15, 6, 8, 15, 0, 4, 15,
+    8, 7, 15,
+  ] as const;
+  const positions: number[] = [];
+
+  for (const [x, y, z] of sourcePositions) {
+    positions.push(
+      x * 1.34,
+      z * 1.34,
+      (y - 0.165) * 1.85,
+    );
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex([...sourceIndices]);
+  geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
+  return geometry;
+};
+
+const createFlobotBloomGeometry = (
+  sourcePositions: readonly (readonly [number, number, number])[],
+  sourceIndices: readonly number[],
+  scale = 1,
+): THREE.BufferGeometry => {
+  const positions: number[] = [];
+  for (const [x, y, z] of sourcePositions) {
+    positions.push(
+      x * scale,
+      z * scale,
+      (y - 0.17) * scale * 1.65,
+    );
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex([...sourceIndices]);
+  geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
+  return geometry;
+};
+
+export const createProcPlantFlobotCupBloomGeometry = (): THREE.BufferGeometry =>
+  createFlobotBloomGeometry(
+    [
+      [0.20332, 0.22244, 0.06838],
+      [0.14908, 0.21936, 0.22378],
+      [-0.05318, 0.16404, 0.10202],
+      [-0.01576, 0.22566, 0.22597],
+      [-0.16077, 0.23356, 0.15682],
+      [-0.25692, 0.24161, 0.02656],
+      [-0.06784, 0.17127, -0.09832],
+      [-0.0519, 0.24163, -0.21237],
+      [0.08503, 0.2369, -0.229],
+      [-0.18991, 0.24367, -0.11342],
+      [0.12841, 0.23453, -0.20831],
+      [0.19431, 0.22805, -0.09],
+      [0.10551, 0.16148, -0.00733],
+      [0, 0, 0],
+    ],
+    [
+      1, 0, 13, 10, 8, 13, 8, 7, 13, 4, 2, 13, 7, 6, 13, 12, 11, 13, 5, 4,
+      13, 6, 9, 13, 0, 12, 13, 11, 10, 13, 9, 5, 13, 3, 1, 13, 2, 3, 13,
+    ],
+    1.42,
+  );
+
+export const createProcPlantFlobotPetal2BloomGeometry = (): THREE.BufferGeometry =>
+  createFlobotBloomGeometry(
+    [
+      [0, 0, 0],
+      [-0.29756, 0.23606, -0.11639],
+      [-0.06628, 0.22962, -0.32914],
+      [-0.13106, 0.2235, -0.15982],
+      [-0.19991, 0.19815, 0.28082],
+      [-0.32067, 0.23198, -0.0297],
+      [-0.18936, 0.211, 0.08922],
+      [-0.11903, 0.189, 0.30195],
+      [0.23901, 0.15582, 0.29387],
+      [0.02075, 0.18052, 0.23685],
+      [0.25461, 0.15857, 0.23535],
+      [0.33075, 0.17203, -0.05027],
+      [0.215, 0.17478, 0.06272],
+      [0.05289, 0.21613, -0.29801],
+      [0.35254, 0.17588, -0.13201],
+      [0.13672, 0.19914, -0.17216],
+    ],
+    [
+      11, 14, 0, 7, 9, 0, 2, 3, 0, 13, 2, 0, 12, 11, 0, 3, 1, 0, 14, 15, 0,
+      9, 8, 0, 4, 7, 0, 15, 13, 0, 8, 10, 0, 5, 6, 0, 10, 12, 0, 6, 4, 0,
+      1, 5, 0,
+    ],
+    1.18,
+  );
+
+export const createProcPlantFlobotPinkBloomGeometry = (): THREE.BufferGeometry =>
+  createFlobotBloomGeometry(
+    [
+      [0.00325, 0.00104, 0.00147],
+      [-0.37905, 0.28913, -0.13556],
+      [-0.10693, 0.26661, -0.41955],
+      [-0.17426, 0.2703, -0.20243],
+      [-0.22472, 0.268, 0.35519],
+      [-0.40095, 0.28982, -0.02515],
+      [-0.22704, 0.27132, 0.11418],
+      [-0.12183, 0.25785, 0.37566],
+      [0.32546, 0.21534, 0.33885],
+      [0.04778, 0.24273, 0.28361],
+      [0.34024, 0.21487, 0.26431],
+      [0.41237, 0.2126, -0.09948],
+      [0.2767, 0.22371, 0.05082],
+      [0.04468, 0.25165, -0.3894],
+      [0.43302, 0.21195, -0.20358],
+      [0.15975, 0.23865, -0.23785],
+    ],
+    [
+      11, 14, 0, 7, 9, 0, 2, 3, 0, 13, 2, 0, 12, 11, 0, 3, 1, 0, 14, 15, 0,
+      9, 8, 0, 4, 7, 0, 15, 13, 0, 8, 10, 0, 5, 6, 0, 10, 12, 0, 6, 4, 0,
+      1, 5, 0,
+    ],
+    0.98,
+  );
 
 export const createProcPlantFoxgloveBloomGeometry = (): THREE.BufferGeometry => {
   const positions: number[] = [];
