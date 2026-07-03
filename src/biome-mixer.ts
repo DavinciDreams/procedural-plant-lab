@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { BarkType, Billboard, LeafType, Tree, TreePreset, TreeType } from "@dgreenheck/ez-tree";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
@@ -17,9 +18,11 @@ import {
 } from "./biome-mix";
 import {
   buildProcPlantObject,
+  GOLDEN_ANGLE_RADIANS,
   procPlantPresets,
   type ProcPlantBiomeId,
   type ProcPlantGenome,
+  type LeafShapeKind,
 } from "./procplants";
 import {
   allProcPlantPresetIds,
@@ -51,10 +54,22 @@ let currentMix = makeEcologyBiomeMix("taiga");
 let selectedEntryId = currentMix.entries[0]?.id ?? "";
 let selectedPresetId = "blueSpruce";
 let selectedWeberPennSpecies = "balsamFir";
+let selectedEzTreePreset = "Pine Large";
+let selectedBranchModulePalette = "decurrent-broadleaf";
 let selectedImportedAssetId = "";
 let jsonVisible = false;
 let statusText = "Ready.";
 const weberPennSpeciesIds = Object.keys(SPECIES).sort() as SpeciesId[];
+const ezTreePresetIds = Object.keys(TreePreset).filter((id) => id !== "Trellis");
+const branchModulePalettes = [
+  "excurrent-conifer",
+  "decurrent-broadleaf",
+  "weeping",
+  "shrub",
+  "palm-ish",
+  "vine-ish",
+] as const;
+type BranchModulePalette = typeof branchModulePalettes[number];
 const gltfLoader = new GLTFLoader();
 const dracoLoader = new DRACOLoader();
 const ktx2Loader = new KTX2Loader();
@@ -488,6 +503,100 @@ const prepareImportedAsset = (object: THREE.Object3D): THREE.Object3D => {
   return rootObject;
 };
 
+const ezTreeBaseOptions = (preset: string): EzTreeOptions =>
+  cloneJson(((TreePreset as unknown as Record<string, EzTreeOptions>)[preset] ?? (TreePreset as unknown as Record<string, EzTreeOptions>)["Pine Large"])!);
+
+const configureEzTreeOptions = (entry: ProcPlantBiomeMixEntry): EzTreeOptions => {
+  const ezTree = entry.ezTree;
+  const kind = ezTree?.kind ?? "pine";
+  const options = ezTreeBaseOptions(ezTree?.preset ?? ezTreePresetForKind(kind));
+  const foliage = ezTree?.foliage ?? 1;
+  const spread = ezTree?.spread ?? 1;
+  const droop = ezTree?.droop ?? 0;
+  const gnarliness = ezTree?.gnarliness ?? 1;
+  options.seed = entry.seed;
+  options.bark.textured = ezTree?.textures !== false;
+  options.bark.tint = ezTree?.barkColor ?? (kind === "pine" ? 0x6a5132 : kind === "willow" ? 0x67523b : 0x6b4a2c);
+  options.leaves.tint = ezTree?.leafColor ?? (kind === "pine" ? 0x5f8461 : kind === "willow" ? 0x7fa05c : 0x6f9a45);
+  options.leaves.count = Math.max(0, Math.round(options.leaves.count * foliage));
+  options.branch.angle[1] = Math.max(4, options.branch.angle[1] * spread);
+  options.branch.angle[2] = Math.max(4, options.branch.angle[2] * spread);
+  options.branch.gnarliness[0] *= gnarliness;
+  options.branch.gnarliness[1] *= gnarliness;
+  options.branch.gnarliness[2] *= gnarliness;
+  options.branch.gnarliness[3] *= gnarliness;
+  if (kind === "pine") {
+    options.type = TreeType.Evergreen;
+    options.bark.type = BarkType.Pine;
+    options.leaves.type = "pine";
+    options.leaves.billboard = Billboard.Double;
+    options.leaves.alphaTest = 0.25;
+  }
+  if (kind === "willow") {
+    options.type = TreeType.Deciduous;
+    options.bark.type = BarkType.Willow;
+    options.leaves.type = LeafType.Aspen;
+    options.leaves.billboard = Billboard.Double;
+    options.leaves.count = Math.max(options.leaves.count, Math.round(12 * foliage));
+    options.leaves.size *= 0.76;
+    options.leaves.start = Math.min(options.leaves.start, 0.08);
+    options.branch.force.direction = { x: 0, y: -1, z: 0 };
+    options.branch.force.strength = -0.02 - droop * 0.045;
+    options.branch.angle[1] = 42 * spread;
+    options.branch.angle[2] = 34 * spread;
+    options.branch.children[0] = Math.max(options.branch.children[0], 11);
+    options.branch.children[1] = Math.max(options.branch.children[1], 5);
+    options.branch.length[1] *= 1.15;
+    options.branch.length[2] *= 1.2;
+  }
+  if (kind === "bush") {
+    options.leaves.count = Math.max(options.leaves.count, Math.round(18 * foliage));
+    options.branch.force.strength *= 0.5;
+  }
+  return options;
+};
+
+const buildEzTreeObject = (entry: ProcPlantBiomeMixEntry): THREE.Object3D => {
+  const tree = new Tree();
+  tree.loadFromJson(configureEzTreeOptions(entry) as any);
+  tree.name = entry.label;
+  const leafTint = new THREE.Color(
+    entry.ezTree?.leafColor ?? (entry.ezTree?.kind === "pine" ? 0x5f8461 : entry.ezTree?.kind === "willow" ? 0x7fa05c : 0x6f9a45),
+  );
+  const useTextures = entry.ezTree?.textures !== false;
+  tree.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(tree);
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  const center = new THREE.Vector3();
+  box.getCenter(center);
+  const maxSide = Math.max(size.x, size.y, size.z, 1e-4);
+  const rootObject = new THREE.Group();
+  rootObject.name = `ez-tree-${entry.ezTree?.kind ?? "tree"}`;
+  tree.position.set(-center.x, -box.min.y, -center.z);
+  rootObject.add(tree);
+  rootObject.scale.setScalar(1 / maxSide);
+  rootObject.userData.ezTree = true;
+  rootObject.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const material of materials) {
+      if (material?.name !== "leaves" || !(material instanceof THREE.MeshPhongMaterial)) continue;
+      const lifted = leafTint.clone().lerp(new THREE.Color(0xffffff), 0.28);
+      material.color.copy(lifted);
+      material.emissive.copy(lifted).multiplyScalar(0.22);
+      material.shininess = 4;
+      material.alphaTest = Math.min(material.alphaTest || 0.3, 0.28);
+      if (!useTextures) material.map = null;
+      material.needsUpdate = true;
+    }
+  });
+  return rootObject;
+};
+
 const tintMaterial = (material: THREE.Material, color: number | undefined): THREE.Material => {
   const cloned = material.clone();
   cloned.userData.importedAssetMaterial = true;
@@ -594,15 +703,102 @@ const geometryVertexCount = (object: THREE.Object3D): number => {
   return total;
 };
 
+const createBiomeGrassTuftGeometry = (seed: number, bladeCount = 12): THREE.BufferGeometry => {
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const indices: number[] = [];
+  const up = new THREE.Vector3(0, 1, 0);
+  for (let i = 0; i < bladeCount; i++) {
+    const yaw = i * GOLDEN_ANGLE_RADIANS + (hash01(seed + i * 17) - 0.5) * 0.7;
+    const radial = new THREE.Vector3(Math.cos(yaw), 0, Math.sin(yaw));
+    const side = new THREE.Vector3(-radial.z, 0, radial.x);
+    const height = 0.34 + hash01(seed + i * 31) * 0.5;
+    const width = 0.012 + hash01(seed + i * 43) * 0.014;
+    const baseSpread = Math.sqrt(hash01(seed + i * 59)) * 0.075;
+    const base = radial.clone().multiplyScalar(baseSpread);
+    const bend = radial.clone().multiplyScalar((0.06 + hash01(seed + i * 71) * 0.18) * height);
+    const mid = base.clone().add(up.clone().multiplyScalar(height * 0.55)).add(bend.clone().multiplyScalar(0.42));
+    const tip = base.clone().add(up.clone().multiplyScalar(height)).add(bend);
+    const normal = new THREE.Vector3().crossVectors(side, tip.clone().sub(base)).normalize();
+    const start = positions.length / 3;
+    const points = [
+      base.clone().add(side.clone().multiplyScalar(-width)),
+      base.clone().add(side.clone().multiplyScalar(width)),
+      mid.clone().add(side.clone().multiplyScalar(width * 0.58)),
+      mid.clone().add(side.clone().multiplyScalar(-width * 0.58)),
+      tip,
+    ];
+    for (const point of points) {
+      positions.push(point.x, point.y, point.z);
+      normals.push(normal.x, normal.y, normal.z);
+    }
+    indices.push(start, start + 1, start + 2, start, start + 2, start + 3, start + 3, start + 2, start + 4);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setIndex(indices);
+  geometry.computeBoundingSphere();
+  return geometry;
+};
+
+const buildGrassWorldObject = (
+  entry: ProcPlantBiomeMixEntry,
+  genome: ProcPlantGenome,
+  count: number,
+): THREE.Object3D => {
+  const bladeCount = Math.round(THREE.MathUtils.clamp(8 + (genome.foliage?.mass ?? 0.8) * 5, 7, 16));
+  const geometry = createBiomeGrassTuftGeometry(entry.seed ^ 0x61a55, bladeCount);
+  const material = new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+  const mesh = new THREE.InstancedMesh(geometry, material, count);
+  mesh.name = `grass-world-${entry.id}`;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  const baseColor = new THREE.Color(genome.leaf.colorA);
+  const tipColor = new THREE.Color(genome.leaf.colorB);
+  const matrix = new THREE.Matrix4();
+  const quat = new THREE.Quaternion();
+  const scale = new THREE.Vector3();
+  const color = new THREE.Color();
+  for (let i = 0; i < count; i++) {
+    const n = entry.seed + i * 97;
+    const radius = 2 + Math.sqrt(hash01(n)) * 39;
+    const angle = i * GOLDEN_ANGLE_RADIANS + hash01(n + 31) * 0.45;
+    const x = Math.sin(angle) * radius;
+    const z = Math.cos(angle) * radius;
+    const y = Math.max(0, z + 40) * 0.035 + 0.012;
+    const moistureLift = THREE.MathUtils.lerp(0.74, 1.18, entry.environment.moisture);
+    const shadeStretch = THREE.MathUtils.lerp(0.86, 1.22, 1 - entry.environment.light);
+    const tuftScale = entry.scale * (0.17 + hash01(n + 71) * 0.19) * moistureLift * shadeStretch;
+    quat.setFromEuler(new THREE.Euler((hash01(n + 101) - 0.5) * 0.2, hash01(n + 131) * Math.PI * 2, (hash01(n + 151) - 0.5) * 0.12));
+    scale.set(tuftScale, tuftScale * (0.9 + (genome.foliage?.mass ?? 0.8) * 0.16), tuftScale);
+    matrix.compose(new THREE.Vector3(x, y, z), quat, scale);
+    mesh.setMatrixAt(i, matrix);
+    color.copy(baseColor).lerp(tipColor, 0.25 + hash01(n + 191) * 0.62);
+    if (hash01(n + 211) < 0.2) color.lerp(new THREE.Color(0xd8cc76), 0.12 + hash01(n + 223) * 0.2);
+    mesh.setColorAt(i, color);
+  }
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  mesh.instanceMatrix.needsUpdate = true;
+  const group = new THREE.Group();
+  group.name = `grass-world-${entry.label}`;
+  group.userData.grassWorld = { count, bladeCount };
+  group.add(mesh);
+  return group;
+};
+
 const selectedEntry = () => currentMix.entries.find((entry) => entry.id === selectedEntryId) ?? currentMix.entries[0];
 
 const colorForEntry = (entry: ProcPlantBiomeMixEntry): number => {
+  if (entry.source === "ez-tree") return entry.ezTree?.leafColor ?? (entry.ezTree?.kind === "pine" ? 0x5f8461 : 0x6f9a45);
   if (isAssetMixEntry(entry)) return 0x6b7f4c;
   const genome = genomeForMixEntry(entry);
   return genome.flower?.color ?? genome.leaf.colorA ?? 0x4f7a39;
 };
 
 const metaForEntry = (entry: ProcPlantBiomeMixEntry): string => {
+  if (entry.source === "ez-tree") return `EZ-Tree ${entry.ezTree?.kind ?? "tree"}`;
   if (isAssetMixEntry(entry)) {
     return importedAssets.has(entry.asset.libraryId ?? entry.id) ? "GLB asset" : "GLB asset missing";
   }
@@ -625,6 +821,274 @@ const cloneGenome = (genome: ProcPlantGenome): ProcPlantGenome =>
     ? structuredClone(genome)
     : JSON.parse(JSON.stringify(genome)) as ProcPlantGenome;
 
+const mutationRng = (seed: number) => {
+  let state = seed >>> 0;
+  return () => {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return state / 0x100000000;
+  };
+};
+
+const branchModuleLeafShapes: LeafShapeKind[] = [
+  "lanceolate",
+  "ovate",
+  "cordate",
+  "palmate",
+  "spatulate",
+  "fan",
+  "linear",
+  "round",
+];
+
+const jitterValue = (value: number, rng: () => number, amount: number, min: number, max: number) =>
+  THREE.MathUtils.clamp(value * (1 + (rng() - 0.5) * amount), min, max);
+
+const jitterAdd = (value: number, rng: () => number, amount: number, min: number, max: number) =>
+  THREE.MathUtils.clamp(value + (rng() - 0.5) * amount, min, max);
+
+const jitterColor = (color: number, rng: () => number, amount = 0.22) => {
+  const out = new THREE.Color(color);
+  const hueShift = (rng() - 0.5) * amount;
+  const satShift = (rng() - 0.5) * amount * 0.45;
+  const lightShift = (rng() - 0.5) * amount * 0.35;
+  const hsl = { h: 0, s: 0, l: 0 };
+  out.getHSL(hsl);
+  out.setHSL(
+    (hsl.h + hueShift + 1) % 1,
+    THREE.MathUtils.clamp(hsl.s + satShift, 0.12, 0.92),
+    THREE.MathUtils.clamp(hsl.l + lightShift, 0.14, 0.78),
+  );
+  return out.getHex();
+};
+
+const mutateBranchModuleGenome = (genome: ProcPlantGenome, seed: number): ProcPlantGenome => {
+  const rng = mutationRng(seed);
+  const next = cloneGenome(genome);
+  next.branchModules = next.branchModules ?? { palette: "decurrent-broadleaf" };
+  next.foliage = next.foliage ?? { mass: 0.88, clusterDensity: 1.18, whorlDensity: 0.58, tipBias: 0.58, size: 0.62 };
+  next.treeRealism = next.treeRealism ?? {
+    crownSpread: next.habit === "conifer" ? 0.42 : 0.82,
+    crownTaper: next.habit === "conifer" ? 0.84 : 0.38,
+    trunkFlare: 0.36,
+    trunkBend: 0.14,
+    branchGnarl: 0.24,
+    windFlex: 0.52,
+    colorVariance: 0.14,
+  };
+  const modules = next.branchModules;
+  const foliage = next.foliage;
+  const realism = next.treeRealism;
+  modules.moduleBudget = Math.round(jitterValue(modules.moduleBudget ?? 110, rng, 0.42, 24, 220));
+  modules.levels = Math.round(jitterAdd(modules.levels ?? 3, rng, 1.8, 1, 6));
+  modules.vigor = jitterValue(modules.vigor ?? 1, rng, 0.55, 0.18, 2.2);
+  modules.branchDensity = jitterValue(modules.branchDensity ?? 1.1, rng, 0.75, 0.15, 3);
+  modules.branchAngle = jitterValue(modules.branchAngle ?? 1, rng, 0.55, 0.25, 1.75);
+  modules.spread = jitterValue(modules.spread ?? 1, rng, 0.62, 0.25, 2);
+  modules.droop = jitterAdd(modules.droop ?? 0.2, rng, 0.72, 0, 2);
+  modules.tropism = jitterAdd(modules.tropism ?? 0.48, rng, 0.52, 0, 1.5);
+  modules.gnarliness = jitterAdd(modules.gnarliness ?? 0.24, rng, 0.64, 0, 1.6);
+  modules.collisionBias = jitterAdd(modules.collisionBias ?? 0.45, rng, 0.5, 0, 1.4);
+  if (rng() < 0.18) {
+    modules.foliageSource = modules.palette === "excurrent-conifer" && rng() < 0.7
+      ? "conifer-spray"
+      : "procplants";
+  }
+  if (rng() < 0.42) {
+    next.leaf.shape = branchModuleLeafShapes[Math.floor(rng() * branchModuleLeafShapes.length)]!;
+  }
+  next.leaf.length = {
+    base: jitterValue(next.leaf.length.base, rng, 0.45, 0.035, 0.85),
+    tip: jitterValue(next.leaf.length.tip, rng, 0.45, 0.025, 0.72),
+    curve: jitterValue(next.leaf.length.curve, rng, 0.34, 0.45, 2.4),
+  };
+  next.leaf.widthRatio = jitterValue(next.leaf.widthRatio, rng, 0.55, 0.08, 1.45);
+  next.leaf.density = {
+    base: jitterValue(next.leaf.density.base, rng, 0.42, 0.03, 1.4),
+    tip: jitterValue(next.leaf.density.tip, rng, 0.42, 0.03, 1.6),
+    curve: jitterValue(next.leaf.density.curve, rng, 0.32, 0.4, 2.6),
+  };
+  next.leaf.curl = jitterAdd(next.leaf.curl, rng, 0.42, -0.45, 0.85);
+  next.leaf.serration = jitterAdd(next.leaf.serration, rng, 0.38, 0, 1);
+  next.leaf.venation = jitterAdd(next.leaf.venation, rng, 0.36, 0, 1);
+  next.leaf.colorA = jitterColor(next.leaf.colorA, rng, 0.12);
+  next.leaf.colorB = jitterColor(next.leaf.colorB, rng, 0.16);
+  modules.leafColor = jitterColor(modules.leafColor ?? next.leaf.colorA, rng, 0.14);
+  modules.barkColor = jitterColor(modules.barkColor ?? 0x5d4327, rng, 0.08);
+  foliage.mass = jitterValue(foliage.mass, rng, 0.5, 0.05, 2.2);
+  foliage.clusterDensity = jitterValue(foliage.clusterDensity, rng, 0.55, 0.2, 2.6);
+  foliage.whorlDensity = jitterValue(foliage.whorlDensity, rng, 0.5, 0.05, 1.8);
+  foliage.tipBias = jitterAdd(foliage.tipBias, rng, 0.36, 0, 1);
+  foliage.size = jitterValue(foliage.size ?? 0.62, rng, 0.5, 0.08, 1.6);
+  realism.crownSpread = jitterValue(realism.crownSpread, rng, 0.32, 0.05, 1.8);
+  realism.crownTaper = jitterValue(realism.crownTaper, rng, 0.32, 0.02, 1.45);
+  realism.trunkBend = jitterAdd(realism.trunkBend, rng, 0.18, 0, 0.8);
+  realism.branchGnarl = jitterAdd(realism.branchGnarl, rng, 0.22, 0, 0.9);
+  realism.windFlex = jitterAdd(realism.windFlex, rng, 0.22, 0, 1);
+  realism.colorVariance = jitterAdd(realism.colorVariance, rng, 0.12, 0, 0.45);
+  next.lightResponse = {
+    ...next.lightResponse,
+    shadeAvoidance: jitterAdd(next.lightResponse.shadeAvoidance, rng, 0.28, 0, 1.6),
+    leafBoostInShade: jitterAdd(next.lightResponse.leafBoostInShade, rng, 0.16, 0, 0.8),
+    branchSuppressionInShade: jitterAdd(next.lightResponse.branchSuppressionInShade, rng, 0.18, 0, 0.8),
+    phototropism: jitterAdd(next.lightResponse.phototropism, rng, 0.22, 0, 1.2),
+  };
+  return next;
+};
+
+type EzTreeOptions = {
+  seed: number;
+  type: string;
+  bark: {
+    type: string;
+    tint: number;
+    flatShading: boolean;
+    textured: boolean;
+    textureScale: { x: number; y: number };
+  };
+  branch: {
+    levels: number;
+    angle: Record<number, number>;
+    children: Record<number, number>;
+    force: { direction: { x: number; y: number; z: number }; strength: number };
+    gnarliness: Record<number, number>;
+    length: Record<number, number>;
+    radius: Record<number, number>;
+    sections: Record<number, number>;
+    segments: Record<number, number>;
+    start: Record<number, number>;
+    taper: Record<number, number>;
+    twist: Record<number, number>;
+  };
+  leaves: {
+    type: string;
+    billboard: string;
+    angle: number;
+    count: number;
+    start: number;
+    size: number;
+    sizeVariance: number;
+    tint: number;
+    alphaTest: number;
+  };
+  trellis: { enabled: boolean };
+};
+type EzTreeKind = NonNullable<ProcPlantBiomeMixEntry["ezTree"]>["kind"];
+
+const cloneJson = <T,>(value: T): T =>
+  typeof structuredClone === "function"
+    ? structuredClone(value)
+    : JSON.parse(JSON.stringify(value)) as T;
+
+const ezTreeKindForPreset = (preset: string): EzTreeKind => {
+  const id = preset.toLowerCase();
+  if (id.includes("oak")) return "oak";
+  if (id.includes("aspen")) return "aspen";
+  if (id.includes("ash")) return "ash";
+  if (id.includes("bush")) return "bush";
+  if (id.includes("willow")) return "willow";
+  return "pine";
+};
+
+const ezTreePresetForKind = (kind: EzTreeKind): string => {
+  if (kind === "oak" || kind === "willow") return "Oak Large";
+  if (kind === "aspen") return "Aspen Large";
+  if (kind === "ash") return "Ash Large";
+  if (kind === "bush") return "Bush 1";
+  return "Pine Large";
+};
+
+const makeEzTreeEntry = (preset: string): ProcPlantBiomeMixEntry => {
+  const kind = ezTreeKindForPreset(preset);
+  const seed = currentMix.seed ^ ((currentMix.entries.length + 1) * 0x7f4a7c15);
+  const basePreset = kind === "willow" ? ezTreePresetForKind(kind) : preset;
+  return {
+    id: `ez-tree-${slug(preset)}-${Date.now().toString(36)}`,
+    label: kind === "willow" ? "EZ Willow" : `EZ ${labelForProcPlantId(preset)}`,
+    source: "ez-tree",
+    ezTree: {
+      preset: basePreset,
+      kind,
+      foliage: kind === "pine" ? 1.15 : 1,
+      spread: kind === "pine" ? 0.86 : 1,
+      droop: kind === "willow" ? 1 : 0,
+      gnarliness: kind === "willow" ? 0.7 : 1,
+      textures: true,
+    },
+    weight: 1,
+    density: 0.34,
+    scale: kind === "bush" ? 4.2 : 8,
+    environment: currentMix.entries[0]?.environment ?? { light: 0.8, moisture: 0.55, crowding: 0.32, biomeWarmth: 0.62 },
+    seed,
+    enabled: true,
+  };
+};
+
+const branchModuleTemplateForPalette = (palette: BranchModulePalette): ProcPlantGenome => {
+  if (palette === "excurrent-conifer") return procPlantPresets.blueSpruce;
+  if (palette === "weeping") return procPlantPresets.birchGrove;
+  if (palette === "shrub") return procPlantPresets.understoryShrub;
+  if (palette === "palm-ish") return procPlantPresets.foldedPalm;
+  if (palette === "vine-ish") return procPlantPresets.vincaVine;
+  return procPlantPresets.oakCanopy;
+};
+
+const makeBranchModuleGenome = (palette: BranchModulePalette, seed: number): ProcPlantGenome => {
+  const base = cloneGenome(branchModuleTemplateForPalette(palette));
+  base.id = `branchModules-${palette}`;
+  base.habit = palette === "excurrent-conifer" ? "conifer" : palette === "shrub" ? "shrub" : palette === "palm-ish" ? "palm" : palette === "vine-ish" ? "vine" : "tree";
+  base.weberPenn = undefined;
+  base.clump = undefined;
+  base.branchModules = {
+    palette,
+    moduleBudget: palette === "excurrent-conifer" ? 120 : palette === "shrub" ? 96 : palette === "palm-ish" ? 36 : palette === "decurrent-broadleaf" ? 150 : 112,
+    levels: palette === "palm-ish" ? 1 : palette === "vine-ish" ? 4 : palette === "decurrent-broadleaf" ? 4 : 3,
+    vigor: 1,
+    branchDensity: palette === "excurrent-conifer" ? 1.05 : palette === "shrub" ? 1.25 : palette === "palm-ish" ? 0.4 : palette === "vine-ish" ? 0.72 : 1.35,
+    branchAngle: palette === "excurrent-conifer" ? 0.82 : palette === "vine-ish" ? 0.55 : palette === "shrub" ? 1.08 : 1.18,
+    spread: palette === "excurrent-conifer" ? 0.58 : palette === "shrub" ? 1.12 : palette === "palm-ish" ? 1.35 : 1.08,
+    droop: palette === "weeping" ? 1.15 : palette === "excurrent-conifer" ? 0.34 : palette === "vine-ish" ? 0.7 : 0.18,
+    tropism: palette === "excurrent-conifer" ? 0.72 : 0.48,
+    gnarliness: palette === "decurrent-broadleaf" ? 0.38 : palette === "weeping" ? 0.32 : palette === "excurrent-conifer" ? 0.16 : 0.24,
+    collisionBias: 0.45,
+    foliageSource: palette === "excurrent-conifer" ? "conifer-spray" : "procplants",
+  };
+  base.foliage = {
+    mass: palette === "palm-ish" ? 0.62 : palette === "excurrent-conifer" ? 1.05 : 0.88,
+    clusterDensity: palette === "shrub" ? 1.45 : 1.18,
+    whorlDensity: palette === "excurrent-conifer" ? 0.85 : 0.58,
+    tipBias: palette === "weeping" ? 0.72 : 0.58,
+    size: palette === "excurrent-conifer" ? 0.54 : 0.62,
+  };
+  base.treeRealism = {
+    crownSpread: palette === "excurrent-conifer" ? 0.42 : palette === "shrub" ? 1.05 : 0.82,
+    crownTaper: palette === "excurrent-conifer" ? 0.84 : palette === "weeping" ? 0.24 : 0.38,
+    trunkFlare: palette === "shrub" ? 0.22 : 0.38,
+    trunkBend: palette === "weeping" ? 0.24 : 0.14,
+    branchGnarl: palette === "decurrent-broadleaf" ? 0.34 : 0.22,
+    windFlex: palette === "weeping" ? 0.72 : 0.52,
+    colorVariance: 0.14,
+  };
+  void seed;
+  return base;
+};
+
+const makeBranchModuleEntry = (palette: BranchModulePalette): ProcPlantBiomeMixEntry => {
+  const seed = currentMix.seed ^ ((currentMix.entries.length + 1) * 0x38b5);
+  const genome = makeBranchModuleGenome(palette, seed);
+  return {
+    id: `branch-module-${slug(palette)}-${Date.now().toString(36)}`,
+    label: `Modules ${labelForProcPlantId(palette)}`,
+    source: "mutation",
+    genome,
+    weight: 1,
+    density: palette === "shrub" ? 0.42 : 0.28,
+    scale: palette === "shrub" ? 5.2 : 8.4,
+    environment: currentMix.entries[0]?.environment ?? { light: 0.8, moisture: 0.55, crowding: 0.32, biomeWarmth: 0.62 },
+    seed,
+    enabled: true,
+  };
+};
+
 const templatePresetForSpecies = (species: SpeciesId): string => {
   const id = species.toLowerCase();
   if (id.includes("fir") || id.includes("pine")) return "blueSpruce";
@@ -646,25 +1110,25 @@ const makeWeberPennGenome = (species: SpeciesId, seed: number): ProcPlantGenome 
   base.habit = conifer ? "conifer" : palm ? "palm" : bamboo ? "grass" : "tree";
   base.weberPenn = {
     species,
-    nativeLeaves: true,
-    crownFill: false,
-    foliageSource: "species",
+    nativeLeaves: !conifer,
+    crownFill: conifer,
+    foliageSource: conifer ? "conifer-spray" : "species",
     fillAnchor: "leaf-sites",
     maxBranchDepth: base.weberPenn?.maxBranchDepth ?? 3,
-    maxStems: base.weberPenn?.maxStems ?? (conifer ? 96 : 80),
-    maxLeaves: base.weberPenn?.maxLeaves ?? (conifer ? 220 : 190),
-    leafScaleMultiplier: base.weberPenn?.leafScaleMultiplier ?? (conifer ? 4.2 : 3.2),
+    maxStems: base.weberPenn?.maxStems ?? (conifer ? 112 : 80),
+    maxLeaves: base.weberPenn?.maxLeaves ?? (conifer ? 300 : 190),
+    leafScaleMultiplier: base.weberPenn?.leafScaleMultiplier ?? (conifer ? 2.8 : 3.2),
     radialSegments: base.weberPenn?.radialSegments ?? 4,
     branchSamples: base.weberPenn?.branchSamples ?? 2,
     barkColor: base.weberPenn?.barkColor ?? (palm ? 0x7a5630 : 0x5d4327),
     leafColor: base.weberPenn?.leafColor ?? base.leaf.colorA,
   };
   base.foliage = {
-    mass: 0,
-    clusterDensity: base.foliage?.clusterDensity ?? (conifer ? 1.08 : 1.12),
-    whorlDensity: base.foliage?.whorlDensity ?? (conifer ? 0.58 : 0.48),
+    mass: conifer ? base.foliage?.mass ?? 1.12 : 0,
+    clusterDensity: base.foliage?.clusterDensity ?? (conifer ? 1.32 : 1.12),
+    whorlDensity: base.foliage?.whorlDensity ?? (conifer ? 0.84 : 0.48),
     tipBias: base.foliage?.tipBias ?? (conifer ? 0.34 : 0.62),
-    size: base.foliage?.size ?? (conifer ? 0.32 : 0.54),
+    size: base.foliage?.size ?? (conifer ? 0.58 : 0.54),
   };
   base.treeRealism = {
     crownSpread: base.treeRealism?.crownSpread ?? (conifer ? 0.36 : 0.72),
@@ -708,7 +1172,9 @@ const editableGenomeForEntry = (entry: ProcPlantBiomeMixEntry): ProcPlantGenome 
   return entry.genome;
 };
 
-const weberFoliageMode = (genome: ProcPlantGenome): "plain" | "procplants" | "conifer" | "mixed" => {
+type WeberFoliageMode = "plain" | "procplants" | "conifer" | "ez-leaf-card" | "mixed";
+
+const weberFoliageMode = (genome: ProcPlantGenome): WeberFoliageMode => {
   const nativeLeaves = genome.weberPenn?.nativeLeaves !== false;
   const crownFill = genome.weberPenn?.crownFill === true ||
     (genome.weberPenn?.crownFill === undefined && Boolean(genome.weberPenn?.foliageSource && genome.weberPenn.foliageSource !== "species"));
@@ -717,12 +1183,13 @@ const weberFoliageMode = (genome: ProcPlantGenome): "plain" | "procplants" | "co
   if (nativeLeaves && mass <= 0.001) return "plain";
   if (!nativeLeaves && mass > 0.001 && source === "procplants") return "procplants";
   if (!nativeLeaves && mass > 0.001 && source === "conifer-spray") return "conifer";
+  if (!nativeLeaves && mass > 0.001 && source === "ez-leaf-card") return "ez-leaf-card";
   return "mixed";
 };
 
 const applyWeberFoliageMode = (
   genome: ProcPlantGenome,
-  mode: "plain" | "procplants" | "conifer" | "mixed",
+  mode: WeberFoliageMode,
 ) => {
   genome.weberPenn = genome.weberPenn ?? { species: "balsamFir" as SpeciesId };
   genome.foliage = genome.foliage ?? { mass: 0, clusterDensity: 1.1, whorlDensity: 0.55, tipBias: 0.5, size: 0.4 };
@@ -752,6 +1219,17 @@ const applyWeberFoliageMode = (
     genome.foliage.clusterDensity = Math.min(genome.foliage.clusterDensity, 1.25);
     genome.foliage.whorlDensity = Math.min(genome.foliage.whorlDensity, 0.72);
     genome.foliage.size = Math.min(genome.foliage.size ?? 0.34, 0.38);
+    return;
+  }
+  if (mode === "ez-leaf-card") {
+    genome.weberPenn.nativeLeaves = false;
+    genome.weberPenn.crownFill = true;
+    genome.weberPenn.foliageSource = "ez-leaf-card";
+    genome.weberPenn.fillAnchor = "branch-tips";
+    genome.foliage.mass = Math.max(0.62, genome.foliage.mass);
+    genome.foliage.clusterDensity = Math.max(1.05, genome.foliage.clusterDensity);
+    genome.foliage.size = Math.max(genome.foliage.size ?? 0.48, 0.52);
+    genome.foliage.whorlDensity = Math.max(genome.foliage.whorlDensity, 0.46);
   }
 };
 
@@ -797,6 +1275,24 @@ const addWeberPennEntry = () => {
   rebuildPreview();
 };
 
+const addEzTreeEntry = () => {
+  const entry = makeEzTreeEntry(selectedEzTreePreset);
+  currentMix.entries.push(entry);
+  selectedEntryId = entry.id;
+  updateStatus(`Added ${entry.label}.`);
+  renderUi();
+  rebuildPreview();
+};
+
+const addBranchModuleEntry = () => {
+  const entry = makeBranchModuleEntry(selectedBranchModulePalette as BranchModulePalette);
+  currentMix.entries.push(entry);
+  selectedEntryId = entry.id;
+  updateStatus(`Added ${entry.label}.`);
+  renderUi();
+  rebuildPreview();
+};
+
 const makeImportedAssetEntry = (assetId: string): ProcPlantBiomeMixEntry | null => {
   const option = importedAssetOptions.find((item) => item.id === assetId);
   if (!option || !importedAssets.has(assetId)) return null;
@@ -830,12 +1326,23 @@ const addImportedAssetEntry = () => {
 const bindAddControls = () => {
   const presetSelect = entryEditor.querySelector<HTMLSelectElement>("#preset-select")!;
   const weberPennSelect = entryEditor.querySelector<HTMLSelectElement>("#weber-penn-select")!;
+  const ezTreeSelect = entryEditor.querySelector<HTMLSelectElement>("#ez-tree-select")!;
+  const branchModuleSelect = entryEditor.querySelector<HTMLSelectElement>("#branch-module-select")!;
   const importedAssetSelect = entryEditor.querySelector<HTMLSelectElement>("#imported-asset-select");
   renderPresetOptions(presetSelect);
   weberPennSelect.innerHTML = weberPennSpeciesIds.map(
     (id) => `<option value="${id}">${labelForProcPlantId(id)}</option>`,
   ).join("");
   weberPennSelect.value = selectedWeberPennSpecies;
+  ezTreeSelect.innerHTML = [
+    ...ezTreePresetIds.map((id) => `<option value="${id}">${labelForProcPlantId(id)}</option>`),
+    `<option value="Willow Synthetic">Willow Synthetic</option>`,
+  ].join("");
+  ezTreeSelect.value = selectedEzTreePreset;
+  branchModuleSelect.innerHTML = branchModulePalettes.map(
+    (id) => `<option value="${id}">${labelForProcPlantId(id)}</option>`,
+  ).join("");
+  branchModuleSelect.value = selectedBranchModulePalette;
   if (importedAssetSelect) {
     importedAssetSelect.innerHTML = importedAssetOptions.length
       ? importedAssetOptions.map((asset) => `<option value="${asset.id}">${asset.label}</option>`).join("")
@@ -852,11 +1359,19 @@ const bindAddControls = () => {
   weberPennSelect.addEventListener("change", () => {
     selectedWeberPennSpecies = weberPennSelect.value;
   });
+  ezTreeSelect.addEventListener("change", () => {
+    selectedEzTreePreset = ezTreeSelect.value;
+  });
+  branchModuleSelect.addEventListener("change", () => {
+    selectedBranchModulePalette = branchModuleSelect.value;
+  });
   importedAssetSelect?.addEventListener("change", () => {
     selectedImportedAssetId = importedAssetSelect.value;
   });
   entryEditor.querySelector<HTMLButtonElement>("#add-preset-button")!.addEventListener("click", addPresetEntry);
   entryEditor.querySelector<HTMLButtonElement>("#add-weber-penn-button")!.addEventListener("click", addWeberPennEntry);
+  entryEditor.querySelector<HTMLButtonElement>("#add-ez-tree-button")!.addEventListener("click", addEzTreeEntry);
+  entryEditor.querySelector<HTMLButtonElement>("#add-branch-module-button")!.addEventListener("click", addBranchModuleEntry);
   const importedAssetButton = entryEditor.querySelector<HTMLButtonElement>("#add-imported-asset-button");
   if (importedAssetButton) {
     importedAssetButton.textContent = importedAssetOptions.length ? "Add" : "Import";
@@ -898,14 +1413,19 @@ const renderEntryEditor = () => {
     entryEditor.innerHTML = "<p>No plants in this mix yet.</p>";
     return;
   }
-  const previewGenome = genomeForMixEntry(entry);
   const isAssetEntry = isAssetMixEntry(entry);
-  const weberPenn = previewGenome.weberPenn;
-  const foliage = previewGenome.foliage;
-  const realism = previewGenome.treeRealism;
-  const foliageMode = weberFoliageMode(previewGenome);
+  const isEzTreeEntry = entry.source === "ez-tree";
+  const previewGenome = isAssetEntry || isEzTreeEntry ? null : genomeForMixEntry(entry);
+  const weberPenn = previewGenome?.weberPenn;
+  const branchModules = previewGenome?.branchModules;
+  const foliage = previewGenome?.foliage;
+  const realism = previewGenome?.treeRealism;
+  const foliageMode = previewGenome ? weberFoliageMode(previewGenome) : "plain";
   const fillMass = foliageMode === "plain" ? 0 : foliage?.mass ?? 0;
-  const fillSize = foliage?.size ?? (previewGenome.habit === "conifer" ? 0.34 : 0.54);
+  const fillSize = foliage?.size ?? (previewGenome?.habit === "conifer" ? 0.34 : 0.54);
+  const clump = previewGenome?.clump;
+  const groundPlant = Boolean(previewGenome && !weberPenn && !branchModules);
+  const ezTree = entry.ezTree;
   entryEditor.innerHTML = `
     <div class="add-row">
       <label>
@@ -920,6 +1440,20 @@ const renderEntryEditor = () => {
         <select id="weber-penn-select"></select>
       </label>
       <button type="button" id="add-weber-penn-button">Add</button>
+    </div>
+    <div class="add-row">
+      <label>
+        Add EZ-Tree
+        <select id="ez-tree-select"></select>
+      </label>
+      <button type="button" id="add-ez-tree-button">Add</button>
+    </div>
+    <div class="add-row">
+      <label>
+        Add Branch Modules
+        <select id="branch-module-select"></select>
+      </label>
+      <button type="button" id="add-branch-module-button">Add</button>
     </div>
     <div class="add-row">
       <label>
@@ -1008,6 +1542,30 @@ const renderEntryEditor = () => {
               <output>${(weberPenn.leafScaleMultiplier ?? 3.2).toFixed(2)}</output>
             </label>
           </div>
+          <div class="inline">
+            <label>
+              Crown spread
+              <input id="tree-crown-spread" type="range" min="0.05" max="1.8" value="${realism?.crownSpread ?? 0.62}" step="0.01" />
+              <output>${(realism?.crownSpread ?? 0.62).toFixed(2)}</output>
+            </label>
+            <label>
+              Crown taper
+              <input id="tree-crown-taper" type="range" min="0" max="1.45" value="${realism?.crownTaper ?? 0.36}" step="0.01" />
+              <output>${(realism?.crownTaper ?? 0.36).toFixed(2)}</output>
+            </label>
+          </div>
+          <div class="inline">
+            <label>
+              Trunk bend
+              <input id="tree-trunk-bend" type="range" min="0" max="0.8" value="${realism?.trunkBend ?? 0.14}" step="0.01" />
+              <output>${(realism?.trunkBend ?? 0.14).toFixed(2)}</output>
+            </label>
+            <label>
+              Branch gnarl
+              <input id="tree-branch-gnarl" type="range" min="0" max="0.9" value="${realism?.branchGnarl ?? 0.22}" step="0.01" />
+              <output>${(realism?.branchGnarl ?? 0.22).toFixed(2)}</output>
+            </label>
+          </div>
         </details>
         <details open>
           <summary>Leaves & Crown</summary>
@@ -1017,6 +1575,7 @@ const renderEntryEditor = () => {
               <option value="plain" ${foliageMode === "plain" ? "selected" : ""}>Plain W/P leaves</option>
               <option value="procplants" ${foliageMode === "procplants" ? "selected" : ""}>Procplants fill only</option>
               <option value="conifer" ${foliageMode === "conifer" ? "selected" : ""}>Conifer fill only</option>
+              <option value="ez-leaf-card" ${foliageMode === "ez-leaf-card" ? "selected" : ""}>EZ leaf cards</option>
               <option value="mixed" ${foliageMode === "mixed" ? "selected" : ""}>Custom mixed</option>
             </select>
           </label>
@@ -1034,6 +1593,7 @@ const renderEntryEditor = () => {
                 <option value="species" ${(weberPenn.foliageSource ?? "species") === "species" ? "selected" : ""}>W/P leaf shape</option>
                 <option value="procplants" ${weberPenn.foliageSource === "procplants" ? "selected" : ""}>Procplants leaf</option>
                 <option value="conifer-spray" ${weberPenn.foliageSource === "conifer-spray" ? "selected" : ""}>Conifer spray</option>
+                <option value="ez-leaf-card" ${weberPenn.foliageSource === "ez-leaf-card" ? "selected" : ""}>EZ leaf card</option>
               </select>
             </label>
           </div>
@@ -1093,8 +1653,246 @@ const renderEntryEditor = () => {
         </details>
       </section>
     ` : ""}
+    ${isEzTreeEntry && ezTree ? `
+      <section class="weber-editor">
+        <h3>EZ-Tree Traits</h3>
+        <label>
+          Preset
+          <select id="ez-entry-preset">
+            ${[
+              ...ezTreePresetIds.map((id) => `<option value="${id}" ${id === ezTree.preset ? "selected" : ""}>${labelForProcPlantId(id)}</option>`),
+              `<option value="Willow Synthetic" ${ezTree.kind === "willow" ? "selected" : ""}>Willow Synthetic</option>`,
+            ].join("")}
+          </select>
+        </label>
+        <details open>
+          <summary>Structure & Leaves</summary>
+          <div class="inline">
+            <label>
+              Foliage
+              <input id="ez-foliage" type="range" min="0" max="3" value="${ezTree.foliage ?? 1}" step="0.01" />
+              <output>${(ezTree.foliage ?? 1).toFixed(2)}</output>
+            </label>
+            <label>
+              Branch spread
+              <input id="ez-spread" type="range" min="0.35" max="2" value="${ezTree.spread ?? 1}" step="0.01" />
+              <output>${(ezTree.spread ?? 1).toFixed(2)}</output>
+            </label>
+          </div>
+          <div class="inline">
+            <label>
+              Droop
+              <input id="ez-droop" type="range" min="0" max="2" value="${ezTree.droop ?? 0}" step="0.01" />
+              <output>${(ezTree.droop ?? 0).toFixed(2)}</output>
+            </label>
+            <label>
+              Gnarliness
+              <input id="ez-gnarliness" type="range" min="0" max="2.4" value="${ezTree.gnarliness ?? 1}" step="0.01" />
+              <output>${(ezTree.gnarliness ?? 1).toFixed(2)}</output>
+            </label>
+          </div>
+        </details>
+        <details>
+          <summary>Colors</summary>
+          <div class="inline">
+            <label>
+              Bark color
+              <input id="ez-bark-color" type="color" value="${toHexColor(ezTree.barkColor, ezTree.kind === "pine" ? 0x6a5132 : 0x6b4a2c)}" />
+            </label>
+            <label>
+              Leaf color
+              <input id="ez-leaf-color" type="color" value="${toHexColor(ezTree.leafColor, ezTree.kind === "pine" ? 0x5f8461 : 0x6f9a45)}" />
+            </label>
+          </div>
+          <label>
+            Textures
+            <select id="ez-textures">
+              <option value="true" ${ezTree.textures === false ? "" : "selected"}>On</option>
+              <option value="false" ${ezTree.textures === false ? "selected" : ""}>Off</option>
+            </select>
+          </label>
+        </details>
+      </section>
+    ` : ""}
+    ${branchModules ? `
+      <section class="weber-editor">
+        <h3>Branch Module Architecture</h3>
+        <label>
+          Palette
+          <select id="branch-module-palette">
+            ${branchModulePalettes.map((id) => `<option value="${id}" ${id === branchModules.palette ? "selected" : ""}>${labelForProcPlantId(id)}</option>`).join("")}
+          </select>
+        </label>
+        <button type="button" id="branch-module-randomize">Randomize</button>
+        <details open>
+          <summary>Architecture</summary>
+          <div class="inline">
+            <label>
+              Module budget
+              <input id="branch-module-budget" type="range" min="18" max="220" value="${branchModules.moduleBudget ?? 96}" step="1" />
+              <output>${branchModules.moduleBudget ?? 96}</output>
+            </label>
+            <label>
+              Levels
+              <input id="branch-module-levels" type="range" min="1" max="6" value="${branchModules.levels ?? 3}" step="1" />
+              <output>${branchModules.levels ?? 3}</output>
+            </label>
+          </div>
+          <div class="inline">
+            <label>
+              Vigor
+              <input id="branch-module-vigor" type="range" min="0.15" max="2.2" value="${branchModules.vigor ?? 1}" step="0.01" />
+              <output>${(branchModules.vigor ?? 1).toFixed(2)}</output>
+            </label>
+            <label>
+              Branch density
+              <input id="branch-module-density" type="range" min="0.15" max="3" value="${branchModules.branchDensity ?? 1.2}" step="0.01" />
+              <output>${(branchModules.branchDensity ?? 1.2).toFixed(2)}</output>
+            </label>
+          </div>
+          <div class="inline">
+            <label>
+              Branch angle
+              <input id="branch-module-angle" type="range" min="0.25" max="1.75" value="${branchModules.branchAngle ?? 1}" step="0.01" />
+              <output>${(branchModules.branchAngle ?? 1).toFixed(2)}</output>
+            </label>
+            <label>
+              Spread
+              <input id="branch-module-spread" type="range" min="0.25" max="2" value="${branchModules.spread ?? 0.9}" step="0.01" />
+              <output>${(branchModules.spread ?? 0.9).toFixed(2)}</output>
+            </label>
+          </div>
+          <div class="inline">
+            <label>
+              Droop
+              <input id="branch-module-droop" type="range" min="0" max="2" value="${branchModules.droop ?? 0.18}" step="0.01" />
+              <output>${(branchModules.droop ?? 0.18).toFixed(2)}</output>
+            </label>
+            <label>
+              Phototropism
+              <input id="branch-module-tropism" type="range" min="0" max="1.5" value="${branchModules.tropism ?? 0.48}" step="0.01" />
+              <output>${(branchModules.tropism ?? 0.48).toFixed(2)}</output>
+            </label>
+          </div>
+          <div class="inline">
+            <label>
+              Gnarliness
+              <input id="branch-module-gnarliness" type="range" min="0" max="1.6" value="${branchModules.gnarliness ?? 0.24}" step="0.01" />
+              <output>${(branchModules.gnarliness ?? 0.24).toFixed(2)}</output>
+            </label>
+            <label>
+              Collision bias
+              <input id="branch-module-collision" type="range" min="0" max="1.4" value="${branchModules.collisionBias ?? 0.45}" step="0.01" />
+              <output>${(branchModules.collisionBias ?? 0.45).toFixed(2)}</output>
+            </label>
+          </div>
+          <div class="inline">
+            <label>
+              Foliage source
+              <select id="branch-module-foliage">
+                <option value="procplants" ${(branchModules.foliageSource ?? "procplants") === "procplants" ? "selected" : ""}>Procplants leaf</option>
+                <option value="conifer-spray" ${branchModules.foliageSource === "conifer-spray" ? "selected" : ""}>Conifer spray</option>
+              </select>
+            </label>
+          </div>
+        </details>
+        <details open>
+          <summary>Foliage</summary>
+          <div class="inline">
+            <label>
+              Mass
+              <input id="branch-module-foliage-mass" type="range" min="0" max="2.2" value="${foliage?.mass ?? 0.88}" step="0.01" />
+              <output>${(foliage?.mass ?? 0.88).toFixed(2)}</output>
+            </label>
+            <label>
+              Density
+              <input id="branch-module-foliage-density" type="range" min="0.2" max="2.6" value="${foliage?.clusterDensity ?? 1.18}" step="0.01" />
+              <output>${(foliage?.clusterDensity ?? 1.18).toFixed(2)}</output>
+            </label>
+          </div>
+          <div class="inline">
+            <label>
+              Size
+              <input id="branch-module-foliage-size" type="range" min="0.08" max="1.6" value="${foliage?.size ?? 0.62}" step="0.01" />
+              <output>${(foliage?.size ?? 0.62).toFixed(2)}</output>
+            </label>
+            <label>
+              Tip bias
+              <input id="branch-module-foliage-tip" type="range" min="0" max="1" value="${foliage?.tipBias ?? 0.58}" step="0.01" />
+              <output>${(foliage?.tipBias ?? 0.58).toFixed(2)}</output>
+            </label>
+          </div>
+        </details>
+      </section>
+    ` : ""}
+    ${groundPlant ? `
+      <section class="weber-editor">
+        <h3>Ground Plant Habit & Clumps</h3>
+        <details open>
+          <summary>Habit</summary>
+          <div class="inline">
+            <label>
+              Branch spread
+              <input id="plant-branch-angle" type="range" min="0.05" max="1.55" value="${previewGenome!.branchAngle.mean}" step="0.01" />
+              <output>${previewGenome!.branchAngle.mean.toFixed(2)}</output>
+            </label>
+            <label>
+              Upright habit
+              <input id="plant-apical" type="range" min="0" max="1.35" value="${previewGenome!.apicalDominance}" step="0.01" />
+              <output>${previewGenome!.apicalDominance.toFixed(2)}</output>
+            </label>
+          </div>
+          <div class="inline">
+            <label>
+              Stem height
+              <input id="plant-height" type="range" min="0.02" max="0.8" value="${previewGenome!.internode.base}" step="0.01" />
+              <output>${previewGenome!.internode.base.toFixed(2)}</output>
+            </label>
+            <label>
+              Branch variance
+              <input id="plant-branch-spread" type="range" min="0" max="1.2" value="${previewGenome!.branchAngle.spread}" step="0.01" />
+              <output>${previewGenome!.branchAngle.spread.toFixed(2)}</output>
+            </label>
+          </div>
+        </details>
+        <details open>
+          <summary>Clumps</summary>
+          <div class="inline">
+            <label>
+              Shoot count
+              <input id="clump-count" type="range" min="1" max="24" value="${clump?.count ?? 1}" step="1" />
+              <output>${clump?.count ?? 1}</output>
+            </label>
+            <label>
+              Radius
+              <input id="clump-radius" type="range" min="0.02" max="1.5" value="${clump?.radius ?? 0.28}" step="0.01" />
+              <output>${(clump?.radius ?? 0.28).toFixed(2)}</output>
+            </label>
+          </div>
+          <div class="inline">
+            <label>
+              Jitter
+              <input id="clump-jitter" type="range" min="0" max="1" value="${clump?.jitter ?? 0.5}" step="0.01" />
+              <output>${(clump?.jitter ?? 0.5).toFixed(2)}</output>
+            </label>
+            <label>
+              Lean
+              <input id="clump-lean" type="range" min="0" max="1.4" value="${clump?.lean ?? 0.35}" step="0.01" />
+              <output>${(clump?.lean ?? 0.35).toFixed(2)}</output>
+            </label>
+          </div>
+          <div class="inline">
+            <label>
+              Scale variance
+              <input id="clump-scale-var" type="range" min="0" max="1" value="${clump?.scaleVar ?? 0.28}" step="0.01" />
+              <output>${(clump?.scaleVar ?? 0.28).toFixed(2)}</output>
+            </label>
+          </div>
+        </details>
+      </section>
+    ` : ""}
     <div class="editor-actions">
-      ${isAssetEntry ? "" : `<button type="button" id="save-entry-preset">Save as Preset</button>`}
+      ${isAssetEntry || isEzTreeEntry ? "" : `<button type="button" id="save-entry-preset">Save as Preset</button>`}
       <button type="button" class="danger" id="remove-entry">Remove Plant</button>
     </div>
   `;
@@ -1131,6 +1929,51 @@ const renderEntryEditor = () => {
     renderEntryList();
     rebuildPreview();
   });
+  const updateGenome = (fn: (genome: ProcPlantGenome) => void, options: { renderList?: boolean; renderEditor?: boolean } = {}) => {
+    const genome = editableGenomeForEntry(entry);
+    fn(genome);
+    renderJson();
+    if (options.renderList) renderEntryList();
+    if (options.renderEditor) renderEntryEditor();
+    rebuildPreview();
+  };
+  const bindGenomeNumber = (
+    selector: string,
+    format: (value: number) => string,
+    update: (genome: ProcPlantGenome, value: number) => void,
+  ) => {
+    const input = entryEditor.querySelector<HTMLInputElement>(selector);
+    if (!input) return;
+    const output = input.nextElementSibling as HTMLOutputElement;
+    input.addEventListener("input", () => {
+      const value = Number(input.value);
+      output.textContent = format(value);
+      updateGenome((genome) => update(genome, value));
+    });
+  };
+  const updateEzTree = (fn: (entry: ProcPlantBiomeMixEntry) => void, options: { renderList?: boolean; renderEditor?: boolean } = {}) => {
+    fn(entry);
+    renderJson();
+    if (options.renderList) renderEntryList();
+    if (options.renderEditor) renderEntryEditor();
+    rebuildPreview();
+  };
+  const bindEzTreeNumber = (
+    selector: string,
+    format: (value: number) => string,
+    update: (ezTree: NonNullable<ProcPlantBiomeMixEntry["ezTree"]>, value: number) => void,
+  ) => {
+    const input = entryEditor.querySelector<HTMLInputElement>(selector);
+    if (!input || !entry.ezTree) return;
+    const output = input.nextElementSibling as HTMLOutputElement;
+    input.addEventListener("input", () => {
+      const value = Number(input.value);
+      output.textContent = format(value);
+      updateEzTree((item) => {
+        if (item.ezTree) update(item.ezTree, value);
+      });
+    });
+  };
   entryEditor.querySelector<HTMLButtonElement>("#save-entry-preset")?.addEventListener("click", (event) => {
     const label = askPresetName(entry.label);
     if (!label) {
@@ -1149,6 +1992,113 @@ const renderEntryEditor = () => {
     renderUi();
     rebuildPreview();
   });
+  if (groundPlant) {
+    const ensureClump = (genome: ProcPlantGenome) => {
+      genome.clump = genome.clump ?? { count: 1, radius: 0.28, jitter: 0.5, scaleVar: 0.28, lean: 0.35 };
+      return genome.clump;
+    };
+    bindGenomeNumber("#plant-branch-angle", (v) => v.toFixed(2), (genome, value) => { genome.branchAngle.mean = value; });
+    bindGenomeNumber("#plant-apical", (v) => v.toFixed(2), (genome, value) => { genome.apicalDominance = value; });
+    bindGenomeNumber("#plant-height", (v) => v.toFixed(2), (genome, value) => {
+      const ratio = genome.internode.tip / Math.max(0.001, genome.internode.base);
+      genome.internode.base = value;
+      genome.internode.tip = Math.max(0.01, value * ratio);
+    });
+    bindGenomeNumber("#plant-branch-spread", (v) => v.toFixed(2), (genome, value) => { genome.branchAngle.spread = value; });
+    bindGenomeNumber("#clump-count", (v) => String(Math.round(v)), (genome, value) => { ensureClump(genome).count = Math.round(value); });
+    bindGenomeNumber("#clump-radius", (v) => v.toFixed(2), (genome, value) => { ensureClump(genome).radius = value; });
+    bindGenomeNumber("#clump-jitter", (v) => v.toFixed(2), (genome, value) => { ensureClump(genome).jitter = value; });
+    bindGenomeNumber("#clump-lean", (v) => v.toFixed(2), (genome, value) => { ensureClump(genome).lean = value; });
+    bindGenomeNumber("#clump-scale-var", (v) => v.toFixed(2), (genome, value) => { ensureClump(genome).scaleVar = value; });
+  }
+  if (isEzTreeEntry && entry.ezTree) {
+    entryEditor.querySelector<HTMLSelectElement>("#ez-entry-preset")?.addEventListener("change", (event) => {
+      const preset = (event.currentTarget as HTMLSelectElement).value;
+      updateEzTree((item) => {
+        const kind = ezTreeKindForPreset(preset);
+        item.ezTree = {
+          ...item.ezTree!,
+          preset: kind === "willow" ? ezTreePresetForKind(kind) : preset,
+          kind,
+          droop: kind === "willow" ? Math.max(item.ezTree?.droop ?? 0, 1) : item.ezTree?.droop ?? 0,
+        };
+        item.label = kind === "willow" ? "EZ Willow" : `EZ ${labelForProcPlantId(preset)}`;
+      }, { renderList: true, renderEditor: true });
+    });
+    bindEzTreeNumber("#ez-foliage", (v) => v.toFixed(2), (ez, value) => { ez.foliage = value; });
+    bindEzTreeNumber("#ez-spread", (v) => v.toFixed(2), (ez, value) => { ez.spread = value; });
+    bindEzTreeNumber("#ez-droop", (v) => v.toFixed(2), (ez, value) => { ez.droop = value; });
+    bindEzTreeNumber("#ez-gnarliness", (v) => v.toFixed(2), (ez, value) => { ez.gnarliness = value; });
+    entryEditor.querySelector<HTMLInputElement>("#ez-bark-color")?.addEventListener("input", (event) => {
+      updateEzTree((item) => {
+        if (item.ezTree) item.ezTree.barkColor = fromHexColor((event.currentTarget as HTMLInputElement).value, 0x6b4a2c);
+      }, { renderList: true });
+    });
+    entryEditor.querySelector<HTMLInputElement>("#ez-leaf-color")?.addEventListener("input", (event) => {
+      updateEzTree((item) => {
+        if (item.ezTree) item.ezTree.leafColor = fromHexColor((event.currentTarget as HTMLInputElement).value, 0x6f9a45);
+      }, { renderList: true });
+    });
+    entryEditor.querySelector<HTMLSelectElement>("#ez-textures")?.addEventListener("change", (event) => {
+      updateEzTree((item) => {
+        if (item.ezTree) item.ezTree.textures = (event.currentTarget as HTMLSelectElement).value === "true";
+      }, { renderEditor: true });
+    });
+  }
+  if (branchModules) {
+    const ensureBranchModules = (genome: ProcPlantGenome) => {
+      genome.branchModules = genome.branchModules ?? { palette: "decurrent-broadleaf" };
+      return genome.branchModules;
+    };
+    const ensureFoliage = (genome: ProcPlantGenome) => {
+      genome.foliage = genome.foliage ?? { mass: 0.88, clusterDensity: 1.18, whorlDensity: 0.58, tipBias: 0.58, size: 0.62 };
+      return genome.foliage;
+    };
+    entryEditor.querySelector<HTMLSelectElement>("#branch-module-palette")?.addEventListener("change", (event) => {
+      const palette = (event.currentTarget as HTMLSelectElement).value as BranchModulePalette;
+      updateGenome((genome) => {
+        const next = makeBranchModuleGenome(palette, entry.seed);
+        genome.id = next.id;
+        genome.habit = next.habit;
+        genome.branchModules = next.branchModules;
+        genome.treeRealism = next.treeRealism;
+        genome.foliage = next.foliage;
+        genome.leaf = next.leaf;
+        genome.lightResponse = next.lightResponse;
+        entry.label = `Modules ${labelForProcPlantId(palette)}`;
+      }, { renderList: true, renderEditor: true });
+    });
+    entryEditor.querySelector<HTMLButtonElement>("#branch-module-randomize")?.addEventListener("click", (event) => {
+      const dice = Math.floor(Math.random() * 1_000_000_000);
+      updateGenome((genome) => {
+        const mutated = mutateBranchModuleGenome(genome, entry.seed ^ dice);
+        entry.seed = (entry.seed ^ dice) >>> 0;
+        entry.source = "mutation";
+        entry.genome = mutated;
+        entry.label = `Modules ${labelForProcPlantId(mutated.branchModules?.palette ?? "branch")} Mutation`;
+      }, { renderList: true, renderEditor: true });
+      flashButtonText(event.currentTarget as HTMLButtonElement, "Mutated");
+    });
+    bindGenomeNumber("#branch-module-budget", (v) => String(Math.round(v)), (genome, value) => { ensureBranchModules(genome).moduleBudget = Math.round(value); });
+    bindGenomeNumber("#branch-module-levels", (v) => String(Math.round(v)), (genome, value) => { ensureBranchModules(genome).levels = Math.round(value); });
+    bindGenomeNumber("#branch-module-vigor", (v) => v.toFixed(2), (genome, value) => { ensureBranchModules(genome).vigor = value; });
+    bindGenomeNumber("#branch-module-density", (v) => v.toFixed(2), (genome, value) => { ensureBranchModules(genome).branchDensity = value; });
+    bindGenomeNumber("#branch-module-angle", (v) => v.toFixed(2), (genome, value) => { ensureBranchModules(genome).branchAngle = value; });
+    bindGenomeNumber("#branch-module-spread", (v) => v.toFixed(2), (genome, value) => { ensureBranchModules(genome).spread = value; });
+    bindGenomeNumber("#branch-module-droop", (v) => v.toFixed(2), (genome, value) => { ensureBranchModules(genome).droop = value; });
+    bindGenomeNumber("#branch-module-tropism", (v) => v.toFixed(2), (genome, value) => { ensureBranchModules(genome).tropism = value; });
+    bindGenomeNumber("#branch-module-gnarliness", (v) => v.toFixed(2), (genome, value) => { ensureBranchModules(genome).gnarliness = value; });
+    bindGenomeNumber("#branch-module-collision", (v) => v.toFixed(2), (genome, value) => { ensureBranchModules(genome).collisionBias = value; });
+    bindGenomeNumber("#branch-module-foliage-mass", (v) => v.toFixed(2), (genome, value) => { ensureFoliage(genome).mass = value; });
+    bindGenomeNumber("#branch-module-foliage-density", (v) => v.toFixed(2), (genome, value) => { ensureFoliage(genome).clusterDensity = value; });
+    bindGenomeNumber("#branch-module-foliage-size", (v) => v.toFixed(2), (genome, value) => { ensureFoliage(genome).size = value; });
+    bindGenomeNumber("#branch-module-foliage-tip", (v) => v.toFixed(2), (genome, value) => { ensureFoliage(genome).tipBias = value; });
+    entryEditor.querySelector<HTMLSelectElement>("#branch-module-foliage")?.addEventListener("change", (event) => {
+      updateGenome((genome) => {
+        ensureBranchModules(genome).foliageSource = (event.currentTarget as HTMLSelectElement).value as NonNullable<ProcPlantGenome["branchModules"]>["foliageSource"];
+      }, { renderEditor: true });
+    });
+  }
   if (weberPenn) {
     const updateTree = (fn: (genome: ProcPlantGenome) => void, options: { renderList?: boolean; renderEditor?: boolean } = {}) => {
       const genome = editableGenomeForEntry(entry);
@@ -1185,8 +2135,24 @@ const renderEntryEditor = () => {
     bindTreeNumber("#weber-stems", (v) => String(Math.round(v)), (genome, value) => { genome.weberPenn!.maxStems = Math.round(value); });
     bindTreeNumber("#weber-leaves", (v) => String(Math.round(v)), (genome, value) => { genome.weberPenn!.maxLeaves = Math.round(value); });
     bindTreeNumber("#weber-leaf-scale", (v) => v.toFixed(2), (genome, value) => { genome.weberPenn!.leafScaleMultiplier = value; });
+    const ensureRealism = (genome: ProcPlantGenome) => {
+      genome.treeRealism = genome.treeRealism ?? {
+        crownSpread: previewGenome!.habit === "conifer" ? 0.36 : 0.62,
+        crownTaper: previewGenome!.habit === "conifer" ? 0.82 : 0.36,
+        trunkFlare: 0.34,
+        trunkBend: previewGenome!.habit === "conifer" ? 0.1 : 0.16,
+        branchGnarl: previewGenome!.habit === "conifer" ? 0.16 : 0.26,
+        windFlex: 0.48,
+        colorVariance: 0.14,
+      };
+      return genome.treeRealism;
+    };
+    bindTreeNumber("#tree-crown-spread", (v) => v.toFixed(2), (genome, value) => { ensureRealism(genome).crownSpread = value; });
+    bindTreeNumber("#tree-crown-taper", (v) => v.toFixed(2), (genome, value) => { ensureRealism(genome).crownTaper = value; });
+    bindTreeNumber("#tree-trunk-bend", (v) => v.toFixed(2), (genome, value) => { ensureRealism(genome).trunkBend = value; });
+    bindTreeNumber("#tree-branch-gnarl", (v) => v.toFixed(2), (genome, value) => { ensureRealism(genome).branchGnarl = value; });
     entryEditor.querySelector<HTMLSelectElement>("#weber-foliage-mode")!.addEventListener("change", (event) => {
-      const mode = (event.currentTarget as HTMLSelectElement).value as "plain" | "procplants" | "conifer" | "mixed";
+      const mode = (event.currentTarget as HTMLSelectElement).value as WeberFoliageMode;
       if (mode === "mixed") return;
       updateTree((genome) => applyWeberFoliageMode(genome, mode), { renderEditor: true });
     });
@@ -1198,7 +2164,7 @@ const renderEntryEditor = () => {
     entryEditor.querySelector<HTMLSelectElement>("#weber-foliage-source")!.addEventListener("change", (event) => {
       updateTree((genome) => {
         genome.weberPenn!.crownFill = true;
-        genome.weberPenn!.foliageSource = (event.currentTarget as HTMLSelectElement).value as "species" | "procplants" | "conifer-spray";
+        genome.weberPenn!.foliageSource = (event.currentTarget as HTMLSelectElement).value as "species" | "procplants" | "conifer-spray" | "ez-leaf-card";
       }, { renderEditor: true });
     });
     entryEditor.querySelector<HTMLSelectElement>("#weber-fill-anchor")!.addEventListener("change", (event) => {
@@ -1271,11 +2237,25 @@ const rebuildPreview = () => {
     const assetKey = isAssetMixEntry(entry) ? entry.asset.libraryId ?? entry.id : "";
     const assetPrototype = isAssetMixEntry(entry) ? importedAssets.get(assetKey) : undefined;
     if (isAssetMixEntry(entry) && !assetPrototype) return;
-    const genome = isAssetMixEntry(entry) ? null : genomeForMixEntry(entry);
-    const prototype = assetPrototype ?? buildProcPlantObject(genome!, entry.seed, entry.environment);
-    const verticesPerPlant = geometryVertexCount(prototype);
+    const genome = isAssetMixEntry(entry) || entry.source === "ez-tree" ? null : genomeForMixEntry(entry);
     const share = Math.max(0.01, entry.weight) / weightTotal;
-    const habitCap = isAssetMixEntry(entry) || genome?.habit === "tree" || genome?.habit === "conifer" || genome?.habit === "palm" ? 12 : 36;
+    if (genome?.habit === "grass") {
+      const grassCount = Math.max(
+        80,
+        Math.min(2400, Math.round(720 * currentMix.density * entry.density * (0.6 + share * 1.6))),
+      );
+      const grassWorld = buildGrassWorldObject(entry, genome, grassCount);
+      const verticesPerTuft = geometryVertexCount(grassWorld);
+      currentVertices += verticesPerTuft * grassCount;
+      previewGroup.add(grassWorld);
+      rendered += grassCount;
+      return;
+    }
+    const prototype = entry.source === "ez-tree"
+      ? buildEzTreeObject(entry)
+      : assetPrototype ?? buildProcPlantObject(genome!, entry.seed, entry.environment);
+    const verticesPerPlant = geometryVertexCount(prototype);
+    const habitCap = isAssetMixEntry(entry) || entry.source === "ez-tree" || genome?.habit === "tree" || genome?.habit === "conifer" || genome?.habit === "palm" ? 12 : 36;
     const count = Math.max(1, Math.min(habitCap, Math.round(70 * currentMix.density * entry.density * share)));
     currentVertices += verticesPerPlant * count;
     for (let i = 0; i < count; i++) {

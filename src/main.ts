@@ -43,6 +43,13 @@ interface LabState {
   crowding: number;
   warmth: number;
   density: number;
+  foliage: number;
+  leafSize: number;
+  clumpCount: number;
+  clumpSpread: number;
+  clumpLean: number;
+  habitSpread: number;
+  habitUpright: number;
 }
 
 const state: LabState = {
@@ -55,6 +62,15 @@ const state: LabState = {
   crowding: 0.24,
   warmth: 0.72,
   density: 0.78,
+  // 1.0 = "use the preset as authored". These multiply the genome's own values
+  // so a slider at 1 is a no-op and moving it scales foliage/leaf/clump live.
+  foliage: 1,
+  leafSize: 1,
+  clumpCount: 1,
+  clumpSpread: 1,
+  clumpLean: 1,
+  habitSpread: 1,
+  habitUpright: 1,
 };
 
 const app = document.querySelector<HTMLDivElement>("#app");
@@ -64,7 +80,7 @@ app.innerHTML = `
   <div class="stage"></div>
   <section class="panel" aria-label="Procedural plant controls">
     <h1>Procplants Lab</h1>
-    <p>Deterministic phi-phyllotaxis plants with light-shaped growth, procedural leaf silhouettes, fur grass, ferns, flowers, and hybrid genomes.</p>
+    <p>Deterministic phi-phyllotaxis plants with light-shaped growth, procedural leaf silhouettes, grass carpets, ferns, flowers, and hybrid genomes.</p>
     <a class="source-link" href="https://github.com/DavinciDreams/procedural-plant-lab" target="_blank" rel="noreferrer">GitHub</a>
     <a class="source-link" href="/biome-mixer.html">Biome Mixer</a>
     <div class="control-grid">
@@ -95,6 +111,34 @@ app.innerHTML = `
       <div class="field">
         <label for="density"><span>Biome Density</span><span id="densityValue"></span></label>
         <input id="density" type="range" min="0.15" max="1" value="0.78" step="0.01" />
+      </div>
+      <div class="field">
+        <label for="foliage"><span>Foliage Mass</span><span id="foliageValue"></span></label>
+        <input id="foliage" type="range" min="0" max="2.5" value="1" step="0.05" />
+      </div>
+      <div class="field">
+        <label for="leafSize"><span>Leaf Size</span><span id="leafSizeValue"></span></label>
+        <input id="leafSize" type="range" min="0.4" max="2.5" value="1" step="0.05" />
+      </div>
+      <div class="field">
+        <label for="clumpCount"><span>Clump Count</span><span id="clumpCountValue"></span></label>
+        <input id="clumpCount" type="range" min="0" max="3" value="1" step="0.05" />
+      </div>
+      <div class="field">
+        <label for="clumpSpread"><span>Clump Spread</span><span id="clumpSpreadValue"></span></label>
+        <input id="clumpSpread" type="range" min="0.3" max="3" value="1" step="0.05" />
+      </div>
+      <div class="field">
+        <label for="clumpLean"><span>Clump Lean</span><span id="clumpLeanValue"></span></label>
+        <input id="clumpLean" type="range" min="0" max="2.5" value="1" step="0.05" />
+      </div>
+      <div class="field">
+        <label for="habitSpread"><span>Habit Spread</span><span id="habitSpreadValue"></span></label>
+        <input id="habitSpread" type="range" min="0.35" max="2.4" value="1" step="0.05" />
+      </div>
+      <div class="field">
+        <label for="habitUpright"><span>Habit Upright</span><span id="habitUprightValue"></span></label>
+        <input id="habitUpright" type="range" min="0.35" max="2.2" value="1" step="0.05" />
       </div>
       <div class="button-row">
         <button id="randomSeed" type="button">Random Seed</button>
@@ -205,6 +249,13 @@ const rangeInputs = {
   moisture: document.querySelector<HTMLInputElement>("#moisture")!,
   crowding: document.querySelector<HTMLInputElement>("#crowding")!,
   density: document.querySelector<HTMLInputElement>("#density")!,
+  foliage: document.querySelector<HTMLInputElement>("#foliage")!,
+  leafSize: document.querySelector<HTMLInputElement>("#leafSize")!,
+  clumpCount: document.querySelector<HTMLInputElement>("#clumpCount")!,
+  clumpSpread: document.querySelector<HTMLInputElement>("#clumpSpread")!,
+  clumpLean: document.querySelector<HTMLInputElement>("#clumpLean")!,
+  habitSpread: document.querySelector<HTMLInputElement>("#habitSpread")!,
+  habitUpright: document.querySelector<HTMLInputElement>("#habitUpright")!,
 };
 const rangeLabels = {
   hybrid: "hybridValue",
@@ -212,6 +263,13 @@ const rangeLabels = {
   moisture: "moistureValue",
   crowding: "crowdingValue",
   density: "densityValue",
+  foliage: "foliageValue",
+  leafSize: "leafSizeValue",
+  clumpCount: "clumpCountValue",
+  clumpSpread: "clumpSpreadValue",
+  clumpLean: "clumpLeanValue",
+  habitSpread: "habitSpreadValue",
+  habitUpright: "habitUprightValue",
 };
 
 const isSpeciesId = (value: string | null): value is SpeciesId =>
@@ -237,6 +295,13 @@ const restoreStateFromUrl = () => {
   state.crowding = readNumberParam(params, "c", state.crowding, 0, 1);
   state.warmth = readNumberParam(params, "w", state.warmth, 0, 1);
   state.density = readNumberParam(params, "d", state.density, 0.15, 1);
+  state.foliage = readNumberParam(params, "f", state.foliage, 0, 2.5);
+  state.leafSize = readNumberParam(params, "ls", state.leafSize, 0.4, 2.5);
+  state.clumpCount = readNumberParam(params, "cc", state.clumpCount, 0, 3);
+  state.clumpSpread = readNumberParam(params, "cs", state.clumpSpread, 0.3, 3);
+  state.clumpLean = readNumberParam(params, "cl", state.clumpLean, 0, 2.5);
+  state.habitSpread = readNumberParam(params, "hs", state.habitSpread, 0.35, 2.4);
+  state.habitUpright = readNumberParam(params, "hu", state.habitUpright, 0.35, 2.2);
 };
 
 installSavedProcPlantPresets();
@@ -311,6 +376,13 @@ const stateParams = (includeCamera = false) => {
   params.set("c", state.crowding.toFixed(2));
   params.set("w", state.warmth.toFixed(2));
   params.set("d", state.density.toFixed(2));
+  params.set("f", state.foliage.toFixed(2));
+  params.set("ls", state.leafSize.toFixed(2));
+  params.set("cc", state.clumpCount.toFixed(2));
+  params.set("cs", state.clumpSpread.toFixed(2));
+  params.set("cl", state.clumpLean.toFixed(2));
+  params.set("hs", state.habitSpread.toFixed(2));
+  params.set("hu", state.habitUpright.toFixed(2));
   if (includeCamera) {
     params.set("cx", camera.position.x.toFixed(3));
     params.set("cy", camera.position.y.toFixed(3));
@@ -340,12 +412,120 @@ const envFromState = (): ProcPlantEnvironment => ({
   biomeWarmth: state.warmth,
 });
 
+// Live customization: scale the selected genome's foliage/leaf/clump by the
+// override sliders. A slider at 1.0 leaves the preset untouched. We deep-clone
+// the branches we mutate so the shared preset objects are never corrupted.
+const overridesActive = () =>
+  Math.abs(state.foliage - 1) > 0.001 ||
+  Math.abs(state.leafSize - 1) > 0.001 ||
+  Math.abs(state.clumpCount - 1) > 0.001 ||
+  Math.abs(state.clumpSpread - 1) > 0.001 ||
+  Math.abs(state.clumpLean - 1) > 0.001 ||
+  Math.abs(state.habitSpread - 1) > 0.001 ||
+  Math.abs(state.habitUpright - 1) > 0.001;
+
+const applyOverrides = (genome: ProcPlantGenome): ProcPlantGenome => {
+  if (!overridesActive()) return genome;
+  const next: ProcPlantGenome = {
+    ...genome,
+    leaf: { ...genome.leaf, length: { ...genome.leaf.length } },
+    internode: { ...genome.internode },
+    branchAngle: { ...genome.branchAngle },
+    lightResponse: { ...genome.lightResponse },
+  };
+  const treeLike = genome.habit === "tree" || genome.habit === "conifer" || genome.habit === "palm";
+  const clamped = THREE.MathUtils.clamp;
+
+  if (Math.abs(state.leafSize - 1) > 0.001) {
+    next.leaf.length = {
+      ...genome.leaf.length,
+      base: genome.leaf.length.base * state.leafSize,
+      tip: genome.leaf.length.tip * state.leafSize,
+    };
+  }
+
+  if (genome.foliage && (Math.abs(state.foliage - 1) > 0.001 || Math.abs(state.leafSize - 1) > 0.001)) {
+    next.foliage = {
+      ...genome.foliage,
+      mass: genome.foliage.mass * state.foliage,
+      size: (genome.foliage.size ?? (genome.habit === "conifer" ? 0.34 : 0.56)) * state.leafSize,
+    };
+  }
+
+  if (treeLike && (Math.abs(state.habitSpread - 1) > 0.001 || Math.abs(state.habitUpright - 1) > 0.001)) {
+    const conifer = genome.habit === "conifer";
+    const realism = genome.treeRealism ?? {
+      crownSpread: conifer ? 0.36 : 0.62,
+      crownTaper: conifer ? 0.82 : 0.36,
+      trunkFlare: 0.34,
+      trunkBend: conifer ? 0.1 : 0.16,
+      branchGnarl: conifer ? 0.16 : 0.26,
+      windFlex: conifer ? 0.52 : 0.48,
+      colorVariance: 0.14,
+    };
+    next.treeRealism = {
+      ...realism,
+      crownSpread: clamped(realism.crownSpread * state.habitSpread, 0.04, 1.85),
+      crownTaper: clamped(realism.crownTaper * (2 - state.habitSpread * 0.35) + (state.habitUpright - 1) * 0.28, 0.02, 1.45),
+      trunkBend: clamped(realism.trunkBend * (2 - state.habitUpright * 0.55), 0, 0.8),
+    };
+    if (genome.foliage) {
+      next.foliage = {
+        ...next.foliage!,
+        whorlDensity: clamped((next.foliage?.whorlDensity ?? genome.foliage.whorlDensity) * state.habitSpread, 0, 1.8),
+        tipBias: clamped((next.foliage?.tipBias ?? genome.foliage.tipBias) + (state.habitUpright - 1) * 0.16, 0, 1),
+      };
+    }
+  }
+
+  if (!treeLike && (Math.abs(state.habitSpread - 1) > 0.001 || Math.abs(state.habitUpright - 1) > 0.001)) {
+    next.branchAngle = {
+      ...next.branchAngle,
+      mean: clamped(genome.branchAngle.mean * state.habitSpread, 0.08, 1.55),
+      spread: clamped(genome.branchAngle.spread * (0.65 + state.habitSpread * 0.45), 0, 1.2),
+    };
+    next.apicalDominance = clamped(genome.apicalDominance * state.habitUpright + (state.habitUpright - 1) * 0.12, 0, 1.35);
+    const heightScale = clamped(0.82 + (state.habitUpright - 1) * 0.34, 0.58, 1.42);
+    next.internode = {
+      ...next.internode,
+      base: genome.internode.base * heightScale,
+      tip: genome.internode.tip * heightScale,
+    };
+    next.leaf.curl = clamped(genome.leaf.curl + (1 - state.habitUpright) * 0.12, -0.4, 0.8);
+  }
+
+  // Clump: scale count/spread/lean, or synthesize a clump if the user dials
+  // count up on a preset that has none (herbaceous plants only).
+  if (!treeLike && (
+    Math.abs(state.clumpCount - 1) > 0.001 ||
+    Math.abs(state.clumpSpread - 1) > 0.001 ||
+    Math.abs(state.clumpLean - 1) > 0.001 ||
+    Math.abs(state.habitSpread - 1) > 0.001
+  )) {
+    const baseClump = genome.clump ?? { count: 1, radius: 0.28, jitter: 0.5, scaleVar: 0.28, lean: 0.35 };
+    const count = Math.max(1, Math.round(baseClump.count * state.clumpCount));
+    if (count > 1) {
+      next.clump = {
+        ...baseClump,
+        count,
+        radius: baseClump.radius * state.clumpSpread * (0.8 + state.habitSpread * 0.2),
+        lean: (baseClump.lean ?? 0.18) * state.clumpLean * (2 - state.habitUpright * 0.35),
+      };
+    } else {
+      next.clump = undefined;
+    }
+  }
+
+  return next;
+};
+
 const selectedGenome = (): ProcPlantGenome => {
   const a = procPlantPresets[state.primary];
   const b = procPlantPresets[state.secondary];
-  return state.hybrid <= 0.001
+  const base = state.hybrid <= 0.001
     ? a
     : hybridizePlantGenomes(a, b, state.hybrid, state.seed ^ 0x9e3779b9);
+  return applyOverrides(base);
 };
 
 const pushTemplate = (
@@ -454,6 +634,99 @@ const geometryForBucket = (bucket: InstanceBucket): THREE.BufferGeometry => {
   return createProcPlantFlowerCenterGeometry();
 };
 
+const grassWorldInfluence = (genome: ProcPlantGenome) => {
+  const primaryGrass = procPlantPresets[state.primary]?.habit === "grass" ? 1 - state.hybrid : 0;
+  const secondaryGrass = procPlantPresets[state.secondary]?.habit === "grass" ? state.hybrid : 0;
+  return Math.max(genome.habit === "grass" ? 1 : 0, primaryGrass + secondaryGrass);
+};
+
+const createGrassTuftGeometry = (seed: number, bladeCount = 12): THREE.BufferGeometry => {
+  const rng = rand(seed);
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const indices: number[] = [];
+  const up = new THREE.Vector3(0, 1, 0);
+  for (let i = 0; i < bladeCount; i++) {
+    const yaw = i * GOLDEN_ANGLE_RADIANS + (rng() - 0.5) * 0.7;
+    const radial = new THREE.Vector3(Math.cos(yaw), 0, Math.sin(yaw));
+    const side = new THREE.Vector3(-radial.z, 0, radial.x);
+    const height = 0.34 + rng() * 0.52;
+    const width = 0.012 + rng() * 0.014;
+    const baseSpread = Math.sqrt(rng()) * 0.075;
+    const base = radial.clone().multiplyScalar(baseSpread);
+    const bend = radial.clone().multiplyScalar((0.06 + rng() * 0.18) * height);
+    const mid = base.clone().add(up.clone().multiplyScalar(height * 0.55)).add(bend.clone().multiplyScalar(0.42));
+    const tip = base.clone().add(up.clone().multiplyScalar(height)).add(bend);
+    const normal = new THREE.Vector3().crossVectors(side, tip.clone().sub(base)).normalize();
+    const start = positions.length / 3;
+    const points = [
+      base.clone().add(side.clone().multiplyScalar(-width)),
+      base.clone().add(side.clone().multiplyScalar(width)),
+      mid.clone().add(side.clone().multiplyScalar(width * 0.58)),
+      mid.clone().add(side.clone().multiplyScalar(-width * 0.58)),
+      tip,
+    ];
+    for (const point of points) {
+      positions.push(point.x, point.y, point.z);
+      normals.push(normal.x, normal.y, normal.z);
+    }
+    indices.push(start, start + 1, start + 2, start, start + 2, start + 3, start + 3, start + 2, start + 4);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setIndex(indices);
+  geometry.computeBoundingSphere();
+  return geometry;
+};
+
+const addGrassCarpet = (
+  group: THREE.Group,
+  genome: ProcPlantGenome,
+  env: ProcPlantEnvironment,
+) => {
+  const influence = grassWorldInfluence(genome);
+  if (influence < 0.18) return { tufts: 0, blades: 0, triangles: 0 };
+  const rng = rand(state.seed ^ 0xb17ade);
+  const tuftCount = Math.round(THREE.MathUtils.lerp(180, 1350, state.density) * influence);
+  const bladeCount = Math.round(THREE.MathUtils.lerp(8, 15, state.foliage / 2.5));
+  const geometry = createGrassTuftGeometry(state.seed ^ 0x61a55, bladeCount);
+  const mesh = new THREE.InstancedMesh(geometry, organMaterial, tuftCount);
+  mesh.name = "procedural-grass-carpet";
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  const baseColor = new THREE.Color(genome.leaf.colorA);
+  const tipColor = new THREE.Color(genome.leaf.colorB);
+  const matrix = new THREE.Matrix4();
+  const quat = new THREE.Quaternion();
+  const scale = new THREE.Vector3();
+  const color = new THREE.Color();
+  for (let i = 0; i < tuftCount; i++) {
+    const radius = Math.sqrt(rng()) * 7.2;
+    const angle = i * GOLDEN_ANGLE_RADIANS + rng() * 0.38;
+    const x = Math.cos(angle) * radius;
+    const z = Math.sin(angle) * radius;
+    const moistureLift = THREE.MathUtils.lerp(0.78, 1.18, env.moisture);
+    const shadeStretch = THREE.MathUtils.lerp(0.82, 1.24, 1 - env.light);
+    const tuftScale = (0.48 + rng() * 0.62) * moistureLift * shadeStretch * state.leafSize;
+    const lean = (rng() - 0.5) * 0.18 + env.crowding * 0.08;
+    quat.setFromEuler(new THREE.Euler(lean, rng() * Math.PI * 2, (rng() - 0.5) * 0.08));
+    scale.set(tuftScale, tuftScale * (0.78 + state.foliage * 0.18), tuftScale);
+    matrix.compose(new THREE.Vector3(x, 0.018, z), quat, scale);
+    mesh.setMatrixAt(i, matrix);
+    color.copy(baseColor).lerp(tipColor, 0.28 + rng() * 0.62);
+    if (rng() < 0.22) color.lerp(new THREE.Color(0xd7c86f), 0.16 + rng() * 0.18);
+    mesh.setColorAt(i, color);
+  }
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  mesh.instanceMatrix.needsUpdate = true;
+  group.add(mesh);
+  currentStats.draws += 1;
+  const triangles = ((geometry.index?.count ?? geometry.getAttribute("position").count) / 3) * tuftCount;
+  return { tufts: tuftCount, blades: tuftCount * bladeCount, triangles };
+};
+
 const addInstanceToBucket = (
   buckets: Map<string, InstanceBucket>,
   kindGenome: ProcPlantGenome,
@@ -560,6 +833,12 @@ const scatterBiome = (genome: ProcPlantGenome, env: ProcPlantEnvironment): THREE
     currentStats.draws += 1;
   }
 
+  const carpet = addGrassCarpet(group, genome, env);
+  leaves += carpet.blades;
+  triangles += carpet.triangles;
+  plants += carpet.tufts;
+  currentStats.plants = plants;
+  currentStats.leaves = leaves;
   currentStats.triangles = Math.round(triangles);
   return group;
 };
@@ -653,6 +932,13 @@ bindRange("light", "lightValue");
 bindRange("moisture", "moistureValue");
 bindRange("crowding", "crowdingValue");
 bindRange("density", "densityValue");
+bindRange("foliage", "foliageValue");
+bindRange("leafSize", "leafSizeValue");
+bindRange("clumpCount", "clumpCountValue");
+bindRange("clumpSpread", "clumpSpreadValue");
+bindRange("clumpLean", "clumpLeanValue");
+bindRange("habitSpread", "habitSpreadValue");
+bindRange("habitUpright", "habitUprightValue");
 
 document.querySelector<HTMLButtonElement>("#randomSeed")!.addEventListener("click", () => {
   state.seed = Math.floor(Math.random() * 1_000_000);

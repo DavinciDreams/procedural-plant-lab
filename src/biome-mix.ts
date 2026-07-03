@@ -14,9 +14,20 @@ export type ProcPlantBiomeMixSource = "ecology" | "custom";
 export interface ProcPlantBiomeMixEntry {
   id: string;
   label: string;
-  source: "preset" | "mutation" | "asset";
+  source: "preset" | "mutation" | "asset" | "ez-tree";
   presetId?: string;
   genome?: ProcPlantGenome;
+  ezTree?: {
+    preset: string;
+    kind: "pine" | "oak" | "aspen" | "ash" | "willow" | "bush";
+    barkColor?: number;
+    leafColor?: number;
+    foliage?: number;
+    spread?: number;
+    droop?: number;
+    gnarliness?: number;
+    textures?: boolean;
+  };
   asset?: {
     kind: "glb";
     name: string;
@@ -225,9 +236,36 @@ export const normalizeBiomeMixDefinition = (raw: unknown): ProcPlantBiomeMixDefi
   const entries = raw.entries
     .map((entry): ProcPlantBiomeMixEntry | null => {
       if (!isRecord(entry)) return null;
-      const source = entry.source === "asset" ? "asset" : entry.source === "mutation" ? "mutation" : "preset";
+      const source = entry.source === "asset"
+        ? "asset"
+        : entry.source === "ez-tree"
+          ? "ez-tree"
+          : entry.source === "mutation"
+            ? "mutation"
+            : "preset";
       const presetId = typeof entry.presetId === "string" ? entry.presetId : undefined;
       const genome = isRecord(entry.genome) ? (entry.genome as unknown as ProcPlantGenome) : undefined;
+      const ezTree = isRecord(entry.ezTree) && typeof entry.ezTree.preset === "string"
+        ? {
+          preset: entry.ezTree.preset,
+          kind: (
+            entry.ezTree.kind === "oak" ||
+            entry.ezTree.kind === "aspen" ||
+            entry.ezTree.kind === "ash" ||
+            entry.ezTree.kind === "willow" ||
+            entry.ezTree.kind === "bush"
+              ? entry.ezTree.kind
+              : "pine"
+          ) as "pine" | "oak" | "aspen" | "ash" | "willow" | "bush",
+          barkColor: typeof entry.ezTree.barkColor === "number" ? entry.ezTree.barkColor : undefined,
+          leafColor: typeof entry.ezTree.leafColor === "number" ? entry.ezTree.leafColor : undefined,
+          foliage: typeof entry.ezTree.foliage === "number" ? entry.ezTree.foliage : undefined,
+          spread: typeof entry.ezTree.spread === "number" ? entry.ezTree.spread : undefined,
+          droop: typeof entry.ezTree.droop === "number" ? entry.ezTree.droop : undefined,
+          gnarliness: typeof entry.ezTree.gnarliness === "number" ? entry.ezTree.gnarliness : undefined,
+          textures: entry.ezTree.textures !== false,
+        }
+        : undefined;
       const asset = isRecord(entry.asset) && entry.asset.kind === "glb" && typeof entry.asset.name === "string"
         ? {
           kind: "glb" as const,
@@ -238,17 +276,19 @@ export const normalizeBiomeMixDefinition = (raw: unknown): ProcPlantBiomeMixDefi
         }
         : undefined;
       if (source === "asset" && !asset) return null;
-      if (source !== "asset" && !genome && (!presetId || !procPlantPresets[presetId])) return null;
+      if (source === "ez-tree" && !ezTree) return null;
+      if (source !== "asset" && source !== "ez-tree" && !genome && (!presetId || !procPlantPresets[presetId])) return null;
       return {
-        id: typeof entry.id === "string" ? entry.id : slug(presetId ?? genome?.id ?? "entry"),
-        label: typeof entry.label === "string" ? entry.label : labelForProcPlantId(presetId ?? genome?.id ?? "Plant"),
+        id: typeof entry.id === "string" ? entry.id : slug(presetId ?? genome?.id ?? ezTree?.preset ?? "entry"),
+        label: typeof entry.label === "string" ? entry.label : labelForProcPlantId(presetId ?? genome?.id ?? ezTree?.preset ?? "Plant"),
         source,
         presetId,
         genome,
+        ezTree,
         asset,
         weight: typeof entry.weight === "number" ? entry.weight : 1,
         density: typeof entry.density === "number" ? entry.density : 0.45,
-        scale: typeof entry.scale === "number" ? entry.scale : genome ? scaleForGenome(genome) : 1,
+        scale: typeof entry.scale === "number" ? entry.scale : source === "ez-tree" ? 8 : genome ? scaleForGenome(genome) : 1,
         environment: isRecord(entry.environment)
           ? { ...defaultPlantEnvironment(), ...(entry.environment as Partial<ProcPlantEnvironment>) }
           : environmentForSample(sample),

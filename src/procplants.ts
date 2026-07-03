@@ -91,6 +91,25 @@ export interface ProcPlantGenome {
     tipBias: number;
     size?: number;
   };
+  /**
+   * Grow this plant as a clump of several offset rosettes/shoots instead of a
+   * single stalk. Applies to the procplant-graph backend (herbaceous plants,
+   * grasses, ferns, flowers) — Weber&Penn trees ignore it. Makes daylilies,
+   * grasses, and meadow flowers render as a believable mound of foliage with
+   * multiple flowering stems rather than one lonely shoot.
+   */
+  clump?: {
+    /** Number of shoots in the clump (1 = single plant, off). */
+    count: number;
+    /** Ground radius (in local units) the shoots spread across. */
+    radius: number;
+    /** Extra positional randomness added to the spread [0..1]. */
+    jitter?: number;
+    /** Per-shoot scale variation [0..1]; 0 = uniform, 1 = up to ±50%. */
+    scaleVar?: number;
+    /** Outward lean of peripheral shoots in radians (arching mound look). */
+    lean?: number;
+  };
   treeRealism?: {
     crownSpread: number;
     crownTaper: number;
@@ -104,7 +123,7 @@ export interface ProcPlantGenome {
     species: SpeciesId;
     nativeLeaves?: boolean;
     crownFill?: boolean;
-    foliageSource?: "species" | "procplants" | "conifer-spray";
+    foliageSource?: "species" | "procplants" | "conifer-spray" | "ez-leaf-card";
     fillAnchor?: "leaf-sites" | "branch-tips";
     maxBranchDepth?: number;
     maxStems?: number;
@@ -113,6 +132,22 @@ export interface ProcPlantGenome {
     blossomScaleMultiplier?: number;
     radialSegments?: number;
     branchSamples?: number;
+    barkColor?: number;
+    leafColor?: number;
+  };
+  branchModules?: {
+    palette: "excurrent-conifer" | "decurrent-broadleaf" | "weeping" | "shrub" | "palm-ish" | "vine-ish";
+    moduleBudget?: number;
+    levels?: number;
+    vigor?: number;
+    branchDensity?: number;
+    branchAngle?: number;
+    spread?: number;
+    droop?: number;
+    tropism?: number;
+    gnarliness?: number;
+    collisionBias?: number;
+    foliageSource?: "procplants" | "conifer-spray" | "ez-leaf-card";
     barkColor?: number;
     leafColor?: number;
   };
@@ -213,7 +248,7 @@ export interface ProcPlantRuntimePackage {
   seed: number;
   genomeId: string;
   architecture: {
-    backend: "procplant-graph" | "weber-penn";
+    backend: "procplant-graph" | "weber-penn" | "branch-module-graph";
     species?: string;
     habit: ProcPlantHabit;
   };
@@ -322,6 +357,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       colorB: 0xa6cf62,
     },
     grass: { blades: 38, furBias: 0.9, heightJitter: 0.38 },
+    clump: { count: 5, radius: 0.22, jitter: 0.6, scaleVar: 0.32, lean: 0.5 },
     lightResponse: {
       shadeAvoidance: 0.45,
       leafBoostInShade: 0.2,
@@ -350,6 +386,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       colorB: 0x73b851,
     },
     fern: { pinnae: 19, leafletPairs: 5, arch: 0.72 },
+    clump: { count: 6, radius: 0.26, jitter: 0.55, scaleVar: 0.3, lean: 0.62 },
     lightResponse: {
       shadeAvoidance: 0.2,
       leafBoostInShade: 0.45,
@@ -384,6 +421,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       color: 0xffc0d7,
       centerColor: 0xf4c94c,
     },
+    clump: { count: 6, radius: 0.28, jitter: 0.6, scaleVar: 0.3, lean: 0.34 },
     lightResponse: {
       shadeAvoidance: 0.72,
       leafBoostInShade: 0.18,
@@ -418,6 +456,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       color: 0xf08ae0,
       centerColor: 0xd09239,
     },
+    clump: { count: 5, radius: 0.3, jitter: 0.55, scaleVar: 0.28, lean: 0.28 },
     lightResponse: {
       shadeAvoidance: 0.68,
       leafBoostInShade: 0.16,
@@ -486,6 +525,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       color: 0xff8f2f,
       centerColor: 0xffd158,
     },
+    clump: { count: 7, radius: 0.32, jitter: 0.5, scaleVar: 0.28, lean: 0.42 },
     lightResponse: {
       shadeAvoidance: 0.58,
       leafBoostInShade: 0.12,
@@ -724,6 +764,7 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       color: 0xb79cff,
       centerColor: 0xffd26a,
     },
+    clump: { count: 5, radius: 0.24, jitter: 0.5, scaleVar: 0.26, lean: 0.4 },
     lightResponse: {
       shadeAvoidance: 0.58,
       leafBoostInShade: 0.12,
@@ -1071,16 +1112,17 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       leafClusterScale: 1.05,
       exposedTrunk: 0.28,
     },
-    foliage: { mass: 0.78, clusterDensity: 1.35, whorlDensity: 0.45, tipBias: 0.58 },
+    foliage: { mass: 1.1, clusterDensity: 1.5, whorlDensity: 0.5, tipBias: 0.62, size: 0.82 },
     treeRealism: { crownSpread: 0.78, crownTaper: 0.36, trunkFlare: 0.46, trunkBend: 0.16, branchGnarl: 0.32, windFlex: 0.42, colorVariance: 0.16 },
     weberPenn: {
       species: "cambridgeOak",
       nativeLeaves: true,
-      crownFill: false,
-      foliageSource: "species",
+      crownFill: true,
+      foliageSource: "procplants",
+      fillAnchor: "leaf-sites",
       maxBranchDepth: 3,
       maxStems: 80,
-      maxLeaves: 180,
+      maxLeaves: 220,
       leafScaleMultiplier: 2.05,
       radialSegments: 4,
       branchSamples: 2,
@@ -1118,16 +1160,17 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       leafClusterScale: 0.82,
       exposedTrunk: 0.5,
     },
-    foliage: { mass: 0.58, clusterDensity: 1.02, whorlDensity: 0.36, tipBias: 0.72 },
+    foliage: { mass: 0.92, clusterDensity: 1.3, whorlDensity: 0.42, tipBias: 0.76, size: 0.68 },
     treeRealism: { crownSpread: 0.46, crownTaper: 0.22, trunkFlare: 0.24, trunkBend: 0.22, branchGnarl: 0.18, windFlex: 0.74, colorVariance: 0.18 },
     weberPenn: {
       species: "silverBirch",
       nativeLeaves: true,
-      crownFill: false,
-      foliageSource: "species",
+      crownFill: true,
+      foliageSource: "procplants",
+      fillAnchor: "leaf-sites",
       maxBranchDepth: 3,
       maxStems: 72,
-      maxLeaves: 160,
+      maxLeaves: 200,
       leafScaleMultiplier: 3.05,
       radialSegments: 4,
       branchSamples: 2,
@@ -1165,16 +1208,17 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       leafClusterScale: 1.14,
       exposedTrunk: 0.56,
     },
-    foliage: { mass: 0.62, clusterDensity: 1.18, whorlDensity: 0.5, tipBias: 0.84 },
+    foliage: { mass: 0.98, clusterDensity: 1.35, whorlDensity: 0.55, tipBias: 0.88, size: 0.6 },
     treeRealism: { crownSpread: 0.92, crownTaper: 0.18, trunkFlare: 0.38, trunkBend: 0.18, branchGnarl: 0.28, windFlex: 0.5, colorVariance: 0.14 },
     weberPenn: {
       species: "sassafras",
       nativeLeaves: true,
-      crownFill: false,
-      foliageSource: "species",
+      crownFill: true,
+      foliageSource: "procplants",
+      fillAnchor: "leaf-sites",
       maxBranchDepth: 3,
       maxStems: 72,
-      maxLeaves: 160,
+      maxLeaves: 200,
       leafScaleMultiplier: 2.1,
       radialSegments: 4,
       branchSamples: 2,
@@ -1212,16 +1256,17 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       leafClusterScale: 0.96,
       exposedTrunk: 0.32,
     },
-    foliage: { mass: 0.72, clusterDensity: 1.22, whorlDensity: 0.44, tipBias: 0.62 },
+    foliage: { mass: 1.0, clusterDensity: 1.4, whorlDensity: 0.5, tipBias: 0.6, size: 0.7 },
     treeRealism: { crownSpread: 0.68, crownTaper: 0.3, trunkFlare: 0.62, trunkBend: 0.24, branchGnarl: 0.36, windFlex: 0.48, colorVariance: 0.18 },
     weberPenn: {
       species: "blackTupelo",
       nativeLeaves: true,
-      crownFill: false,
-      foliageSource: "species",
+      crownFill: true,
+      foliageSource: "procplants",
+      fillAnchor: "leaf-sites",
       maxBranchDepth: 3,
       maxStems: 80,
-      maxLeaves: 170,
+      maxLeaves: 200,
       leafScaleMultiplier: 2.2,
       radialSegments: 4,
       branchSamples: 2,
@@ -1253,16 +1298,17 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       colorA: 0x263f32,
       colorB: 0x6f8f74,
     },
-    foliage: { mass: 0.92, clusterDensity: 1.26, whorlDensity: 0.84, tipBias: 0.38 },
-    treeRealism: { crownSpread: 0.38, crownTaper: 0.86, trunkFlare: 0.34, trunkBend: 0.14, branchGnarl: 0.18, windFlex: 0.58, colorVariance: 0.12 },
+    foliage: { mass: 1.15, clusterDensity: 1.4, whorlDensity: 0.9, tipBias: 0.34, size: 0.68 },
+    treeRealism: { crownSpread: 0.44, crownTaper: 0.78, trunkFlare: 0.34, trunkBend: 0.14, branchGnarl: 0.18, windFlex: 0.58, colorVariance: 0.12 },
     weberPenn: {
       species: "smallPine",
-      nativeLeaves: true,
-      crownFill: false,
-      foliageSource: "species",
+      nativeLeaves: false,
+      crownFill: true,
+      foliageSource: "conifer-spray",
+      fillAnchor: "leaf-sites",
       maxBranchDepth: 3,
-      maxStems: 84,
-      maxLeaves: 180,
+      maxStems: 96,
+      maxLeaves: 260,
       leafScaleMultiplier: 2.6,
       radialSegments: 4,
       branchSamples: 2,
@@ -1294,16 +1340,17 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       colorA: 0x1f392e,
       colorB: 0x6b8a63,
     },
-    foliage: { mass: 1.04, clusterDensity: 1.36, whorlDensity: 0.96, tipBias: 0.32 },
-    treeRealism: { crownSpread: 0.34, crownTaper: 0.94, trunkFlare: 0.36, trunkBend: 0.1, branchGnarl: 0.16, windFlex: 0.5, colorVariance: 0.1 },
+    foliage: { mass: 1.25, clusterDensity: 1.45, whorlDensity: 0.95, tipBias: 0.3, size: 0.6 },
+    treeRealism: { crownSpread: 0.36, crownTaper: 0.88, trunkFlare: 0.36, trunkBend: 0.1, branchGnarl: 0.16, windFlex: 0.5, colorVariance: 0.1 },
     weberPenn: {
       species: "balsamFir",
-      nativeLeaves: true,
-      crownFill: false,
-      foliageSource: "species",
+      nativeLeaves: false,
+      crownFill: true,
+      foliageSource: "conifer-spray",
+      fillAnchor: "leaf-sites",
       maxBranchDepth: 3,
-      maxStems: 92,
-      maxLeaves: 220,
+      maxStems: 104,
+      maxLeaves: 300,
       leafScaleMultiplier: 2.85,
       radialSegments: 4,
       branchSamples: 2,
@@ -1335,16 +1382,17 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       colorA: 0x264735,
       colorB: 0x78965e,
     },
-    foliage: { mass: 0.6, clusterDensity: 0.86, whorlDensity: 0.5, tipBias: 0.62 },
-    treeRealism: { crownSpread: 0.3, crownTaper: 0.82, trunkFlare: 0.42, trunkBend: 0.12, branchGnarl: 0.22, windFlex: 0.38, colorVariance: 0.1 },
+    foliage: { mass: 1.05, clusterDensity: 1.2, whorlDensity: 0.6, tipBias: 0.5, size: 0.52 },
+    treeRealism: { crownSpread: 0.32, crownTaper: 0.84, trunkFlare: 0.42, trunkBend: 0.12, branchGnarl: 0.22, windFlex: 0.38, colorVariance: 0.1 },
     weberPenn: {
       species: "douglasFir",
-      nativeLeaves: true,
-      crownFill: false,
-      foliageSource: "species",
+      nativeLeaves: false,
+      crownFill: true,
+      foliageSource: "conifer-spray",
+      fillAnchor: "leaf-sites",
       maxBranchDepth: 3,
-      maxStems: 84,
-      maxLeaves: 190,
+      maxStems: 96,
+      maxLeaves: 300,
       leafScaleMultiplier: 2.45,
       radialSegments: 4,
       branchSamples: 2,
@@ -1473,6 +1521,7 @@ export const hybridizePlantGenomes = (
           }
         : undefined,
     weberPenn: pick(a.weberPenn, b.weberPenn),
+    branchModules: pick(a.branchModules, b.branchModules),
     tree: pick(a.tree, b.tree),
     lightResponse: {
       shadeAvoidance: THREE.MathUtils.lerp(
@@ -3109,6 +3158,19 @@ export const buildProcPlantInstancedParts = (
   seed = 1,
   env: ProcPlantEnvironment = defaultPlantEnvironment(),
 ): ProcPlantInstancedParts => {
+  if (genome.branchModules) {
+    const built = buildBranchModuleGraphTemplate(genome, seed, env);
+    return {
+      stems: built.template,
+      instances: [],
+      graph: built.graph,
+      stats: {
+        ...built.stats,
+        stemTriangles: built.template.idx.length / 3,
+        instances: 0,
+      },
+    };
+  }
   if (genome.weberPenn) {
     const built = buildWeberPennProcPlantTemplate(genome, seed, env);
     return {
@@ -3122,6 +3184,19 @@ export const buildProcPlantInstancedParts = (
       },
     };
   }
+  const clump = genome.clump;
+  if (clump && clump.count > 1) {
+    return buildProcPlantClumpParts(genome, seed, env, clump);
+  }
+  return buildProcPlantSingleShootParts(genome, seed, env);
+};
+
+/** Build one shoot of the procplant-graph backend (leaf/flower/grass organs). */
+const buildProcPlantSingleShootParts = (
+  genome: ProcPlantGenome,
+  seed: number,
+  env: ProcPlantEnvironment,
+): ProcPlantInstancedParts => {
   const graph = buildProcPlantGraph(genome, seed, env);
   const stemBuilder = new TemplateBuilder();
   const shade = 1 - THREE.MathUtils.clamp(env.light, 0, 1);
@@ -3165,6 +3240,88 @@ export const buildProcPlantInstancedParts = (
       stemTriangles: stems.idx.length / 3,
       instances: instances.length,
       triangles: stems.idx.length / 3 + instances.length,
+    },
+  };
+};
+
+/**
+ * Build a clump: several offset shoots of the same genome merged into one part
+ * set. Each shoot gets its own seed, a golden-angle placement inside the clump
+ * radius, slight scale variation, and an outward lean so the mound arches.
+ */
+const buildProcPlantClumpParts = (
+  genome: ProcPlantGenome,
+  seed: number,
+  env: ProcPlantEnvironment,
+  clump: NonNullable<ProcPlantGenome["clump"]>,
+): ProcPlantInstancedParts => {
+  const count = Math.max(1, Math.min(24, Math.round(clump.count)));
+  const radius = Math.max(0, clump.radius);
+  const jitter = THREE.MathUtils.clamp(clump.jitter ?? 0.4, 0, 1);
+  const scaleVar = THREE.MathUtils.clamp(clump.scaleVar ?? 0.25, 0, 1);
+  const lean = clump.lean ?? 0.18;
+  const rng = rngFromSeed((seed ^ 0x27d4eb2f) >>> 0);
+
+  let mergedStems: ProcPlantTemplate | null = null;
+  const instances: ProcPlantInstance[] = [];
+  const mergedGraph: ProcPlantGraph = { stems: [], segments: [], organs: [] };
+  let leaves = 0;
+  let flowers = 0;
+  let stemTriangles = 0;
+
+  for (let i = 0; i < count; i++) {
+    const shoot = buildProcPlantSingleShootParts(genome, (seed + i * 2749) >>> 0, env);
+
+    // Placement: first shoot at center, rest spiralled out via golden angle.
+    const ringT = count > 1 ? i / (count - 1) : 0;
+    const spread = i === 0 ? 0 : radius * (0.35 + ringT * 0.65);
+    const angle = i * GOLDEN_ANGLE + (rng() - 0.5) * jitter * 1.4;
+    const jitterR = spread * (1 + (rng() - 0.5) * jitter);
+    const ox = Math.cos(angle) * jitterR;
+    const oz = Math.sin(angle) * jitterR;
+
+    const shootScale = 1 + (rng() - 0.5) * scaleVar;
+    // Peripheral shoots lean away from clump center for an arching mound.
+    const leanAxis = new THREE.Vector3(-Math.sin(angle), 0, Math.cos(angle));
+    const leanQuat = new THREE.Quaternion().setFromAxisAngle(leanAxis, lean * ringT);
+    const spinQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rng() * Math.PI * 2, 0));
+    const quat = leanQuat.multiply(spinQuat);
+
+    const matrix = new THREE.Matrix4().compose(
+      new THREE.Vector3(ox, 0, oz),
+      quat,
+      new THREE.Vector3(shootScale, shootScale, shootScale),
+    );
+
+    const transformedStems = transformTemplate(shoot.stems, matrix);
+    mergedStems = mergedStems ? combineTemplates(mergedStems, transformedStems) : transformedStems;
+
+    for (const inst of shoot.instances) {
+      instances.push({
+        kind: inst.kind,
+        matrix: matrix.clone().multiply(inst.matrix),
+        color: inst.color.clone(),
+        sway: inst.sway,
+      });
+    }
+
+    leaves += shoot.stats.leaves;
+    flowers += shoot.stats.flowers;
+    stemTriangles += shoot.stats.stemTriangles;
+  }
+
+  const stems = mergedStems ?? buildProcPlantSingleShootParts(genome, seed, env).stems;
+  return {
+    stems,
+    instances,
+    graph: mergedGraph,
+    stats: {
+      stems: 0,
+      leaves,
+      flowers,
+      stemTriangles,
+      instances: instances.length,
+      triangles: stemTriangles + instances.length,
     },
   };
 };
@@ -3233,7 +3390,7 @@ export const createProcPlantGrassBladeGeometry = (widthRatio: number, curl = 0):
   return geometry;
 };
 
-export const createProcPlantConiferSprayGeometry = (): THREE.BufferGeometry => {
+export const createProcPlantConiferSprayGeometry = (detail: "full" | "light" = "full"): THREE.BufferGeometry => {
   const positions: number[] = [];
   const normals: number[] = [];
   const indices: number[] = [];
@@ -3257,7 +3414,7 @@ export const createProcPlantConiferSprayGeometry = (): THREE.BufferGeometry => {
     ridge: number,
     droop: number,
   ) => {
-    const rows = 4;
+    const rows = detail === "light" ? 2 : 4;
     const left: THREE.Vector3[] = [];
     const center: THREE.Vector3[] = [];
     const right: THREE.Vector3[] = [];
@@ -3281,8 +3438,10 @@ export const createProcPlantConiferSprayGeometry = (): THREE.BufferGeometry => {
   addNeedlePlate(0.085, 1.02, 0, 0, 0, 0.02, 0.035, 0.11);
   addNeedlePlate(0.06, 0.82, 0.08, -0.075, -0.022, -0.035, 0.025, 0.12);
   addNeedlePlate(0.06, 0.82, 0.12, 0.08, -0.026, 0.04, 0.025, 0.12);
-  addNeedlePlate(0.045, 0.62, 0.22, -0.12, -0.042, -0.035, 0.018, 0.1);
-  addNeedlePlate(0.045, 0.62, 0.26, 0.13, -0.048, 0.035, 0.018, 0.1);
+  if (detail === "full") {
+    addNeedlePlate(0.045, 0.62, 0.22, -0.12, -0.042, -0.035, 0.018, 0.1);
+    addNeedlePlate(0.045, 0.62, 0.26, 0.13, -0.048, 0.035, 0.018, 0.1);
+  }
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
@@ -3384,6 +3543,29 @@ const combineTemplates = (base: ProcPlantTemplate, extra: ProcPlantTemplate): Pr
 
 const emptyGraph = (): ProcPlantGraph => ({ stems: [], segments: [], organs: [] });
 
+/** Apply a world matrix to every vertex of a template (positions + normals). */
+const transformTemplate = (template: ProcPlantTemplate, matrix: THREE.Matrix4): ProcPlantTemplate => {
+  const normalMatrix = new THREE.Matrix3().getNormalMatrix(matrix);
+  const pos = new Float32Array(template.pos.length);
+  const nrm = new Float32Array(template.nrm.length);
+  const p = new THREE.Vector3();
+  const n = new THREE.Vector3();
+  for (let i = 0; i < template.pos.length; i += 3) {
+    p.set(template.pos[i]!, template.pos[i + 1]!, template.pos[i + 2]!).applyMatrix4(matrix);
+    n.set(template.nrm[i]!, template.nrm[i + 1]!, template.nrm[i + 2]!).applyMatrix3(normalMatrix).normalize();
+    pos[i] = p.x; pos[i + 1] = p.y; pos[i + 2] = p.z;
+    nrm[i] = n.x; nrm[i + 1] = n.y; nrm[i + 2] = n.z;
+  }
+  return {
+    pos,
+    nrm,
+    col: template.col.slice(),
+    tintable: template.tintable.slice(),
+    sway: template.sway.slice(),
+    idx: template.idx.slice(),
+  };
+};
+
 interface WeberPennFoliageAnchor {
   position: THREE.Vector3;
   direction: THREE.Vector3;
@@ -3417,9 +3599,54 @@ const geometryFromWeberPennLeafShape = (genome: ProcPlantGenome): THREE.BufferGe
   return geometry;
 };
 
+const createWeberPennEzLeafCardGeometry = (): THREE.BufferGeometry => {
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+  const addCard = (rotation: number) => {
+    const c = Math.cos(rotation);
+    const s = Math.sin(rotation);
+    const points = [
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(-0.26, 0.18, 0),
+      new THREE.Vector3(-0.46, 0.46, 0),
+      new THREE.Vector3(-0.34, 0.74, 0),
+      new THREE.Vector3(0, 1, 0),
+      new THREE.Vector3(0.34, 0.74, 0),
+      new THREE.Vector3(0.46, 0.46, 0),
+      new THREE.Vector3(0.26, 0.18, 0),
+    ].map((p) => new THREE.Vector3(p.x * c + p.z * s, p.y, -p.x * s + p.z * c));
+    const normal = new THREE.Vector3(s, 0, c).normalize();
+    const base = positions.length / 3;
+    positions.push(0, 0.42, 0);
+    normals.push(normal.x, normal.y, normal.z);
+    uvs.push(0.5, 0.58);
+    for (const point of points) {
+      positions.push(point.x, point.y, point.z);
+      normals.push(normal.x, normal.y, normal.z);
+      uvs.push(point.x + 0.5, 1 - point.y);
+    }
+    for (let i = 1; i <= points.length; i++) {
+      const next = i === points.length ? 1 : i + 1;
+      indices.push(base, base + i, base + next);
+    }
+  };
+  addCard(0);
+  addCard(Math.PI / 2);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeBoundingSphere();
+  return geometry;
+};
+
 const createWeberPennFoliageGeometry = (genome: ProcPlantGenome, conifer: boolean): THREE.BufferGeometry => {
   const source = genome.weberPenn?.foliageSource ?? "species";
-  if (source === "conifer-spray") return createProcPlantConiferSprayGeometry();
+  if (source === "conifer-spray") return createProcPlantConiferSprayGeometry("light");
+  if (source === "ez-leaf-card") return createWeberPennEzLeafCardGeometry();
   if (source === "procplants") {
     return createProcPlantLeafGeometry(
       genome.leaf.shape,
@@ -3428,7 +3655,7 @@ const createWeberPennFoliageGeometry = (genome: ProcPlantGenome, conifer: boolea
       genome.leaf.curl,
     );
   }
-  if (conifer && source !== "species") return createProcPlantConiferSprayGeometry();
+  if (conifer && source !== "species") return createProcPlantConiferSprayGeometry("light");
   return geometryFromWeberPennLeafShape(genome);
 };
 
@@ -3505,12 +3732,12 @@ const addWeberPennFoliageMass = (
     tipBias: genome.foliage?.tipBias ?? 0.5,
     size: genome.foliage?.size ?? (conifer ? 0.34 : 0.56),
   };
-  const budgetBase = conifer ? 72 : 42;
+  const budgetBase = conifer ? 128 : 180;
   const budget = Math.round(
     THREE.MathUtils.clamp(
       budgetBase * foliage.mass * foliage.clusterDensity * (0.72 + env.moisture * 0.36),
       0,
-      conifer ? 150 : 96,
+      conifer ? 320 : 520,
     ),
   );
   if (budget <= 0) return 0;
@@ -3528,7 +3755,8 @@ const addWeberPennFoliageMass = (
     const o = vi * 3;
     const t = anchor?.t ?? THREE.MathUtils.clamp(source.pos[o + 1] ?? 0, 0, 1);
     const tipBoost = THREE.MathUtils.lerp(1, t, foliage.tipBias);
-    if (rng() > 0.58 + tipBoost * 0.3 + foliage.mass * 0.08) continue;
+    const acceptBias = conifer ? 0.82 : 0.72;
+    if (rng() > acceptBias + tipBoost * 0.3 + foliage.mass * 0.08) continue;
     const position = anchor
       ? anchor.position.clone()
       : new THREE.Vector3(source.pos[o] ?? 0, source.pos[o + 1] ?? 0, source.pos[o + 2] ?? 0);
@@ -3537,21 +3765,22 @@ const addWeberPennFoliageMass = (
     radial.normalize();
     const yaw = rng() * Math.PI * 2;
     const branchDirection = anchor?.direction.clone().normalize();
-    const direction = conifer
+    const ezLeafCard = sourceMode === "ez-leaf-card";
+    const direction = conifer && !ezLeafCard
       ? (branchDirection ?? radial).clone()
-        .multiplyScalar(anchor ? 0.58 : 0)
-        .add(radial.clone().multiplyScalar(0.86))
-        .add(new THREE.Vector3(0, -0.22 - t * 0.18, 0))
+        .multiplyScalar(anchor ? 0.95 : 0)
+        .add(radial.clone().multiplyScalar(0.5))
+        .add(new THREE.Vector3(0, -0.12 - t * 0.1, 0))
         .normalize()
       : (branchDirection ?? radial).clone()
-        .multiplyScalar(anchor ? 0.42 : 0)
-        .add(radial.clone().multiplyScalar(0.44))
-        .add(new THREE.Vector3(0, 0.5 + rng() * 0.28, 0))
+        .multiplyScalar(anchor ? (ezLeafCard ? 0.72 : 0.42) : 0)
+        .add(radial.clone().multiplyScalar(ezLeafCard ? 0.26 : 0.44))
+        .add(new THREE.Vector3(0, ezLeafCard ? 0.18 + rng() * 0.22 : 0.5 + rng() * 0.28, 0))
         .normalize();
     const right = tangentBasis(direction).right.applyAxisAngle(direction, yaw).normalize();
     const sourceLength = curve(genome.leaf.length, t);
-    const sizeBase = conifer ? 0.18 + fillSize * 0.32 : 0.34 + fillSize * 0.55;
-    const sourceDamping = sourceMode === "conifer-spray" ? 0.82 : sourceMode === "procplants" ? 0.9 : 1;
+    const sizeBase = conifer && !ezLeafCard ? 0.32 + fillSize * 0.6 : ezLeafCard ? 0.28 + fillSize * 0.78 : 0.34 + fillSize * 0.55;
+    const sourceDamping = sourceMode === "conifer-spray" ? 0.82 : sourceMode === "procplants" ? 0.9 : ezLeafCard ? 0.72 : 1;
     const scale =
       sourceLength *
       sizeBase *
@@ -3562,6 +3791,7 @@ const addWeberPennFoliageMass = (
       new THREE.Color(genome.leaf.colorB),
       conifer ? 0.35 + t * 0.45 : t,
     );
+    if (ezLeafCard) color.lerp(new THREE.Color(0xffffff), 0.18);
     const normal = new THREE.Vector3().crossVectors(right, direction).normalize().negate();
     const anchorJitter = useAttachmentAnchors ? 0.006 + spread * 0.025 : 0.025 + spread * 0.09;
     const jitteredPosition = position
@@ -3579,6 +3809,294 @@ const addWeberPennFoliageMass = (
   }
   sprayGeometry.dispose();
   return added;
+};
+
+interface BranchModuleAnchor {
+  position: THREE.Vector3;
+  direction: THREE.Vector3;
+  right: THREE.Vector3;
+  t: number;
+  depth: number;
+}
+
+const branchModuleDefaults = (genome: ProcPlantGenome) => {
+  const palette = genome.branchModules?.palette ?? "decurrent-broadleaf";
+  const conifer = palette === "excurrent-conifer";
+  const shrub = palette === "shrub";
+  const palm = palette === "palm-ish";
+  const vine = palette === "vine-ish";
+  return {
+    palette,
+    levels: genome.branchModules?.levels ?? (palm ? 1 : vine ? 4 : shrub ? 3 : 4),
+    moduleBudget: genome.branchModules?.moduleBudget ?? (conifer ? 120 : shrub ? 96 : palm ? 34 : 140),
+    vigor: genome.branchModules?.vigor ?? 1,
+    branchDensity: genome.branchModules?.branchDensity ?? (conifer ? 1.05 : shrub ? 1.25 : palm ? 0.4 : vine ? 0.72 : 1.35),
+    branchAngle: genome.branchModules?.branchAngle ?? (conifer ? 0.82 : shrub ? 1.08 : vine ? 0.55 : 1.18),
+    spread: genome.branchModules?.spread ?? (conifer ? 0.58 : shrub ? 1.12 : palm ? 1.35 : 1.08),
+    droop: genome.branchModules?.droop ?? (palette === "weeping" ? 1.1 : conifer ? 0.32 : vine ? 0.7 : 0.18),
+    tropism: genome.branchModules?.tropism ?? (conifer ? 0.72 : vine ? 0.34 : 0.48),
+    gnarliness: genome.branchModules?.gnarliness ?? (palette === "decurrent-broadleaf" ? 0.38 : palette === "weeping" ? 0.32 : conifer ? 0.16 : 0.24),
+    collisionBias: genome.branchModules?.collisionBias ?? 0.45,
+    foliageSource: genome.branchModules?.foliageSource ?? (conifer ? "conifer-spray" : "procplants"),
+    barkColor: genome.branchModules?.barkColor ?? 0x5d4327,
+    leafColor: genome.branchModules?.leafColor ?? genome.leaf.colorA,
+  };
+};
+
+const branchModuleStemRadius = (base: number, depth: number, t: number, vigor: number) =>
+  Math.max(0.003, base * Math.pow(0.58, depth) * THREE.MathUtils.lerp(1.08, 0.24, t) * (0.72 + vigor * 0.28));
+
+const addBranchModuleFoliage = (
+  builder: TemplateBuilder,
+  genome: ProcPlantGenome,
+  seed: number,
+  env: ProcPlantEnvironment,
+  anchors: BranchModuleAnchor[],
+) => {
+  const options = branchModuleDefaults(genome);
+  const rng = rngFromSeed(seed ^ 0x6d2b79f5);
+  const shade = 1 - THREE.MathUtils.clamp(env.light, 0, 1);
+  const foliage = {
+    mass: Math.max(0, genome.foliage?.mass ?? 0.74),
+    clusterDensity: genome.foliage?.clusterDensity ?? 1.12,
+    whorlDensity: genome.foliage?.whorlDensity ?? 0.58,
+    tipBias: genome.foliage?.tipBias ?? 0.58,
+    size: genome.foliage?.size ?? 0.48,
+  };
+  const source = options.foliageSource === "ez-leaf-card" ? "procplants" : options.foliageSource;
+  const geometry = source === "conifer-spray"
+    ? createProcPlantConiferSprayGeometry("light")
+    : createProcPlantLeafGeometry(genome.leaf.shape, genome.leaf.widthRatio, genome.leaf.serration, genome.leaf.curl);
+  let leaves = 0;
+  const budget = Math.round(THREE.MathUtils.clamp(anchors.length * foliage.mass * foliage.clusterDensity * 2.8, 0, 760));
+  for (let i = 0; i < budget; i++) {
+    const anchor = anchors[Math.floor(Math.pow(rng(), 1.0 + foliage.tipBias) * anchors.length)];
+    if (!anchor) continue;
+    const t = anchor.t;
+    const whorlCount = source === "conifer-spray" ? 2 : Math.max(1, Math.round(1 + foliage.whorlDensity * 2));
+    for (let whorl = 0; whorl < whorlCount; whorl++) {
+      if (rng() > 0.62 + foliage.mass * 0.12 + t * foliage.tipBias * 0.18) continue;
+      const yaw = rng() * Math.PI * 2 + (whorl / whorlCount) * Math.PI * 2;
+      const direction = anchor.direction.clone()
+        .multiplyScalar(source === "conifer-spray" ? 0.85 : 0.38)
+        .add(new THREE.Vector3(Math.cos(yaw), source === "conifer-spray" ? -0.18 : 0.22, Math.sin(yaw)).multiplyScalar(source === "conifer-spray" ? 0.38 : 0.72))
+        .normalize();
+      const right = tangentBasis(direction).right.applyAxisAngle(direction, yaw).normalize();
+      const normal = new THREE.Vector3().crossVectors(right, direction).normalize().negate();
+      const scale =
+        curve(genome.leaf.length, t) *
+        foliage.size *
+        (source === "conifer-spray" ? 0.72 : 1) *
+        (0.72 + rng() * 0.38) *
+        Math.pow(0.86, Math.max(0, anchor.depth - 1)) *
+        (1 + shade * genome.lightResponse.leafBoostInShade * 0.25);
+      const color = new THREE.Color(options.leafColor)
+        .lerp(new THREE.Color(genome.leaf.colorB), source === "conifer-spray" ? 0.36 + t * 0.34 : t * 0.72);
+      const matrix = instanceMatrixFromFrame(
+        anchor.position.clone()
+          .add(direction.clone().multiplyScalar((rng() - 0.5) * 0.035))
+          .add(new THREE.Vector3(0, (rng() - 0.5) * 0.018, 0)),
+        right,
+        direction,
+        normal,
+        new THREE.Vector3(scale, scale, scale),
+      );
+      addTransformedGeometry(builder, geometry, matrix, color, 0.4 + t * 0.58);
+      leaves++;
+    }
+  }
+  geometry.dispose();
+  return leaves;
+};
+
+const buildBranchModuleGraphTemplate = (
+  genome: ProcPlantGenome,
+  seed = 1,
+  env: ProcPlantEnvironment = defaultPlantEnvironment(),
+): { template: ProcPlantTemplate; graph: ProcPlantGraph; stats: ProcPlantStats } => {
+  const options = branchModuleDefaults(genome);
+  const rng = rngFromSeed(seed ^ 0x4f1bbcdc);
+  const builder = new TemplateBuilder();
+  const stems: StemNode[] = [];
+  const segments: Array<[number, number]> = [];
+  const organs: Organ[] = [];
+  const anchors: BranchModuleAnchor[] = [];
+  const shade = 1 - THREE.MathUtils.clamp(env.light, 0, 1);
+  const crowding = THREE.MathUtils.clamp(env.crowding, 0, 1);
+  const lightVector = new THREE.Vector3(0.22, 1, 0.16).normalize();
+  const realism = treeRealismTraits({ ...genome, weberPenn: undefined });
+  const barkColor = new THREE.Color(options.barkColor);
+  const baseRadius = options.palette === "shrub" ? 0.036 : options.palette === "vine-ish" ? 0.014 : 0.058;
+  const trunkCount = options.palette === "shrub" ? 3 : 1;
+  const height = THREE.MathUtils.clamp(0.8 + genome.nodeCount * curve(genome.internode, 0.15) * 0.22, 0.85, 2.6);
+  const modules: Array<{ node: StemNode; direction: THREE.Vector3; depth: number; length: number; vigor: number; t: number }> = [];
+
+  const addNode = (position: THREE.Vector3, direction: THREE.Vector3, radius: number, depth: number, t: number): StemNode => {
+    const node: StemNode = { position, direction, radius, depth, t, index: stems.length };
+    stems.push(node);
+    return node;
+  };
+
+  for (let trunk = 0; trunk < trunkCount; trunk++) {
+    const yaw = trunkCount === 1 ? 0 : trunk * GOLDEN_ANGLE + (rng() - 0.5) * 0.32;
+    const rootDir = options.palette === "vine-ish"
+      ? new THREE.Vector3(Math.cos(yaw) * 0.48, 0.56, Math.sin(yaw) * 0.48).normalize()
+      : new THREE.Vector3(Math.cos(yaw) * 0.12, 1, Math.sin(yaw) * 0.12).normalize();
+    const root = addNode(
+      new THREE.Vector3(Math.cos(yaw) * 0.025 * trunk, 0, Math.sin(yaw) * 0.025 * trunk),
+      rootDir,
+      baseRadius * (trunkCount === 1 ? 1 : 0.72),
+      0,
+      0,
+    );
+    const trunkSegments = options.palette === "palm-ish" ? 7 : options.palette === "shrub" ? 5 : 9;
+    let previous = root;
+    for (let i = 1; i <= trunkSegments; i++) {
+      const t = i / trunkSegments;
+      const photo = lightVector.clone().multiplyScalar(options.tropism * shade * t * 0.18);
+      const crowdNarrowing = new THREE.Vector3(0, crowding * options.collisionBias * t * 0.18, 0);
+      const bend = new THREE.Vector3(Math.cos(seed * 0.013 + trunk) * realism.trunkBend, 0, Math.sin(seed * 0.017 + trunk) * realism.trunkBend)
+        .multiplyScalar(t * 0.035);
+      const dir = previous.direction.clone().add(photo).add(crowdNarrowing).add(bend).normalize();
+      const length = height / trunkSegments * (options.palette === "shrub" ? 0.74 : 1) * (0.92 + rng() * 0.16);
+      const node = addNode(
+        previous.position.clone().add(dir.clone().multiplyScalar(length)),
+        dir,
+        branchModuleStemRadius(root.radius, 0, t, options.vigor),
+        0,
+        t,
+      );
+      segments.push([previous.index, node.index]);
+      previous = node;
+      const crownStart = options.palette === "excurrent-conifer" ? 0.12 : options.palette === "palm-ish" ? 0.76 : 0.22;
+      if (t > crownStart && options.palette !== "palm-ish") {
+        const starterCount = options.palette === "excurrent-conifer"
+          ? 1
+          : options.palette === "shrub"
+            ? Math.max(1, Math.round(options.branchDensity))
+            : Math.max(1, Math.round(options.branchDensity * (t < 0.88 ? 1.8 : 1.2)));
+        for (let starter = 0; starter < starterCount; starter++) {
+          modules.push({
+            node,
+            direction: dir,
+            depth: 1,
+            length: length * (options.palette === "excurrent-conifer" ? 1.15 : options.palette === "weeping" ? 1.9 : 1.75),
+            vigor: options.vigor * (1 - t * 0.18) * (0.88 + starter * 0.04),
+            t,
+          });
+        }
+      }
+    }
+    if (options.palette === "palm-ish") {
+      for (let i = 0; i < 18; i++) {
+        const yawPalm = i * GOLDEN_ANGLE;
+        const direction = rotateFromAxis(previous.direction, yawPalm, Math.PI / 2.25 + (rng() - 0.5) * 0.28);
+        anchors.push({
+          position: previous.position.clone().add(direction.clone().multiplyScalar(0.035)),
+          direction,
+          right: tangentBasis(previous.direction).right.applyAxisAngle(previous.direction, yawPalm).normalize(),
+          t: 0.96,
+          depth: 1,
+        });
+      }
+    }
+  }
+
+  let moduleCursor = 0;
+  while (moduleCursor < modules.length && segments.length < options.moduleBudget) {
+    const module = modules[moduleCursor++]!;
+    if (module.depth > options.levels) continue;
+    const densityBoost = THREE.MathUtils.clamp(options.branchDensity * module.vigor, 0.2, 3.4);
+    const children = options.palette === "excurrent-conifer"
+      ? Math.max(1, Math.round((module.depth === 1 ? 3 : 2) * densityBoost))
+      : options.palette === "weeping"
+        ? Math.max(1, Math.round((module.depth === 1 ? 4 : 2) * densityBoost))
+        : options.palette === "vine-ish"
+          ? Math.max(1, Math.round(densityBoost * 0.8))
+          : Math.max(1, Math.round((module.depth === 1 ? 4 : module.depth === 2 ? 3 : 2) * densityBoost));
+    for (let child = 0; child < children && segments.length < options.moduleBudget; child++) {
+      const yaw = module.node.index * GOLDEN_ANGLE + child * (Math.PI * 2 / children) + (rng() - 0.5) * genome.branchAngle.spread;
+      const depthT = module.depth / Math.max(1, options.levels);
+      const baseAngle =
+        options.palette === "excurrent-conifer" ? Math.PI / 2.05 + depthT * 0.38 :
+        options.palette === "weeping" ? Math.PI / 2.2 :
+        options.palette === "vine-ish" ? Math.PI / 3.8 :
+        Math.PI / 2.65;
+      const direction = rotateFromAxis(module.direction, yaw, baseAngle * options.branchAngle * options.spread)
+        .add(lightVector.clone().multiplyScalar(options.tropism * shade * 0.12))
+        .add(new THREE.Vector3(0, -options.droop * (0.12 + depthT * 0.18), 0))
+        .add(new THREE.Vector3(0, crowding * options.collisionBias * 0.08, 0))
+        .normalize();
+      const chain = options.palette === "vine-ish" ? 3 : module.depth === 1 ? 3 : 2;
+      let previous = module.node;
+      let chainDir = direction;
+      for (let step = 1; step <= chain; step++) {
+        const chainT = step / chain;
+        chainDir = chainDir.clone()
+          .add(lightVector.clone().multiplyScalar(options.tropism * shade * chainT * 0.08))
+          .add(new THREE.Vector3((rng() - 0.5) * options.gnarliness * 0.5, -options.droop * 0.05 * chainT, (rng() - 0.5) * options.gnarliness * 0.5))
+          .normalize();
+        const length = module.length * Math.pow(options.palette === "decurrent-broadleaf" ? 0.78 : 0.72, module.depth) / chain * (0.86 + rng() * 0.34) * (1 - crowding * options.collisionBias * 0.18);
+        const t = THREE.MathUtils.clamp(module.t + (1 - module.t) * chainT * 0.72, 0, 1);
+        const node = addNode(
+          previous.position.clone().add(chainDir.clone().multiplyScalar(length)),
+          chainDir,
+          branchModuleStemRadius(baseRadius, module.depth, t, module.vigor),
+          module.depth,
+          t,
+        );
+        segments.push([previous.index, node.index]);
+        previous = node;
+      }
+      const tipT = THREE.MathUtils.clamp(previous.t, 0, 1);
+      anchors.push({
+        position: previous.position.clone(),
+        direction: chainDir.clone(),
+        right: tangentBasis(chainDir).right,
+        t: tipT,
+        depth: module.depth,
+      });
+      if (module.depth < options.levels && module.vigor > 0.12) {
+        const nextCount = options.palette === "excurrent-conifer"
+          ? 2
+          : options.palette === "shrub"
+            ? Math.max(1, Math.round(1.5 * options.branchDensity))
+            : Math.max(1, Math.round(options.branchDensity));
+        for (let next = 0; next < nextCount; next++) {
+          modules.push({
+            node: previous,
+            direction: chainDir,
+            depth: module.depth + 1,
+            length: module.length * (options.palette === "weeping" ? 0.78 : 0.68),
+            vigor: module.vigor * (0.62 + rng() * 0.18),
+            t: tipT,
+          });
+        }
+      }
+    }
+  }
+
+  for (const [ai, bi] of segments) {
+    const a = stems[ai]!;
+    const b = stems[bi]!;
+    const bark = barkColor.clone();
+    const delta = (hashUnit(seed + bi * 19) - 0.5) * realism.colorVariance * 0.5;
+    if (delta > 0) bark.lerp(new THREE.Color(0xffffff), delta);
+    else bark.lerp(new THREE.Color(0x050805), -delta);
+    addStemSegment(builder, a, b, bark);
+  }
+  const leaves = addBranchModuleFoliage(builder, genome, seed, env, anchors);
+  const template = builder.build();
+  return {
+    template,
+    graph: { stems, segments, organs },
+    stats: {
+      stems: segments.length,
+      leaves,
+      flowers: 0,
+      triangles: template.idx.length / 3,
+    },
+  };
 };
 
 export const buildWeberPennProcPlantTemplate = (
@@ -3954,6 +4472,7 @@ export const buildProcPlantTemplate = (
   seed = 1,
   env: ProcPlantEnvironment = defaultPlantEnvironment(),
 ): { template: ProcPlantTemplate; graph: ProcPlantGraph; stats: ProcPlantStats } => {
+  if (genome.branchModules) return buildBranchModuleGraphTemplate(genome, seed, env);
   if (genome.weberPenn) return buildWeberPennProcPlantTemplate(genome, seed, env);
   const graph = buildProcPlantGraph(genome, seed, env);
   const builder = new TemplateBuilder();
@@ -4259,7 +4778,7 @@ export const buildProcPlantRuntimePackage = (
     seed,
     genomeId: genome.id,
     architecture: {
-      backend: genome.weberPenn ? "weber-penn" : "procplant-graph",
+      backend: genome.branchModules ? "branch-module-graph" : genome.weberPenn ? "weber-penn" : "procplant-graph",
       species: genome.weberPenn?.species,
       habit: genome.habit,
     },
