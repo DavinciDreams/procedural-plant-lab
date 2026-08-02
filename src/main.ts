@@ -25,6 +25,7 @@ import {
   type ProcPlantInstance,
   type ProcPlantEnvironment,
   type ProcPlantGenome,
+  type ProcPlantInstancedParts,
   type ProcPlantTemplate,
 } from "./procplants";
 import {
@@ -169,6 +170,10 @@ app.innerHTML = `
         <button id="exportJson" type="button">Export JSON</button>
         <button id="savePreset" type="button">Save Preset</button>
       </div>
+      <output id="growthStatus" class="growth-status" aria-live="polite" hidden>
+        <span class="growth-spinner" aria-hidden="true"></span>
+        <span>Growing biome…</span>
+      </output>
       <output id="saveStatus" class="save-status" aria-live="polite"></output>
     </div>
     <div class="stats" aria-live="polite">
@@ -253,6 +258,76 @@ let biomeGroup: THREE.Group | null = null;
 let heroMesh: THREE.Mesh | null = null;
 let currentStats = { triangles: 0, plants: 0, leaves: 0, draws: 0 };
 let autoDemoTimer: number | null = null;
+let regenerationBusy = false;
+
+interface TreePreviewResponse {
+  id: number;
+  template?: ProcPlantTemplate;
+  stats?: ProcPlantInstancedParts["stats"];
+  error?: string;
+}
+
+type PreviewPlantParts = Pick<ProcPlantInstancedParts, "stems" | "stats" | "instances">;
+
+let treePreviewWorker: Worker | null = null;
+let treePreviewRequest = 0;
+let pendingTreePreview: {
+  id: number;
+  resolve: (value: PreviewPlantParts) => void;
+  reject: (reason: Error) => void;
+} | null = null;
+
+const ensureTreePreviewWorker = () => {
+  if (treePreviewWorker) return treePreviewWorker;
+  const worker = new Worker(new URL("./tree-preview-worker.ts", import.meta.url), { type: "module" });
+  worker.addEventListener("message", (event: MessageEvent<TreePreviewResponse>) => {
+    if (!pendingTreePreview || event.data.id !== pendingTreePreview.id) return;
+    const pending = pendingTreePreview;
+    pendingTreePreview = null;
+    if (event.data.error || !event.data.template || !event.data.stats) {
+      pending.reject(new Error(event.data.error ?? "Tree preview worker returned incomplete data."));
+      return;
+    }
+    pending.resolve({ stems: event.data.template, stats: event.data.stats, instances: [] });
+  });
+  worker.addEventListener("error", (event) => {
+    if (!pendingTreePreview) return;
+    const pending = pendingTreePreview;
+    pendingTreePreview = null;
+    pending.reject(new Error(event.message || "Tree preview worker failed."));
+  });
+  treePreviewWorker = worker;
+  return worker;
+};
+
+const buildTreePreview = (
+  genome: ProcPlantGenome,
+  seed: number,
+  env: ProcPlantEnvironment,
+) => new Promise<PreviewPlantParts>((resolve, reject) => {
+  const worker = ensureTreePreviewWorker();
+  const id = ++treePreviewRequest;
+  pendingTreePreview = { id, resolve, reject };
+  // The lab preview replaces raw Weber-Penn leaves with its authored crown
+  // foliage anyway. Branch-tip anchors avoid generating thousands of hidden
+  // leaf sites, while the exported/runtime genome remains unchanged.
+  const previewGenome: ProcPlantGenome = genome.weberPenn
+    ? {
+        ...genome,
+        weberPenn: {
+          ...genome.weberPenn,
+          nativeLeaves: false,
+          fillAnchor: "branch-tips",
+          maxLeaves: 0,
+        },
+      }
+    : genome;
+  worker.postMessage({ id, genome: previewGenome, seed, env });
+});
+
+// Warm the worker module after the initial biome is visible so a later dice
+// roll does not also pay the worker download/parse cost.
+window.setTimeout(() => ensureTreePreviewWorker(), 1_500);
 
 const speciesLabel = (id: string) =>
   savedPresetLabelMap()[id] ?? labelForPresetId(id);
@@ -291,6 +366,11 @@ const rangeLabels = {
   habitSpread: "habitSpreadValue",
   habitUpright: "habitUprightValue",
 };
+const growthStatus = document.querySelector<HTMLOutputElement>("#growthStatus")!;
+const growthStatusText = growthStatus.querySelector<HTMLSpanElement>("span:last-child")!;
+const rollDiceButton = document.querySelector<HTMLButtonElement>("#rollDice")!;
+const randomSeedButton = document.querySelector<HTMLButtonElement>("#randomSeed")!;
+const regenerateButton = document.querySelector<HTMLButtonElement>("#regenerate")!;
 
 const isSpeciesId = (value: string | null): value is SpeciesId =>
   !!value && Object.prototype.hasOwnProperty.call(procPlantPresets, value);
@@ -786,10 +866,23 @@ const addInstanceToBucket = (
   });
 };
 
-const scatterBiome = (genome: ProcPlantGenome, env: ProcPlantEnvironment): THREE.Group => {
+const scatterBiome = async (genome: ProcPlantGenome, env: ProcPlantEnvironment) => {
   const rng = rand(state.seed ^ 0x5151);
   const buffers = { positions: [] as number[], normals: [] as number[], colors: [] as number[], indices: [] as number[] };
   const buckets = new Map<string, InstanceBucket>();
+  // Weber-Penn trees are orders of magnitude more expensive than the graph
+  // plants. Build one seeded template and vary it with scale/rotation instead
+  // of regenerating the full recursive tree for every biome placement.
+  let reusableTree: PreviewPlantParts | null = null;
+  if (genome.weberPenn) {
+    try {
+      reusableTree = await buildTreePreview(genome, state.seed, env);
+    } catch (error) {
+      console.warn("[procplants] Tree worker unavailable; using main-thread fallback.", error);
+      reusableTree = buildProcPlantInstancedParts(genome, state.seed, env);
+    }
+  }
+  const reusableTreeMatrices: THREE.Matrix4[] = [];
   const plantCount =
     genome.habit === "tree" || genome.habit === "conifer" || genome.habit === "palm"
       ? Math.round(8 + state.density * 26)
@@ -817,7 +910,9 @@ const scatterBiome = (genome: ProcPlantGenome, env: ProcPlantEnvironment): THREE
       genome.habit === "grass" || i % 5 !== 0
         ? genome
         : hybridizePlantGenomes(genome, procPlantPresets.furGrass, 0.12, state.seed + i);
-    const built = buildProcPlantInstancedParts(species, state.seed + i * 101, localEnv);
+    const built: PreviewPlantParts = reusableTree && species.weberPenn
+      ? reusableTree
+      : buildProcPlantInstancedParts(species, state.seed + i * 101, localEnv);
     const scale =
       species.habit === "grass"
         ? 0.72 + rng() * 0.42
@@ -835,7 +930,11 @@ const scatterBiome = (genome: ProcPlantGenome, env: ProcPlantEnvironment): THREE
       new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rng() * Math.PI * 2, 0)),
       new THREE.Vector3(scale, scale, scale),
     );
-    pushTemplate(buffers, built.stems, matrix, new THREE.Matrix3().getNormalMatrix(matrix));
+    if (built === reusableTree) {
+      reusableTreeMatrices.push(matrix);
+    } else {
+      pushTemplate(buffers, built.stems, matrix, new THREE.Matrix3().getNormalMatrix(matrix));
+    }
     for (const instance of built.instances) addInstanceToBucket(buckets, species, instance, matrix);
     leaves += built.stats.leaves + built.stats.flowers;
     triangles += built.stats.stemTriangles;
@@ -854,6 +953,20 @@ const scatterBiome = (genome: ProcPlantGenome, env: ProcPlantEnvironment): THREE
     currentStats.draws += 1;
   } else {
     stemGeometry.dispose();
+  }
+
+  if (reusableTree && reusableTreeMatrices.length > 0) {
+    const geometry = templateToGeometry(reusableTree.stems);
+    const trees = new THREE.InstancedMesh(geometry, plantMaterial, reusableTreeMatrices.length);
+    trees.name = "procedural-tree-instances";
+    trees.castShadow = true;
+    trees.receiveShadow = true;
+    for (let i = 0; i < reusableTreeMatrices.length; i++) {
+      trees.setMatrixAt(i, reusableTreeMatrices[i]);
+    }
+    trees.instanceMatrix.needsUpdate = true;
+    group.add(trees);
+    currentStats.draws += 1;
   }
 
   for (const bucket of buckets.values()) {
@@ -887,11 +1000,15 @@ const scatterBiome = (genome: ProcPlantGenome, env: ProcPlantEnvironment): THREE
   currentStats.plants = plants;
   currentStats.leaves = leaves;
   currentStats.triangles = Math.round(triangles);
-  return group;
+  return { group, heroTemplate: reusableTree?.stems };
 };
 
-const buildHero = (genome: ProcPlantGenome, env: ProcPlantEnvironment) => {
-  const built = buildProcPlantTemplate(genome, state.seed, env);
+const buildHero = (
+  genome: ProcPlantGenome,
+  env: ProcPlantEnvironment,
+  reusableTemplate?: ProcPlantTemplate,
+) => {
+  const template = reusableTemplate ?? buildProcPlantTemplate(genome, state.seed, env).template;
   const buffers = { positions: [] as number[], normals: [] as number[], colors: [] as number[], indices: [] as number[] };
   const scale =
     genome.habit === "grass"
@@ -908,7 +1025,7 @@ const buildHero = (genome: ProcPlantGenome, env: ProcPlantEnvironment) => {
     new THREE.Quaternion(),
     new THREE.Vector3(scale, scale, scale),
   );
-  pushTemplate(buffers, built.template, matrix, new THREE.Matrix3().getNormalMatrix(matrix));
+  pushTemplate(buffers, template, matrix, new THREE.Matrix3().getNormalMatrix(matrix));
   return geometryFromBuffers(buffers);
 };
 
@@ -926,7 +1043,7 @@ const disposeGroup = (group: THREE.Group | null) => {
   scene.remove(group);
 };
 
-const regenerate = () => {
+const performRegeneration = async () => {
   const genome = selectedGenome();
   const env = envFromState();
   updateAddressState();
@@ -934,14 +1051,15 @@ const regenerate = () => {
   scene.background = new THREE.Color(0xb9d7ee).lerp(new THREE.Color(0x6f7d8d), 1 - state.light);
   scene.fog = new THREE.Fog(scene.background as THREE.Color, 18, 64);
 
+  currentStats = { triangles: 0, plants: 0, leaves: 0, draws: 0 };
+  const biome = await scatterBiome(genome, env);
+
   disposeGroup(biomeGroup);
   disposeMesh(heroMesh);
-
-  currentStats = { triangles: 0, plants: 0, leaves: 0, draws: 0 };
-  biomeGroup = scatterBiome(genome, env);
+  biomeGroup = biome.group;
   scene.add(biomeGroup);
 
-  heroMesh = new THREE.Mesh(buildHero(genome, env), plantMaterial);
+  heroMesh = new THREE.Mesh(buildHero(genome, env, biome.heroTemplate), plantMaterial);
   heroMesh.castShadow = true;
   heroMesh.receiveShadow = true;
   scene.add(heroMesh);
@@ -952,6 +1070,42 @@ const regenerate = () => {
   setText("leaves", currentStats.leaves.toLocaleString());
 };
 
+let regenerationTimer: number | null = null;
+let regenerationRequest = 0;
+
+const setRegenerationBusy = (busy: boolean) => {
+  regenerationBusy = busy;
+  growthStatus.hidden = !busy;
+  growthStatusText.textContent = `Growing ${speciesLabel(state.primary)} biome…`;
+  rollDiceButton.disabled = busy;
+  randomSeedButton.disabled = busy;
+  regenerateButton.disabled = busy;
+  primarySelect.disabled = busy;
+  secondarySelect.disabled = busy;
+  for (const input of Object.values(rangeInputs)) input.disabled = busy;
+};
+
+const regenerate = (delay = 0) => {
+  const request = ++regenerationRequest;
+  if (regenerationTimer !== null) window.clearTimeout(regenerationTimer);
+  setRegenerationBusy(true);
+  regenerationTimer = window.setTimeout(() => {
+    regenerationTimer = null;
+    // Two frames ensure the loading state is painted before procedural growth
+    // starts its remaining synchronous work.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(async () => {
+        if (request !== regenerationRequest) return;
+        try {
+          await performRegeneration();
+        } finally {
+          if (request === regenerationRequest) setRegenerationBusy(false);
+        }
+      });
+    });
+  }, delay);
+};
+
 const bindRange = (id: keyof LabState, labelId: string) => {
   const input = rangeInputs[id as keyof typeof rangeInputs];
   if (!input) return;
@@ -959,7 +1113,7 @@ const bindRange = (id: keyof LabState, labelId: string) => {
   const sync = () => {
     state[id] = Number(input.value) as never;
     setText(labelId, Number(input.value).toFixed(2));
-    regenerate();
+    regenerate(120);
   };
   input.addEventListener("input", sync);
   setText(labelId, Number(input.value).toFixed(2));
@@ -987,12 +1141,12 @@ bindRange("clumpLean", "clumpLeanValue");
 bindRange("habitSpread", "habitSpreadValue");
 bindRange("habitUpright", "habitUprightValue");
 
-document.querySelector<HTMLButtonElement>("#randomSeed")!.addEventListener("click", () => {
+randomSeedButton.addEventListener("click", () => {
   state.seed = Math.floor(Math.random() * 1_000_000);
   regenerate();
 });
 
-document.querySelector<HTMLButtonElement>("#regenerate")!.addEventListener("click", regenerate);
+regenerateButton.addEventListener("click", () => regenerate());
 
 const weightedRandomSpecies = (rng: () => number): SpeciesId => {
   const ids = allProcPlantPresetIds();
@@ -1001,6 +1155,7 @@ const weightedRandomSpecies = (rng: () => number): SpeciesId => {
 };
 
 const rollBiomeDice = () => {
+  if (regenerationBusy) return;
   const dice = Math.floor(Math.random() * 1_000_000_000);
   const rng = rand(dice);
   state.seed = Math.floor(rng() * 1_000_000);
@@ -1017,7 +1172,7 @@ const rollBiomeDice = () => {
   setSaveStatus(`${speciesLabel(state.primary)} x ${speciesLabel(state.secondary)} rolled.`);
 };
 
-document.querySelector<HTMLButtonElement>("#rollDice")!.addEventListener("click", rollBiomeDice);
+rollDiceButton.addEventListener("click", rollBiomeDice);
 
 document.querySelector<HTMLButtonElement>("#autoDemo")!.addEventListener("click", () => {
   const button = document.querySelector<HTMLButtonElement>("#autoDemo")!;

@@ -130,6 +130,11 @@ button[aria-pressed="true"] {
   background: #f0d891;
 }
 
+button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
 .button-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
@@ -141,6 +146,42 @@ button[aria-pressed="true"] {
   color: #b6c8b2;
   font-size: 11px;
   line-height: 1.35;
+}
+
+.growth-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+  color: #d7f5b2;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.growth-status[hidden] {
+  display: none;
+}
+
+.growth-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgb(215 245 178 / 28%);
+  border-top-color: #d7f5b2;
+  border-radius: 50%;
+  animation: growth-spin 700ms linear infinite;
+}
+
+@keyframes growth-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .growth-spinner {
+    animation: none;
+    border-color: #d7f5b2;
+  }
 }
 
 .stats {

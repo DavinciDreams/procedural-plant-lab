@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import {
-  generateBakedTree,
+  bakeTree,
   generateTreeData,
   SPECIES,
   type BakeOptions,
@@ -4478,12 +4478,7 @@ export const buildWeberPennProcPlantTemplate = (
     generateLeaves,
     bakeOptions.maxBranchDepth,
   );
-  const baked = generateBakedTree(
-    genome.weberPenn.species,
-    seed >>> 0,
-    bakeOptions,
-    generateLeaves,
-  );
+  const baked = bakeTree(treeData, bakeOptions);
   const barkColor = new THREE.Color(genome.weberPenn.barkColor ?? 0x5d4327);
   const leafColor = new THREE.Color(genome.weberPenn.leafColor ?? genome.leaf.colorA);
   const height = Math.max(1e-4, baked.max.y - baked.min.y);

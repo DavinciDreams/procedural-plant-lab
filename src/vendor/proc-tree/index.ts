@@ -12,6 +12,7 @@ import { PRESETS } from "./presets";
 import type { TreeParams, BakeOptions, TreeData } from "./types";
 
 export type { BakedTree, Soup } from "./bake";
+export { bakeTree } from "./bake";
 export type { TreeParams, BakeOptions, TreeData } from "./types";
 export { PRESETS } from "./presets";
 
