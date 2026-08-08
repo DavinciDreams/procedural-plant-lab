@@ -1,9 +1,4 @@
 import * as THREE from "three";
-import { BarkType, Billboard, LeafType, Tree, TreePreset, TreeType } from "@dgreenheck/ez-tree";
-import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
-import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
   PROCPLANT_BIOME_OPTIONS,
@@ -60,7 +55,13 @@ let selectedImportedAssetId = "";
 let jsonVisible = false;
 let statusText = "Ready.";
 const weberPennSpeciesIds = Object.keys(SPECIES).sort() as SpeciesId[];
-const ezTreePresetIds = Object.keys(TreePreset).filter((id) => id !== "Trellis");
+const ezTreePresetIds = [
+  "Ash Small", "Ash Medium", "Ash Large",
+  "Aspen Small", "Aspen Medium", "Aspen Large",
+  "Bush 1", "Bush 2", "Bush 3",
+  "Oak Small", "Oak Medium", "Oak Large",
+  "Pine Small", "Pine Medium", "Pine Large",
+];
 const branchModulePalettes = [
   "excurrent-conifer",
   "decurrent-broadleaf",
@@ -70,9 +71,9 @@ const branchModulePalettes = [
   "vine-ish",
 ] as const;
 type BranchModulePalette = typeof branchModulePalettes[number];
-const gltfLoader = new GLTFLoader();
-const dracoLoader = new DRACOLoader();
-const ktx2Loader = new KTX2Loader();
+type EzTreeModule = typeof import("@dgreenheck/ez-tree");
+let ezTreeModulePromise: Promise<EzTreeModule> | null = null;
+const getEzTreeModule = () => ezTreeModulePromise ??= import("@dgreenheck/ez-tree");
 const importedAssets = new Map<string, THREE.Object3D>();
 const importedAssetOptions: Array<{ id: string; label: string; name: string }> = [];
 
@@ -419,12 +420,6 @@ ecologySelect.value = currentMix.ecologyBiome ?? "taiga";
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
 renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
 renderer.shadowMap.enabled = true;
-dracoLoader.setDecoderPath("/node_modules/three/examples/jsm/libs/draco/gltf/");
-ktx2Loader.setTranscoderPath("/node_modules/three/examples/jsm/libs/basis/");
-ktx2Loader.detectSupport(renderer);
-gltfLoader.setDRACOLoader(dracoLoader);
-gltfLoader.setKTX2Loader(ktx2Loader);
-gltfLoader.setMeshoptDecoder(MeshoptDecoder);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xdfe9ee);
 scene.fog = new THREE.Fog(0xdfe9ee, 65, 190);
@@ -453,6 +448,37 @@ scene.add(ground);
 const groundMaterial = ground.material as THREE.MeshLambertMaterial;
 const previewGroup = new THREE.Group();
 scene.add(previewGroup);
+
+type GlbLoader = import("three/examples/jsm/loaders/GLTFLoader.js").GLTFLoader;
+let glbLoaderPromise: Promise<GlbLoader> | null = null;
+
+const getGlbLoader = (): Promise<GlbLoader> => {
+  if (glbLoaderPromise) return glbLoaderPromise;
+  // The Meshopt decoder alone is several megabytes. Keep the complete asset
+  // import stack out of the initial biome-editor route until a user actually
+  // selects a GLB/GLTF file.
+  glbLoaderPromise = Promise.all([
+    import("three/examples/jsm/loaders/GLTFLoader.js"),
+    import("three/examples/jsm/loaders/DRACOLoader.js"),
+    import("three/examples/jsm/loaders/KTX2Loader.js"),
+    import("three/examples/jsm/libs/meshopt_decoder.module.js"),
+  ]).then(([{ GLTFLoader }, { DRACOLoader }, { KTX2Loader }, { MeshoptDecoder }]) => {
+    const loader = new GLTFLoader();
+    const dracoLoader = new DRACOLoader();
+    const ktx2Loader = new KTX2Loader();
+    dracoLoader.setDecoderPath("/node_modules/three/examples/jsm/libs/draco/gltf/");
+    ktx2Loader.setTranscoderPath("/node_modules/three/examples/jsm/libs/basis/");
+    ktx2Loader.detectSupport(renderer);
+    loader.setDRACOLoader(dracoLoader);
+    loader.setKTX2Loader(ktx2Loader);
+    loader.setMeshoptDecoder(MeshoptDecoder);
+    return loader;
+  }).catch((error) => {
+    glbLoaderPromise = null;
+    throw error;
+  });
+  return glbLoaderPromise;
+};
 
 const disposeObject = (object: THREE.Object3D) => {
   object.traverse((child) => {
@@ -503,13 +529,14 @@ const prepareImportedAsset = (object: THREE.Object3D): THREE.Object3D => {
   return rootObject;
 };
 
-const ezTreeBaseOptions = (preset: string): EzTreeOptions =>
-  cloneJson(((TreePreset as unknown as Record<string, EzTreeOptions>)[preset] ?? (TreePreset as unknown as Record<string, EzTreeOptions>)["Pine Large"])!);
+const ezTreeBaseOptions = (preset: string, ezTreeModule: EzTreeModule): EzTreeOptions =>
+  cloneJson(((ezTreeModule.TreePreset as unknown as Record<string, EzTreeOptions>)[preset]
+    ?? (ezTreeModule.TreePreset as unknown as Record<string, EzTreeOptions>)["Pine Large"])!);
 
-const configureEzTreeOptions = (entry: ProcPlantBiomeMixEntry): EzTreeOptions => {
+const configureEzTreeOptions = (entry: ProcPlantBiomeMixEntry, ezTreeModule: EzTreeModule): EzTreeOptions => {
   const ezTree = entry.ezTree;
   const kind = ezTree?.kind ?? "pine";
-  const options = ezTreeBaseOptions(ezTree?.preset ?? ezTreePresetForKind(kind));
+  const options = ezTreeBaseOptions(ezTree?.preset ?? ezTreePresetForKind(kind), ezTreeModule);
   const foliage = ezTree?.foliage ?? 1;
   const spread = ezTree?.spread ?? 1;
   const droop = ezTree?.droop ?? 0;
@@ -526,17 +553,17 @@ const configureEzTreeOptions = (entry: ProcPlantBiomeMixEntry): EzTreeOptions =>
   options.branch.gnarliness[2] *= gnarliness;
   options.branch.gnarliness[3] *= gnarliness;
   if (kind === "pine") {
-    options.type = TreeType.Evergreen;
-    options.bark.type = BarkType.Pine;
+    options.type = ezTreeModule.TreeType.Evergreen;
+    options.bark.type = ezTreeModule.BarkType.Pine;
     options.leaves.type = "pine";
-    options.leaves.billboard = Billboard.Double;
+    options.leaves.billboard = ezTreeModule.Billboard.Double;
     options.leaves.alphaTest = 0.25;
   }
   if (kind === "willow") {
-    options.type = TreeType.Deciduous;
-    options.bark.type = BarkType.Willow;
-    options.leaves.type = LeafType.Aspen;
-    options.leaves.billboard = Billboard.Double;
+    options.type = ezTreeModule.TreeType.Deciduous;
+    options.bark.type = ezTreeModule.BarkType.Willow;
+    options.leaves.type = ezTreeModule.LeafType.Aspen;
+    options.leaves.billboard = ezTreeModule.Billboard.Double;
     options.leaves.count = Math.max(options.leaves.count, Math.round(12 * foliage));
     options.leaves.size *= 0.76;
     options.leaves.start = Math.min(options.leaves.start, 0.08);
@@ -556,9 +583,9 @@ const configureEzTreeOptions = (entry: ProcPlantBiomeMixEntry): EzTreeOptions =>
   return options;
 };
 
-const buildEzTreeObject = (entry: ProcPlantBiomeMixEntry): THREE.Object3D => {
-  const tree = new Tree();
-  tree.loadFromJson(configureEzTreeOptions(entry) as any);
+const buildEzTreeObject = (entry: ProcPlantBiomeMixEntry, ezTreeModule: EzTreeModule): THREE.Object3D => {
+  const tree = new ezTreeModule.Tree();
+  tree.loadFromJson(configureEzTreeOptions(entry, ezTreeModule) as any);
   tree.name = entry.label;
   const leafTint = new THREE.Color(
     entry.ezTree?.leafColor ?? (entry.ezTree?.kind === "pine" ? 0x5f8461 : entry.ezTree?.kind === "willow" ? 0x7fa05c : 0x6f9a45),
@@ -622,6 +649,7 @@ const cloneImportedAssetInstance = (prototype: THREE.Object3D, color: number | u
 const loadGlbFile = async (file: File): Promise<THREE.Object3D> => {
   const url = URL.createObjectURL(file);
   try {
+    const gltfLoader = await getGlbLoader();
     const gltf = await gltfLoader.loadAsync(url);
     return prepareImportedAsset(gltf.scene);
   } finally {
@@ -2261,7 +2289,13 @@ const hash01 = (value: number) => {
   return x - Math.floor(x);
 };
 
-const rebuildPreview = () => {
+let previewBuildRequest = 0;
+const rebuildPreview = async () => {
+  const request = ++previewBuildRequest;
+  const enabled = normalizedEnabledEntries();
+  const needsEzTree = enabled.some((entry) => entry.source === "ez-tree");
+  const ezTreeModule = needsEzTree ? await getEzTreeModule() : null;
+  if (request !== previewBuildRequest) return;
   while (previewGroup.children.length) {
     const child = previewGroup.children.pop();
     if (child) {
@@ -2270,7 +2304,6 @@ const rebuildPreview = () => {
       else disposeObject(child);
     }
   }
-  const enabled = normalizedEnabledEntries();
   const weightTotal = enabled.reduce((sum, entry) => sum + Math.max(0.01, entry.weight), 0) || 1;
   let rendered = 0;
   let currentVertices = 0;
@@ -2293,7 +2326,7 @@ const rebuildPreview = () => {
       return;
     }
     const prototype = entry.source === "ez-tree"
-      ? buildEzTreeObject(entry)
+      ? buildEzTreeObject(entry, ezTreeModule!)
       : assetPrototype ?? buildProcPlantObject(genome!, entry.seed, entry.environment);
     const verticesPerPlant = geometryVertexCount(prototype);
     const habitCap = isAssetMixEntry(entry) || entry.source === "ez-tree" || genome?.habit === "tree" || genome?.habit === "conifer" || genome?.habit === "palm" ? 12 : 36;

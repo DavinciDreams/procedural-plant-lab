@@ -22,6 +22,7 @@ self.addEventListener("message", (event: MessageEvent<TreePreviewRequest>) => {
         transfer: [
           template.pos.buffer,
           template.nrm.buffer,
+          template.uv0.buffer,
           template.col.buffer,
           template.tintable.buffer,
           template.sway.buffer,

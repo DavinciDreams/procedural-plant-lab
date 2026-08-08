@@ -3,6 +3,7 @@ import {
   procPlantPresets,
   type ProcPlantGenome,
 } from "./procplants";
+import type { ProcPlantVariantSpec } from "./plant-variants";
 
 const STORAGE_KEY = "procplants.savedPresets.v1";
 
@@ -10,6 +11,7 @@ export interface SavedProcPlantPreset {
   id: string;
   label: string;
   genome: ProcPlantGenome;
+  variants?: ProcPlantVariantSpec[];
   createdAt: string;
   updatedAt: string;
 }
@@ -29,8 +31,15 @@ const slug = (value: string): string =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "") || "preset";
 
+export const procPlantBuiltinPresetLabels: Readonly<Record<string, string>> = Object.freeze({
+  maidenhairFernPatch: "Maidenhair Fern Patch",
+  woodlandVioletCarpet: "Woodland Violet Carpet",
+  trilliumPatch: "Trillium Patch",
+  horsetailColony: "Horsetail Colony",
+});
+
 export const labelForPresetId = (id: string): string =>
-  id
+  procPlantBuiltinPresetLabels[id] ?? id
     .replace(/^custom-/, "")
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/[-_]+/g, " ")
@@ -75,6 +84,7 @@ export const saveProcPlantPreset = (
   label: string,
   genome: ProcPlantGenome,
   preferredId?: string,
+  variants?: ProcPlantVariantSpec[],
 ): SavedProcPlantPreset => {
   const saved = loadSavedProcPlantPresets();
   const existingIds = new Set([...procPlantPresetIds, ...saved.map((preset) => preset.id)]);
@@ -93,6 +103,7 @@ export const saveProcPlantPreset = (
     id,
     label: label.trim() || labelForPresetId(id),
     genome: cloneGenome({ ...genome, id }),
+    variants: variants?.map((variant) => ({ ...variant })),
     createdAt: now,
     updatedAt: now,
   };
