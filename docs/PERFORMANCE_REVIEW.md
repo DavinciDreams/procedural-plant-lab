@@ -124,6 +124,13 @@ production build pass. This proves local source/build compatibility only; no
 served world, GPU frame profile, default asset substitution, or deployment was
 changed.
 
+The final companion worktree adds placement-only Maidenhair Fern and Woodland
+Violet templates at 2,112 and 2,276 close triangles (Clover remains 1,226),
+keeps all three out of automatic mappings, and passes 57 focused tests. Against
+the same baseline, the `tellus-procplant-biomes` chunk grows 2,198 raw bytes
+(1.43%) and 508 level-9 gzip bytes (1.21%); main and shared Three.js stay
+effectively byte-identical.
+
 A byte-for-byte production-bundle comparison against a second clean
 `origin/master` worktree localizes the integration cost to the procplant-biomes
 chunk: 154,248 to 155,163 raw bytes (+915, 0.59%) and 42,042 to 42,322 gzip
