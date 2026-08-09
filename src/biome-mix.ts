@@ -9,7 +9,24 @@ import {
   type ProcPlantSubstrateKind,
 } from "./procplants";
 
-export type ProcPlantBiomeMixSource = "ecology" | "custom";
+export type ProcPlantBiomeMixSource = "ecology" | "terrain-paint" | "custom";
+
+export type ProcPlantBiomeAssetLodPreference =
+  | "game-optimized"
+  | "lod0"
+  | "lod1"
+  | "lod2"
+  | "lod3"
+  | "impostor";
+
+export interface ProcPlantBiomeAssetTemplate {
+  version: 1;
+  vertexCount: number;
+  positions: number[];
+  normals: number[];
+  colors: number[];
+  indices: number[];
+}
 
 export interface ProcPlantBiomeMixEntry {
   id: string;
@@ -32,12 +49,17 @@ export interface ProcPlantBiomeMixEntry {
     kind: "glb";
     name: string;
     libraryId?: string;
+    lodPreference?: ProcPlantBiomeAssetLodPreference;
     color?: number;
     runtimeOnly?: boolean;
+    template?: ProcPlantBiomeAssetTemplate;
   };
   weight: number;
   density: number;
   scale: number;
+  grassHeight?: number;
+  grassSpread?: number;
+  grassLean?: number;
   environment: ProcPlantEnvironment;
   seed: number;
   enabled: boolean;
@@ -49,6 +71,9 @@ export interface ProcPlantBiomeMixDefinition {
   label: string;
   source: ProcPlantBiomeMixSource;
   ecologyBiome?: ProcPlantBiomeId;
+  /** Tellus terrain-paint routing key; kept string-based for forward compatibility. */
+  terrainPaint?: string;
+  targetTerrainPaint?: string;
   substrate?: ProcPlantSubstrateKind;
   seed: number;
   density: number;
@@ -271,8 +296,20 @@ export const normalizeBiomeMixDefinition = (raw: unknown): ProcPlantBiomeMixDefi
           kind: "glb" as const,
           name: entry.asset.name,
           libraryId: typeof entry.asset.libraryId === "string" ? entry.asset.libraryId : undefined,
+          lodPreference: (
+            entry.asset.lodPreference === "lod0" ||
+            entry.asset.lodPreference === "lod1" ||
+            entry.asset.lodPreference === "lod2" ||
+            entry.asset.lodPreference === "lod3" ||
+            entry.asset.lodPreference === "impostor"
+              ? entry.asset.lodPreference
+              : "game-optimized"
+          ) as ProcPlantBiomeAssetLodPreference,
           color: typeof entry.asset.color === "number" ? entry.asset.color : undefined,
           runtimeOnly: entry.asset.runtimeOnly !== false,
+          template: isRecord(entry.asset.template) && entry.asset.template.version === 1
+            ? entry.asset.template as unknown as ProcPlantBiomeAssetTemplate
+            : undefined,
         }
         : undefined;
       if (source === "asset" && !asset) return null;
@@ -289,6 +326,9 @@ export const normalizeBiomeMixDefinition = (raw: unknown): ProcPlantBiomeMixDefi
         weight: typeof entry.weight === "number" ? entry.weight : 1,
         density: typeof entry.density === "number" ? entry.density : 0.45,
         scale: typeof entry.scale === "number" ? entry.scale : source === "ez-tree" ? 8 : genome ? scaleForGenome(genome) : 1,
+        grassHeight: typeof entry.grassHeight === "number" ? entry.grassHeight : undefined,
+        grassSpread: typeof entry.grassSpread === "number" ? entry.grassSpread : undefined,
+        grassLean: typeof entry.grassLean === "number" ? entry.grassLean : undefined,
         environment: isRecord(entry.environment)
           ? { ...defaultPlantEnvironment(), ...(entry.environment as Partial<ProcPlantEnvironment>) }
           : environmentForSample(sample),
@@ -305,8 +345,10 @@ export const normalizeBiomeMixDefinition = (raw: unknown): ProcPlantBiomeMixDefi
     version: 1,
     id: typeof raw.id === "string" ? raw.id : "custom-biome",
     label: typeof raw.label === "string" ? raw.label : "Custom Biome",
-    source: raw.source === "ecology" ? "ecology" : "custom",
+    source: raw.source === "ecology" ? "ecology" : raw.source === "terrain-paint" ? "terrain-paint" : "custom",
     ecologyBiome,
+    terrainPaint: typeof raw.terrainPaint === "string" ? raw.terrainPaint : undefined,
+    targetTerrainPaint: typeof raw.targetTerrainPaint === "string" ? raw.targetTerrainPaint : undefined,
     substrate: sample.substrate,
     seed: typeof raw.seed === "number" ? raw.seed : 1,
     density: typeof raw.density === "number" ? raw.density : 0.65,

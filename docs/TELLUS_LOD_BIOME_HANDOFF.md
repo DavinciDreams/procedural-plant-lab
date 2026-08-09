@@ -2,6 +2,12 @@
 
 Date: 2026-06-25
 
+> Historical design note. The 2026-08-07 repository audit in
+> `docs/TELLUS_INTEGRATION.md` supersedes checkout paths, current Tellus
+> behavior, and the vendoring recommendations below. In particular, use the
+> versioned Procplants package and contract-v2 golden fixture; do not refresh
+> Tellus by copying `src/procplants.ts` into another divergent source file.
+
 This handoff describes how to wire the standalone Procplants generator into
 Tellus without making Tellus more monolithic. The goal is a deterministic,
 chunk-aware biome system that can evolve over time, stream with terrain chunks,
