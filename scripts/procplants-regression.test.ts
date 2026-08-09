@@ -244,6 +244,48 @@ test("public attachment IDs, parent segments, and branch-relative frames are det
   assert.ok(parentedAttachments > 0, "graph-backed fixtures must expose attachments parented to generated segments");
 });
 
+test("accessory-organ presets build valid attachment frames across a seed sweep", () => {
+  // Branch-start nodes share their parent's position, so the segment joining them
+  // has zero length and no usable tangent. Nearest-segment binding used to select
+  // those segments for accessory organs, throwing on a minority of seeds; a single
+  // fixed seed per preset is not enough to catch it.
+  const sweepPresets = Object.entries(procPlantPresets).filter(
+    ([, genome]) => (genome.accessoryOrgans?.length ?? 0) > 0,
+  );
+  assert.ok(sweepPresets.length > 0, "expected presets carrying accessory organs");
+
+  let checkedFrames = 0;
+  for (const [presetId, genome] of sweepPresets) {
+    for (let seed = 1; seed <= 64; seed++) {
+      let graph: ReturnType<typeof buildProcPlantTemplate>["graph"] | null = null;
+      try {
+        graph = buildProcPlantTemplate(genome, seed).graph;
+      } catch (error) {
+        assert.fail(
+          `${presetId} seed=${seed} failed to build: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      for (const attachment of graph.attachments) {
+        const label = `${presetId} seed=${seed} ${attachment.id}`;
+        for (const axis of ["tangent", "right", "up"] as const) {
+          const vector = attachment[axis];
+          assert.ok(
+            Number.isFinite(vector.x) && Number.isFinite(vector.y) && Number.isFinite(vector.z),
+            `${label} ${axis} must be finite`,
+          );
+          assert.ok(Math.abs(vector.length() - 1) < 1e-5, `${label} ${axis} must be unit length`);
+        }
+        const handedness = new THREE.Vector3()
+          .crossVectors(attachment.tangent, attachment.right)
+          .dot(attachment.up);
+        assert.ok(handedness >= 0.999, `${label} frame must be right-handed`);
+        checkedFrames++;
+      }
+    }
+  }
+  assert.ok(checkedFrames > 0, "seed sweep must inspect attachment frames");
+});
+
 test("phyllotaxy resolves legacy, alternate, opposite, decussate, and three-organ whorl sequences", () => {
   const base = procPlantPresets.cloverGroundcover!;
   const legacy = clone(base);

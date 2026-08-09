@@ -799,8 +799,22 @@ const buildGrassWorldObject = (
     const moistureLift = THREE.MathUtils.lerp(0.74, 1.18, entry.environment.moisture);
     const shadeStretch = THREE.MathUtils.lerp(0.86, 1.22, 1 - entry.environment.light);
     const tuftScale = entry.scale * (0.17 + hash01(n + 71) * 0.19) * moistureLift * shadeStretch;
-    quat.setFromEuler(new THREE.Euler((hash01(n + 101) - 0.5) * 0.2, hash01(n + 131) * Math.PI * 2, (hash01(n + 151) - 0.5) * 0.12));
-    scale.set(tuftScale, tuftScale * (0.9 + (genome.foliage?.mass ?? 0.8) * 0.16), tuftScale);
+    // grassHeight/grassSpread/grassLean are authored per entry and shipped to Tellus,
+    // so the preview has to honour them or it stops matching the export. Defaults are
+    // neutral (1/1/0) to leave unset entries rendering exactly as before.
+    const grassHeight = entry.grassHeight ?? 1;
+    const grassSpread = entry.grassSpread ?? 1;
+    const grassLean = entry.grassLean ?? 0;
+    quat.setFromEuler(new THREE.Euler(
+      (hash01(n + 101) - 0.5) * 0.2 + grassLean * (hash01(n + 241) * 0.5 + 0.5),
+      hash01(n + 131) * Math.PI * 2,
+      (hash01(n + 151) - 0.5) * 0.12,
+    ));
+    scale.set(
+      tuftScale * grassSpread,
+      tuftScale * (0.9 + (genome.foliage?.mass ?? 0.8) * 0.16) * grassHeight,
+      tuftScale * grassSpread,
+    );
     matrix.compose(new THREE.Vector3(x, y, z), quat, scale);
     mesh.setMatrixAt(i, matrix);
     color.copy(baseColor).lerp(tipColor, 0.25 + hash01(n + 191) * 0.62);

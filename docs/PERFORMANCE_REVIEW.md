@@ -109,6 +109,7 @@ The final headless Chrome check reproduced the Phi Fern values and reported no p
 
 - The hero LOD3 and matching live biome far placements use the baked atlas after an explicit 16-view bake. Other species/seeds and all sessions without a user bake keep geometric far cards; startup never captures atlases.
 - Ground-cover pool savings start after the worker result; initial fallback generation still occurs so failure cannot blank the scene.
+- Scattered instances only cast shadows for `tree`, `conifer`, and `palm` habits, and ground-cover LOD pools set `castShadow` false, so in shrub/vine/ground-cover scenes the hero is the only shadow caster. This reads as intentional render-pressure control but is an unannotated conditional; confirm it against the Tellus shadow budget before treating it as contract.
 - These measurements prove the standalone Procplants build. Tellus owns different chunking, render-pressure, shadow, asset-substitution, and deployment behavior; the integration handoff requires opt-in runtime validation there.
 
 ## Tellus parity worktree evidence
@@ -116,10 +117,10 @@ The final headless Chrome check reproduced the Phi Fern values and reported no p
 The isolated Tellus `origin/master` worktree accepts the strengthened producer
 fixture and compiles a selective cost-only parity port without changing any
 automatic biome/default policy. At seed 612072, Tellus materialized Phi Fern at
-312 rather than 6,384 triangles, Clover at 1,226 rather than 1,574, Blue Spruce
+352 rather than 6,384 triangles, Clover at 1,226 rather than 1,574, Blue Spruce
 at 5,398 rather than 11,840, and Alpine Fir at 6,750 rather than 15,824. Phi
-retains an approximately 1.45 by 1.45 footprint and Clover 1.11 by 1.29. The
-Tellus typecheck, full 53-test vegetation suite, contract/cost tests, and
+retains an approximately 1.23 by 1.61 footprint and Clover 1.11 by 1.29. The
+Tellus typecheck, full 54-test vegetation suite, contract/cost tests, and
 production build pass. This proves local source/build compatibility only; no
 served world, GPU frame profile, default asset substitution, or deployment was
 changed.

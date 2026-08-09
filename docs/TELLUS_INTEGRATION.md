@@ -32,13 +32,13 @@ shadow, chunk LOD, or deployment default changed:
 
 | Tellus preset | Before | After | Reduction |
 | --- | ---: | ---: | ---: |
-| Phi Fern | 6,384 tris | 312 tris | 95.1% |
+| Phi Fern | 6,384 tris | 352 tris | 94.5% |
 | Clover Groundcover | 1,574 tris | 1,226 tris | 22.1% |
 | Blue Spruce | 11,840 tris | 5,398 tris | 54.4% |
 | Alpine Fir | 15,824 tris | 6,750 tris | 57.3% |
 
-Phi Fern retains an approximately 1.45 by 1.45 local-unit footprint and Clover
-approximately 1.11 by 1.29. Tellus typecheck, the full 53-test procplant
+Phi Fern retains an approximately 1.23 by 1.61 local-unit footprint and Clover
+approximately 1.11 by 1.29. Tellus typecheck, the full 54-test procplant
 vegetation suite, the contract/cost gates, and the production build pass in that
 worktree. These are source/build results; no served world or deployment was
 changed or claimed.

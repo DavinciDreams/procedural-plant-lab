@@ -2933,7 +2933,9 @@ const buildProcPlantGraphIr = (
   const assertFrame = (tangent: THREE.Vector3, right: THREE.Vector3, up: THREE.Vector3, id: string) => {
     const orthogonal = Math.max(Math.abs(tangent.dot(right)), Math.abs(tangent.dot(up)), Math.abs(right.dot(up)));
     const handedness = new THREE.Vector3().crossVectors(tangent, right).dot(up);
-    if (orthogonal > 1e-4 || handedness < 0.999) {
+    // Compare for the passing range rather than the failing one: a NaN axis makes
+    // every `>`/`<` test false, which would otherwise admit degenerate frames.
+    if (!(orthogonal <= 1e-4) || !(handedness >= 0.999)) {
       throw new Error(`Invalid right-handed attachment frame: ${id}`);
     }
   };
@@ -2966,9 +2968,11 @@ const buildProcPlantGraphIr = (
       if (!start || !end) continue;
       const span = end.clone().sub(start);
       const lengthSq = span.lengthSq();
-      const axialT = lengthSq > 1e-10
-        ? THREE.MathUtils.clamp(organ.position.clone().sub(start).dot(span) / lengthSq, 0, 1)
-        : 0;
+      // Branch-start nodes are seeded at their parent's exact position, so the
+      // connecting segment is zero-length and yields no usable tangent. Skip it
+      // and let the organ bind to a segment that has a real direction.
+      if (lengthSq <= 1e-10) continue;
+      const axialT = THREE.MathUtils.clamp(organ.position.clone().sub(start).dot(span) / lengthSq, 0, 1);
       const nearest = start.clone().addScaledVector(span, axialT);
       const distanceSq = nearest.distanceToSquared(organ.position);
       if (distanceSq < bestDistanceSq) {
@@ -4501,6 +4505,10 @@ class TemplateBuilder {
     color: THREE.Color,
     tint = true,
     sway = 1,
+    // Placeholder corner UVs, not an authored unwrap. The organ factories below rely
+    // on this default, so their geometry carries only a handful of distinct UV pairs.
+    // It satisfies the procplants.geometry-uv0 contract (finite, bounded, one pair per
+    // vertex) but is not suitable for texturing until per-organ unwraps are authored.
     uv0: readonly [readonly [number, number], readonly [number, number], readonly [number, number]] =
       [[0, 0], [1, 0], [0.5, 1]],
   ) {
@@ -6394,6 +6402,11 @@ const addWeberPennFoliageMass = (
   const sourceMode = genome.weberPenn?.foliageSource ?? "species";
   const sprayGeometry = createWeberPennFoliageGeometry(genome, conifer);
   const useAttachmentAnchors = fillAnchors.length > 0 && sourceMode !== "species";
+  // Without anchors there is nothing to sample once leafVerts is zero: `branchVerts + 0`
+  // would index past the branch range and pin every fill leaf to the origin. Anchors are
+  // currently always present here (makeFoliageAnchors falls back to branch tips), so this
+  // is a guard against that fallback regressing rather than a reachable state today.
+  if (!useAttachmentAnchors && leafVerts <= 0) return 0;
   let added = 0;
   for (let i = 0; i < budget; i++) {
     const anchor = useAttachmentAnchors
@@ -7035,10 +7048,16 @@ export const buildWeberPennProcPlantTemplate = (
   const graph = emptyGraph();
   graph.attachments = foliageAnchors.map((anchor, index) => {
     const tangent = anchor.direction.clone().normalize();
-    const right = anchor.right.clone().projectOnPlane(tangent).normalize();
+    // An anchor right that is parallel to the tangent projects to zero, so fall back
+    // to a derived basis rather than normalizing a zero vector into NaN.
+    const right = anchor.right.clone().projectOnPlane(tangent);
+    if (right.lengthSq() < 0.0001) right.copy(tangentBasis(tangent).right);
+    right.normalize();
     const up = new THREE.Vector3().crossVectors(tangent, right).normalize();
-    if (Math.max(Math.abs(tangent.dot(right)), Math.abs(tangent.dot(up)), Math.abs(right.dot(up))) > 1e-4 ||
-        new THREE.Vector3().crossVectors(tangent, right).dot(up) < 0.999) {
+    // Passing-range comparisons keep a NaN axis from slipping through; see assertFrame.
+    const orthogonal = Math.max(Math.abs(tangent.dot(right)), Math.abs(tangent.dot(up)), Math.abs(right.dot(up)));
+    const handedness = new THREE.Vector3().crossVectors(tangent, right).dot(up);
+    if (!(orthogonal <= 1e-4) || !(handedness >= 0.999)) {
       throw new Error(`Invalid Weber-Penn attachment frame: ${anchor.kind}:${index}`);
     }
     return {
@@ -7568,7 +7587,12 @@ const templateBoundsAndColor = (template: ProcPlantTemplate) => {
   const box = new THREE.Box3();
   const point = new THREE.Vector3();
   const color = new THREE.Color();
-  if (template.pos.length === 0) box.set(new THREE.Vector3(-0.25, 0, -0.25), new THREE.Vector3(0.25, 1, 0.25));
+  if (template.pos.length === 0) {
+    // The per-vertex `??` fallbacks below never run for an empty template, which
+    // would average to pure black and emit a black LOD/impostor card.
+    box.set(new THREE.Vector3(-0.25, 0, -0.25), new THREE.Vector3(0.25, 1, 0.25));
+    return { box, color: new THREE.Color(0.3, 0.55, 0.25) };
+  }
   for (let i = 0; i < template.pos.length; i += 3) {
     point.set(template.pos[i]!, template.pos[i + 1]!, template.pos[i + 2]!);
     box.expandByPoint(point);

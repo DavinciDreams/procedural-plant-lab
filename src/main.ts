@@ -585,7 +585,9 @@ interface BiomePlacementLodState {
 let biomePlacementLodState: BiomePlacementLodState | null = null;
 let heroDebugOverlay: ProcPlantDebugOverlay | null = null;
 let heroPruneTool: ProcPlantPruneTool | null = null;
+let heroPruneToolRequest = 0;
 let heroPlacementTool: ProcPlantPruneTool | null = null;
+let heroPlacementToolRequest = 0;
 let crownVolumeTool: ProcPlantCrownVolumeTool | null = null;
 let cutoutPreview: THREE.Mesh<THREE.BufferGeometry, THREE.MeshLambertMaterial> | null = null;
 let heroImportPreview: THREE.Group | null = null;
@@ -2160,6 +2162,7 @@ const syncPruneButtons = () => {
 
 const refreshHeroPruneTool = async () => {
   disposeHeroPruneTool();
+  const request = ++heroPruneToolRequest;
   const target = heroLodState;
   if (!pruneModeVisible || !target?.graph) {
     app.dataset.heroPruneAvailable = String(Boolean(target?.graph));
@@ -2167,7 +2170,9 @@ const refreshHeroPruneTool = async () => {
     return;
   }
   const { createProcPlantPruneTool } = await loadProcPlantAuthoringTools();
-  if (!pruneModeVisible || heroLodState !== target || !target.graph) return;
+  // The request guard is what catches a mode toggled off and back on across the
+  // import; heroLodState alone is unchanged in that case.
+  if (request !== heroPruneToolRequest || !pruneModeVisible || heroLodState !== target || !target.graph) return;
   const tool = createProcPlantPruneTool(target.graph, { visible: true, opacity: 0.3, radiusScale: 2.2 });
   tool.object.position.copy(target.mesh.position);
   tool.object.quaternion.copy(target.mesh.quaternion);
@@ -2212,13 +2217,14 @@ const syncPlacementButtons = () => {
 
 const refreshHeroPlacementTool = async () => {
   disposeHeroPlacementTool();
+  const request = ++heroPlacementToolRequest;
   const target = heroLodState;
   if (!placementModeVisible || !target?.graph) {
     syncPlacementButtons();
     return;
   }
   const { createProcPlantPruneTool } = await loadProcPlantAuthoringTools();
-  if (!placementModeVisible || heroLodState !== target || !target.graph) return;
+  if (request !== heroPlacementToolRequest || !placementModeVisible || heroLodState !== target || !target.graph) return;
   const tool = createProcPlantPruneTool(target.graph, { visible: true, opacity: 0.2, radiusScale: 2.4 });
   tool.object.position.copy(target.mesh.position);
   tool.object.quaternion.copy(target.mesh.quaternion);
@@ -2469,6 +2475,9 @@ const installCompiledHeroLods = async (
     camera.position.distanceTo(target.mesh.position) / target.scale,
   );
   let nextBiomePlacementLodState: BiomePlacementLodState | null = null;
+  // Hoisted so the catch below can dispose whatever was built before the throw.
+  let pool: ProcPlantInstanceLodPool | null = null;
+  let visibilityAdapter: ProcPlantThreeVisibilityLodAdapter | null = null;
   if (treeLodSource) {
     try {
       const [{ createProcPlantInstanceLodPool }, { createProcPlantThreeVisibilityLodAdapter }] = await Promise.all([
@@ -2476,7 +2485,7 @@ const installCompiledHeroLods = async (
         import("./procplant-three-visibility-lod-adapter"),
       ]);
       const farLodIndex = result.lods.findIndex((lod) => lod.level === 3);
-      const pool = createProcPlantInstanceLodPool(
+      pool = createProcPlantInstanceLodPool(
         treeLodSource.placements,
         result.lods.map((lod) => ({
           distance: lod.distance * treeLodSource.distanceScale,
@@ -2512,7 +2521,7 @@ const installCompiledHeroLods = async (
           },
         },
       );
-      const visibilityAdapter = createProcPlantThreeVisibilityLodAdapter(pool, {
+      visibilityAdapter = createProcPlantThreeVisibilityLodAdapter(pool, {
         maxDistance: camera.far,
         frustumPadding: 0.025,
       });
@@ -2537,10 +2546,21 @@ const installCompiledHeroLods = async (
       nextBiomePlacementLodState.updates++;
       refreshPoolWindPhases(pool);
     } catch (error) {
-      nextBiomePlacementLodState?.pool.dispose();
+      // Dispose the local handles: on an early throw nextBiomePlacementLodState is
+      // still null, so going through it would leak the pool and the adapter.
+      visibilityAdapter?.dispose();
+      pool?.dispose();
       console.warn("[procplants] Dense placement LOD pool unavailable; keeping full instances.", error);
       nextBiomePlacementLodState = null;
     }
+  }
+  // The dynamic imports above yield, so a newer regeneration may have taken over
+  // while this run was suspended. Re-check before mutating any shared scene state:
+  // proceeding here would dispose the live pool and blank the pooled cohort.
+  if (request !== regenerationRequest || heroLodState !== target || biomeGroup !== targetGroup) {
+    disposeBiomePlacementLodState(nextBiomePlacementLodState);
+    for (const geometry of geometries) geometry.dispose();
+    return;
   }
   target.mesh.geometry = geometries[controller.index];
   for (const geometry of target.geometries) geometry.dispose();
@@ -3443,6 +3463,10 @@ editHeroSpineButton.addEventListener("click", async () => {
   if (!preview || !spine || !(target instanceof THREE.Mesh) || !sourceHash) return;
   try {
     const { createProcPlantHeroSpineEditor, createProcPlantHeroSpineEditorState } = await import("./procplant-hero-spine-editor");
+    // A second click while the import was in flight would otherwise build a rival
+    // editor whose capture-phase listeners swallow all canvas input for good.
+    // A re-import in that window would leave the editor bound to a stale mesh.
+    if (heroSpineEditor || heroImportPreview !== preview || heroImportSpine !== spine) return;
     heroSpineEditorState ??= createProcPlantHeroSpineEditorState(spine, sourceHash);
     const editor = createProcPlantHeroSpineEditor({
       canvas: renderer.domElement,
