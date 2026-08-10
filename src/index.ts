@@ -16,6 +16,7 @@ export * from "./procplant-foliage-relaxation";
 export * from "./procplant-generator-graph";
 export * from "./procplant-graph-resource-growth";
 export * from "./procplant-growth-simulation";
+export * from "./procplant-growth-calibration";
 export * from "./procplant-growth-topology";
 export * from "./procplant-guide-query";
 export * from "./procplant-lod";
