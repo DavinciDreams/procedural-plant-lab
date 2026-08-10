@@ -69,8 +69,25 @@ eight unique caller-owned Three `WebGLRenderer` instances. Each renderer has at
 most one active capture. The pool propagates cancellation between view
 readbacks and releases its own references on `dispose()`, but deliberately does
 not dispose caller renderers. `createProcPlantFiveTierAtlasMemoryCache(...)`
-provides bounded session storage with explicit `clear()`/`dispose()`;
-IndexedDB, filesystem, or service storage is still supplied by the caller.
+provides bounded session storage with explicit `clear()`/`dispose()`.
+
+`createProcPlantFiveTierAtlasIndexedDbCache(...)` is the durable browser
+adapter. Its version-1 schema stores the exact slot key, manifest cache key,
+serialized asset, UTF-8 size, and monotonic insertion sequence. Caller caps
+are bounded at 128 entries and 512 MiB; replacement and FIFO eviction happen
+atomically with persistent byte/eviction counters. Schema/version/size drift,
+corrupt records, blocked storage, and native quota errors fail closed with a
+typed error code. They are never reported as cache misses or adopted. Importing
+the module does not open IndexedDB; its first explicit cache operation does.
+
+The standalone lab exposes this adapter through the lazy **Five-tier Catalog**
+panel. Preset and seed rows are explicit, capture concurrency is one, progress
+includes hits/stale/misses/in-flight bytes/evictions, cancellation uses an
+`AbortSignal`, and prepared GLBs are capped at 64 MiB. Opening the panel does
+not create a WebGL context; a cache-hit-only run does not create one either.
+The dedicated renderer is created only if capture is required and is disposed
+with a forced context loss when the panel closes. Nothing runs at application
+startup.
 
 The catalog module is exported from the full package only. Importing core or
 starting the demo does not create a cache, renderer, capture job, or catalog
@@ -119,8 +136,12 @@ keys, two-entry bounded concurrency, cache hits, source-stale regeneration,
 cancellation, and bounded cache eviction. `npm run test:lod5-catalog-browser`
 captures Phi Fern and Clover through real Chrome WebGL, reuses both cache
 entries, regenerates a changed fern, adopts and renders LOD3/LOD4, exports and
-re-imports five-scene GLBs, and checks capture/cache/pool cleanup. It is again a
-correctness and resource-lifecycle proof, not an FPS or capacity benchmark.
+re-imports five-scene GLBs, and checks capture/cache/pool cleanup. Its durable
+UI pass closes and reopens IndexedDB to prove reload hits without another WebGL
+context, exact source-change recapture, cancellation, deterministic eviction,
+corrupt-record and quota classification, GLB export/re-import, and GPU cleanup.
+It is again a correctness and resource-lifecycle proof, not an FPS or capacity
+benchmark.
 
 Tellus has not adopted this opt-in version-2 stack. Tellus remains responsible
 for field placement, render pressure, shadows, camera-facing transforms, and

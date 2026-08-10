@@ -39,7 +39,7 @@
     "test:lod5": "node scripts/run-five-tier-lod-tests.mjs",
     "test:lod5-atlas": "node scripts/run-five-tier-atlas-build-tests.mjs && node scripts/run-five-tier-atlas-catalog-tests.mjs",
     "test:lod5-catalog": "node scripts/run-five-tier-atlas-catalog-tests.mjs",
-    "test:lod5-catalog-browser": "node scripts/run-five-tier-atlas-catalog-browser-smoke.mjs",
+    "test:lod5-catalog-browser": "node scripts/run-five-tier-atlas-catalog-browser-smoke.mjs && node scripts/run-five-tier-atlas-catalog-ui-browser-smoke.mjs",
     "test:lod5-browser": "node scripts/run-five-tier-lod-browser-smoke.mjs",
     "test:cli-png-e2e": "node scripts/run-cli-png-e2e.mjs",
     "test:lod-pool": "node scripts/run-instance-lod-pool-tests.mjs",

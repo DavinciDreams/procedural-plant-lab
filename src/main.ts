@@ -484,6 +484,10 @@ app.innerHTML = `
         <button id="exportImpostor" type="button" disabled>Export Impostor GLB</button>
       </div>
       <div class="button-row">
+        <button id="openLod5Catalog" type="button" aria-expanded="false" aria-controls="lod5CatalogHost">Five-tier Catalog</button>
+      </div>
+      <div id="lod5CatalogHost" hidden></div>
+      <div class="button-row">
         <button id="importHeroGlb" type="button">Import Hero GLB</button>
         <button id="clearHeroGlb" type="button" disabled>Clear Hero Import</button>
         <button id="bakeMaterial" type="button">Bake PBR Material</button>
@@ -916,6 +920,8 @@ const exportGlbButton = document.querySelector<HTMLButtonElement>("#exportGlb")!
 const bakeImpostorButton = document.querySelector<HTMLButtonElement>("#bakeImpostor")!;
 const exportImpostorButton = document.querySelector<HTMLButtonElement>("#exportImpostor")!;
 const impostorStatus = document.querySelector<HTMLOutputElement>("#impostorStatus")!;
+const openLod5CatalogButton = document.querySelector<HTMLButtonElement>("#openLod5Catalog")!;
+const lod5CatalogHost = document.querySelector<HTMLElement>("#lod5CatalogHost")!;
 const debugIrButton = document.querySelector<HTMLButtonElement>("#debugIr")!;
 const debugFramesButton = document.querySelector<HTMLButtonElement>("#debugFrames")!;
 const debugWindButton = document.querySelector<HTMLButtonElement>("#debugWind")!;
@@ -1275,6 +1281,7 @@ type ProcPlantOrganPlacementModule = typeof import("./procplant-organ-placement-
 type ProcPlantPlacementDecalThreeModule = typeof import("./procplant-placement-decal-three");
 type ProcPlantVineGuideAuthoringModule = typeof import("./procplant-vine-guide-authoring");
 type ProcPlantVineSurfaceAuthoringModule = typeof import("./procplant-vine-surface-authoring");
+type ProcPlantFiveTierAtlasCatalogUiModule = typeof import("./procplant-five-tier-atlas-catalog-ui");
 type ProcPlantGeneratorGraphOperation = import("./procplant-generator-graph").ProcPlantGeneratorGraphOperation;
 let procPlantRulesModule: ProcPlantRulesModule | null = null;
 let procPlantRulesPromise: Promise<ProcPlantRulesModule> | null = null;
@@ -1303,7 +1310,19 @@ let procPlantVineGuideAuthoringModule: ProcPlantVineGuideAuthoringModule | null 
 let procPlantVineGuideAuthoringPromise: Promise<ProcPlantVineGuideAuthoringModule> | null = null;
 let procPlantVineSurfaceAuthoringModule: ProcPlantVineSurfaceAuthoringModule | null = null;
 let procPlantVineSurfaceAuthoringPromise: Promise<ProcPlantVineSurfaceAuthoringModule> | null = null;
+let procPlantFiveTierAtlasCatalogUiPromise: Promise<ProcPlantFiveTierAtlasCatalogUiModule> | null = null;
+let procPlantFiveTierAtlasCatalogUi: import("./procplant-five-tier-atlas-catalog-ui").ProcPlantFiveTierAtlasCatalogUi | null = null;
 const graphOverrideOperations = new Map<string, ProcPlantGeneratorGraphOperation[]>();
+const loadProcPlantFiveTierAtlasCatalogUi = () => {
+  if (procPlantFiveTierAtlasCatalogUiPromise) return procPlantFiveTierAtlasCatalogUiPromise;
+  procPlantFiveTierAtlasCatalogUiPromise = import("./procplant-five-tier-atlas-catalog-ui").then((module) => {
+    app.dataset.lod5CatalogLoaded = "true";
+    return module;
+  }).finally(() => {
+    procPlantFiveTierAtlasCatalogUiPromise = null;
+  });
+  return procPlantFiveTierAtlasCatalogUiPromise;
+};
 const loadProcPlantGraphEditorUi = () => {
   if (procPlantGraphEditorUiModule) return Promise.resolve(procPlantGraphEditorUiModule);
   if (procPlantGraphEditorUiPromise) return procPlantGraphEditorUiPromise;
@@ -4110,6 +4129,32 @@ randomSeedButton.addEventListener("click", () => {
   regenerate();
 });
 
+openLod5CatalogButton.addEventListener("click", async () => {
+  if (procPlantFiveTierAtlasCatalogUi) {
+    procPlantFiveTierAtlasCatalogUi.dispose();
+    procPlantFiveTierAtlasCatalogUi = null;
+    lod5CatalogHost.hidden = true;
+    openLod5CatalogButton.setAttribute("aria-expanded", "false");
+    openLod5CatalogButton.textContent = "Five-tier Catalog";
+    return;
+  }
+  openLod5CatalogButton.disabled = true;
+  openLod5CatalogButton.textContent = "Loading Catalog...";
+  try {
+    const module = await loadProcPlantFiveTierAtlasCatalogUi();
+    lod5CatalogHost.hidden = false;
+    procPlantFiveTierAtlasCatalogUi = module.createProcPlantFiveTierAtlasCatalogUi({ host: lod5CatalogHost });
+    openLod5CatalogButton.setAttribute("aria-expanded", "true");
+    openLod5CatalogButton.textContent = "Close Catalog";
+  } catch (error) {
+    lod5CatalogHost.hidden = true;
+    setSaveStatus(`Five-tier catalog unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    openLod5CatalogButton.textContent = "Five-tier Catalog";
+  } finally {
+    openLod5CatalogButton.disabled = false;
+  }
+});
+
 regenerateButton.addEventListener("click", () => regenerate());
 
 const commitChainTubeControls = () => {
@@ -6262,6 +6307,8 @@ document.addEventListener("visibilitychange", () => {
 });
 window.addEventListener("pagehide", () => {
   impostorBakeAbort?.abort();
+  procPlantFiveTierAtlasCatalogUi?.dispose();
+  procPlantFiveTierAtlasCatalogUi = null;
   heroDebugOverlayRequest++;
   disposeCrownVolumeTool();
   disposeVineGuideVisualization();

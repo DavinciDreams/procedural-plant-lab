@@ -61,6 +61,7 @@ const forbiddenStaticEntries = [
   "src/procplant-crown-voxel-mask-fit-ui.ts",
   "src/procplant-impostor-three.ts",
   "src/procplant-lab-authoring-imports.ts",
+  "src/procplant-five-tier-atlas-catalog-ui.ts",
 ];
 for (const key of forbiddenStaticEntries) {
   const manifestKey = manifest[key]

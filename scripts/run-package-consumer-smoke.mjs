@@ -95,6 +95,7 @@ import {
   createProcPlantFiveTierAtlasBuildManifest,
   createProcPlantFiveTierAtlasCatalogPlan,
   createProcPlantFiveTierAtlasMemoryCache,
+  classifyProcPlantFiveTierAtlasIndexedDbError,
   fitProcPlantCrownMask,
   fitProcPlantCrownVoxelMask,
   buildProcPlantTemplateWithCrownLightPruning,
@@ -163,6 +164,7 @@ if (authoredVine.status !== "applied" || authoredVine.genome.vine?.guide?.length
 if (!lod5AtlasPlan.cacheKey.startsWith("procplants-lod5-atlas-v1-")) throw new Error("five-tier atlas build export drift");
 if (!lod5CatalogPlan.cacheKey.startsWith("procplants-lod5-atlas-catalog-v1-")) throw new Error("five-tier atlas catalog export drift");
 if (lod5CatalogCache.stats().entries !== 0) throw new Error("five-tier atlas memory cache export drift");
+if (classifyProcPlantFiveTierAtlasIndexedDbError(new DOMException("full", "QuotaExceededError")) !== "quota") throw new Error("five-tier atlas IndexedDB cache export drift");
 lod5CatalogCache.dispose();
 console.log(JSON.stringify({ revision: PROCPLANT_GENERATOR_CONTRACT_REVISION, kind, triangles: prototype.idx.length / 3 }));
 `);

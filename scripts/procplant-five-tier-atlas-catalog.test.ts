@@ -11,10 +11,23 @@ import {
   PROCPLANT_FIVE_TIER_ATLAS_ASSET_VERSION,
   type ProcPlantFiveTierAtlasAsset,
 } from "../src/procplant-five-tier-atlas-build";
+import {
+  classifyProcPlantFiveTierAtlasIndexedDbError,
+  createProcPlantFiveTierAtlasIndexedDbCache,
+} from "../src/procplant-five-tier-atlas-indexeddb-cache";
 import { buildProcPlantImpostorAtlas } from "../src/procplant-impostor";
 import { defaultPlantEnvironment, procPlantPresets, type ProcPlantGenome } from "../src/procplants";
 
 const environment = defaultPlantEnvironment();
+assert.equal(classifyProcPlantFiveTierAtlasIndexedDbError(new DOMException("full", "QuotaExceededError")), "quota");
+assert.throws(() => createProcPlantFiveTierAtlasIndexedDbCache(), /IndexedDB is unavailable/);
+assert.throws(() => createProcPlantFiveTierAtlasIndexedDbCache({ maxEntries: 129 }), /maxEntries/);
+const quotaCache = createProcPlantFiveTierAtlasIndexedDbCache({
+  indexedDB: { open: () => { throw new DOMException("full", "QuotaExceededError"); } } as unknown as IDBFactory,
+});
+await assert.rejects(() => quotaCache.stats(), (error: unknown) =>
+  (error as { code?: string }).code === "quota");
+quotaCache.dispose();
 const buildOptions = {
   width: 16,
   height: 16,
