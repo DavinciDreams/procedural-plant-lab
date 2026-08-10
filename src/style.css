@@ -265,6 +265,34 @@ canvas {
   line-height: 1.4;
 }
 
+.material-shader-preview {
+  margin: 0.7rem 0;
+  border: 1px solid rgba(121, 180, 133, 0.35);
+  border-radius: 0.55rem;
+  padding: 0.65rem;
+}
+
+.material-shader-preview label {
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.material-shader-preview-status {
+  display: block;
+  margin-top: 0.35rem;
+}
+
+.material-shader-diagnostics {
+  margin: 0.4rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.material-shader-diagnostics [data-blocking="true"] {
+  color: #ffd0c7;
+}
+
 .graph-editor-status {
   min-height: 1.4em;
   color: #f0d891;

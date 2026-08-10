@@ -112,7 +112,7 @@ try {
       for (let i = 0; i < 100 && (!document.querySelector('#inspectGraph') || document.querySelector('#inspectGraph').disabled); i++) await wait(100);
       const initialLazyAuthoringResources = performance.getEntriesByType('resource')
         .map((entry) => entry.name.split('/').at(-1) ?? entry.name)
-        .filter((name) => /procplant-(?:graph-editor-ui|material-graph-editor-ui|lab-authoring-imports|three-geometry|three-material-adapter|rules|contour-editor-ui|crown-volume-tool)-/.test(name));
+        .filter((name) => /procplant-(?:graph-editor-ui|material-graph-editor-ui|material-shader|three-material-shader|lab-authoring-imports|three-geometry|three-material-adapter|rules|contour-editor-ui|crown-volume-tool)-/.test(name));
       document.querySelector('#inspectGraph').click();
       for (let i = 0; i < 100 && !document.querySelector('.graph-node-editor'); i++) await wait(100);
       const row = [...document.querySelectorAll('.graph-node-list > li')]
@@ -148,6 +148,16 @@ try {
       document.querySelector('#editMaterialGraph').click();
       for (let i = 0; i < 120 && !document.querySelector('#materialGraphEditor .material-node-list'); i++) await wait(100);
       const materialGraphBaselineHash = document.querySelector('#app')?.dataset.materialGraphHash ?? '';
+      const shaderPreviewPanel = document.querySelector('#materialGraphEditor .material-shader-preview');
+      const shaderPreviewToggle = shaderPreviewPanel?.querySelector('input[type=checkbox]');
+      const shaderPreviewDiagnostics = [...(shaderPreviewPanel?.querySelectorAll('.material-shader-diagnostics li') ?? [])].map((entry) => ({ text: entry.textContent ?? '', blocking: entry.dataset.blocking }));
+      const shaderPreviewLive = shaderPreviewPanel?.querySelector('.material-shader-preview-status')?.getAttribute('aria-live') ?? null;
+      const materialShaderPlanReady = shaderPreviewPanel?.dataset.ready ?? null;
+      const materialShaderBaselinePlanHash = shaderPreviewPanel?.dataset.hash ?? '';
+      shaderPreviewToggle?.click();
+      for (let i = 0; i < 120 && document.querySelector('#app')?.dataset.materialShaderPreviewEnabled !== 'true'; i++) await wait(100);
+      await wait(250);
+      for (let i = 0; i < 120 && !document.querySelector('#materialGraphEditor .material-node-list [data-node-id="barkRoughLow"]'); i++) await wait(100);
       const barkRoughLow = [...document.querySelectorAll('#materialGraphEditor .material-node-list > li')]
         .find((entry) => entry.dataset.nodeId === 'barkRoughLow');
       barkRoughLow.querySelector('.material-node').click();
@@ -181,6 +191,9 @@ try {
       const materialLiveTangents = document.querySelector('#app')?.dataset.materialLiveTangents ?? null;
       const materialLiveNormalMaps = Number(document.querySelector('#app')?.dataset.materialLiveNormalMaps ?? 0);
       const materialLiveTextureBytes = Number(document.querySelector('#app')?.dataset.materialLiveTextureBytes ?? 0);
+      const materialShaderPreviewActive = document.querySelector('#app')?.dataset.materialShaderPreviewActive ?? null;
+      const materialShaderPreviewHash = document.querySelector('#app')?.dataset.materialShaderPreviewHash ?? '';
+      const materialShaderFinalPlanHash = document.querySelector('#app')?.dataset.materialShaderPlanHash ?? '';
       document.querySelector('#exportGlb').click();
       for (let i = 0; i < 240 && !document.querySelector('#app')?.dataset.lastGlbMaterialHash; i++) await wait(100);
       const lastGlbMaterialHash = document.querySelector('#app')?.dataset.lastGlbMaterialHash ?? '';
@@ -388,6 +401,14 @@ try {
         materialLiveTangents,
         materialLiveNormalMaps,
         materialLiveTextureBytes,
+        materialShaderPlanReady,
+        materialShaderBaselinePlanHash,
+        materialShaderFinalPlanHash,
+        materialShaderPreviewActive,
+        materialShaderPreviewHash,
+        shaderPreviewToggleEnabled: Boolean(shaderPreviewToggle && !shaderPreviewToggle.disabled),
+        shaderPreviewDiagnostics,
+        shaderPreviewLive,
         lastGlbMaterialHash,
         lastGlbMaterialAssignments,
         lastGlbSurfaceGroups,
@@ -480,6 +501,15 @@ try {
   assert.equal(result.materialLiveTangents, "true", "live normal-mapped geometry must carry explicit tangents");
   assert.equal(result.materialLiveNormalMaps, 2, "both live bark and organ surfaces must bind normal maps");
   assert.equal(result.materialLiveTextureBytes, 6 * 256 * 256 * 4, "live texture ownership audit must be exact");
+  assert.equal(result.materialShaderPlanReady, "true");
+  assert.match(result.materialShaderBaselinePlanHash, /^fnv1a32:[0-9a-f]{8}$/);
+  assert.match(result.materialShaderFinalPlanHash, /^fnv1a32:[0-9a-f]{8}$/);
+  assert.equal(result.materialShaderPreviewActive, "true", "opt-in generated shader must be installed on the live baked materials");
+  assert.equal(result.materialShaderPreviewHash, result.materialShaderFinalPlanHash);
+  assert.equal(result.shaderPreviewToggleEnabled, true);
+  assert.equal(result.shaderPreviewLive, "polite");
+  assert.ok(result.shaderPreviewDiagnostics.length >= 2 && result.shaderPreviewDiagnostics.every((diagnostic) => diagnostic.blocking === "false"));
+  assert.ok(result.shaderPreviewDiagnostics.every((diagnostic) => /normal remains on the validated baked/.test(diagnostic.text)));
   assert.match(result.lastGlbMaterialHash, /^fnv1a32:[0-9a-f]{8}$/, "lab GLB export must embed the active baked material bundle");
   assert.ok(result.lastGlbSurfaceGroups > 0);
   assert.equal(result.lastGlbMaterialAssignments, result.lastGlbSurfaceGroups,
