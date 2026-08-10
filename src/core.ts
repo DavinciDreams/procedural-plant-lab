@@ -16,6 +16,7 @@ export {
   procPlantPresetIds,
   hybridizePlantGenomes,
   buildProcPlantGraph,
+  inspectProcPlantSpaceColonizationChains,
   buildProcPlantInstancedParts,
   buildProcPlantTemplateFromGraph,
   buildProcPlantTemplate,
@@ -27,6 +28,7 @@ export {
   estimateProcPlantLods,
   buildProcPlantRuntimePackage,
 } from "./procplants";
+export * from "./procplant-chain-tube-overrides";
 export * from "./plant-readiness";
 export * from "./plant-variants";
 export * from "./procplant-organ-variants";

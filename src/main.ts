@@ -27,6 +27,7 @@ import {
   defaultPlantEnvironment,
   GOLDEN_ANGLE_RADIANS,
   hybridizePlantGenomes,
+  inspectProcPlantSpaceColonizationChains,
   procPlantPresets,
   type ProcPlantInstance,
   type ProcPlantEnvironment,
@@ -35,6 +36,16 @@ import {
   type ProcPlantInstancedParts,
   type ProcPlantTemplate,
 } from "./procplants";
+import {
+  createProcPlantChainTubeOverridePackage,
+  deserializeProcPlantChainTubeOverridePackage,
+  removeProcPlantChainTubeOverride,
+  serializeProcPlantChainTubeOverridePackage,
+  setProcPlantChainTubeOverride,
+  validateProcPlantChainTubeOverridePackage,
+  type ProcPlantColonizationChainSnapshot,
+  type ProcPlantChainTubeOverridePackage,
+} from "./procplant-chain-tube-overrides";
 import {
   allProcPlantPresetIds,
   installSavedProcPlantPresets,
@@ -128,6 +139,7 @@ interface LabState {
   crownDepth: number;
   crownDensity: number;
   crownField: ProcPlantFreeformCrown | null;
+  chainTubeOverrides: ProcPlantChainTubeOverridePackage | null;
   tubeResolution: number;
   collarStrength: number;
   barkRoughness: number;
@@ -168,6 +180,7 @@ const state: LabState = {
   crownDepth: 1,
   crownDensity: 1,
   crownField: null,
+  chainTubeOverrides: null,
   tubeResolution: 1,
   collarStrength: 1,
   barkRoughness: 1,
@@ -312,6 +325,19 @@ app.innerHTML = `
           <div class="field"><label for="tubeResolution"><span>Tube resolution</span><span id="tubeResolutionValue"></span></label><input id="tubeResolution" type="range" min="0.6" max="1.6" value="1" step="0.1" /></div>
           <div class="field"><label for="collarStrength"><span>Junction collars</span><span id="collarStrengthValue"></span></label><input id="collarStrength" type="range" min="0" max="2" value="1" step="0.05" /></div>
           <div class="field"><label for="barkRoughness"><span>Bark roughness</span><span id="barkRoughnessValue"></span></label><input id="barkRoughness" type="range" min="0" max="2" value="1" step="0.05" /></div>
+        </div>
+        <div id="chainTubeActions" class="crown-volume-actions" hidden>
+          <div class="field">
+            <label for="chainTubeSelect"><span>Branch chain</span><span id="chainTubeCountValue"></span></label>
+            <select id="chainTubeSelect"></select>
+          </div>
+          <div class="advanced-grid">
+            <div class="field"><label for="chainTubeRadius"><span>Chain radius</span><span id="chainTubeRadiusValue"></span></label><input id="chainTubeRadius" type="range" min="0.25" max="4" value="1" step="0.05" /></div>
+            <div class="field"><label for="chainTubeTaper"><span>Tip taper</span><span id="chainTubeTaperValue"></span></label><input id="chainTubeTaper" type="range" min="0.1" max="2" value="1" step="0.05" /></div>
+            <div class="field"><label for="chainTubeResolution"><span>Chain resolution</span><span id="chainTubeResolutionValue"></span></label><input id="chainTubeResolution" type="range" min="3" max="12" value="5" step="1" /></div>
+          </div>
+          <button id="chainTubeReset" type="button">Reset Selected Chain</button>
+          <small>Edits are bound to this seed and growth graph. Changing the crown or seed safely clears stale edits.</small>
         </div>
         <div id="crownVolumeActions" class="crown-volume-actions" hidden>
           <button id="crownVolumeMode" type="button" aria-pressed="false" aria-controls="crownWidth crownHeight crownDepth" disabled>Crown Handles</button>
@@ -813,6 +839,16 @@ const crownVolumeAddButton = document.querySelector<HTMLButtonElement>("#crownVo
 const crownVolumeSubtractButton = document.querySelector<HTMLButtonElement>("#crownVolumeSubtract")!;
 const crownVolumeRemoveButton = document.querySelector<HTMLButtonElement>("#crownVolumeRemove")!;
 const crownVolumeActions = document.querySelector<HTMLElement>("#crownVolumeActions")!;
+const chainTubeActions = document.querySelector<HTMLElement>("#chainTubeActions")!;
+const chainTubeSelect = document.querySelector<HTMLSelectElement>("#chainTubeSelect")!;
+const chainTubeRadiusInput = document.querySelector<HTMLInputElement>("#chainTubeRadius")!;
+const chainTubeTaperInput = document.querySelector<HTMLInputElement>("#chainTubeTaper")!;
+const chainTubeResolutionInput = document.querySelector<HTMLInputElement>("#chainTubeResolution")!;
+const chainTubeRadiusOutput = document.querySelector<HTMLElement>("#chainTubeRadiusValue")!;
+const chainTubeTaperOutput = document.querySelector<HTMLElement>("#chainTubeTaperValue")!;
+const chainTubeResolutionOutput = document.querySelector<HTMLElement>("#chainTubeResolutionValue")!;
+const chainTubeCountOutput = document.querySelector<HTMLElement>("#chainTubeCountValue")!;
+const chainTubeResetButton = document.querySelector<HTMLButtonElement>("#chainTubeReset")!;
 const crownLobeControls = document.querySelector<HTMLElement>("#crownLobeControls")!;
 const crownLobeInputs = {
   width: document.querySelector<HTMLInputElement>("#crownLobeWidth")!,
@@ -886,6 +922,17 @@ const restoreStateFromUrl = () => {
     } catch (error) {
       state.crownField = null;
       app.dataset.crownFieldRestoreError = error instanceof Error ? error.message : String(error);
+    }
+  }
+  const chainTubeOverrides = params.get("ct");
+  if (chainTubeOverrides) {
+    try {
+      const restored = deserializeProcPlantChainTubeOverridePackage(chainTubeOverrides);
+      state.chainTubeOverrides = restored.overrides.length > 0 ? restored : null;
+      app.dataset.chainTubeRestored = restored.overrides.length > 0 ? "true" : "empty-normalized";
+    } catch (error) {
+      state.chainTubeOverrides = null;
+      app.dataset.chainTubeRestoreError = error instanceof Error ? error.message : String(error);
     }
   }
 };
@@ -992,6 +1039,9 @@ const stateParams = (includeCamera = false) => {
   params.set("jc", state.collarStrength.toFixed(2));
   params.set("br", state.barkRoughness.toFixed(2));
   if (state.crownField) params.set("cf", serializeProcPlantFreeformCrown(state.crownField));
+  if (state.chainTubeOverrides?.overrides.length) {
+    params.set("ct", serializeProcPlantChainTubeOverridePackage(state.chainTubeOverrides));
+  }
   if (includeCamera) {
     params.set("cx", camera.position.x.toFixed(3));
     params.set("cy", camera.position.y.toFixed(3));
@@ -1038,6 +1088,7 @@ const overridesActive = () =>
   Math.abs(state.crownHeight - 1) > 0.001 ||
   Math.abs(state.crownDepth - 1) > 0.001 ||
   state.crownField !== null ||
+  state.chainTubeOverrides !== null ||
   Math.abs(state.crownDensity - 1) > 0.001 ||
   Math.abs(state.tubeResolution - 1) > 0.001 ||
   Math.abs(state.collarStrength - 1) > 0.001 ||
@@ -1270,6 +1321,13 @@ const applyOverrides = (genome: ProcPlantGenome): ProcPlantGenome => {
     };
   }
 
+  if (genome.spaceColonization && state.chainTubeOverrides) {
+    next.spaceColonization = {
+      ...(next.spaceColonization ?? genome.spaceColonization),
+      chainTubeOverrides: state.chainTubeOverrides,
+    };
+  }
+
   return next;
 };
 
@@ -1338,6 +1396,91 @@ const selectedGenome = (): ProcPlantGenome => {
 };
 
 const selectedGeneratorSeed = () => graphExecutionSeedForGenome(selectedBaseGenome(false));
+
+let currentChainTubeSnapshot: ProcPlantColonizationChainSnapshot | null = null;
+
+const genomeWithoutChainTubeOverrides = (genome: ProcPlantGenome): ProcPlantGenome => {
+  if (!genome.spaceColonization?.chainTubeOverrides) return genome;
+  const spaceColonization = { ...genome.spaceColonization };
+  delete spaceColonization.chainTubeOverrides;
+  return { ...genome, spaceColonization };
+};
+
+const clearChainTubeOverrides = (reason?: string) => {
+  state.chainTubeOverrides = null;
+  delete app.dataset.chainTubeOverrideCount;
+  if (reason) app.dataset.chainTubeResetReason = reason;
+};
+
+const reconcileChainTubeOverrides = (
+  genome: ProcPlantGenome,
+  seed: number,
+  env: ProcPlantEnvironment,
+): ProcPlantGenome => {
+  if (!state.chainTubeOverrides || !genome.spaceColonization) return genome;
+  const clean = genomeWithoutChainTubeOverrides(genome);
+  try {
+    const snapshot = inspectProcPlantSpaceColonizationChains(clean, seed, env);
+    validateProcPlantChainTubeOverridePackage(state.chainTubeOverrides, snapshot);
+    return genome;
+  } catch (error) {
+    clearChainTubeOverrides("stale-target");
+    app.dataset.chainTubeRestoreError = error instanceof Error ? error.message : String(error);
+    return clean;
+  }
+};
+
+const syncChainTubeInputs = () => {
+  const snapshot = currentChainTubeSnapshot;
+  const chainId = chainTubeSelect.value;
+  const chain = snapshot?.chains.find((entry) => entry.id === chainId);
+  const authored = state.chainTubeOverrides?.overrides.find((entry) => entry.chainId === chainId);
+  const genome = selectedGenome();
+  const defaultResolution = Math.max(3, Math.min(8, Math.round(genome.spaceColonization?.radialSegments ?? 5)));
+  chainTubeRadiusInput.value = String(authored?.radiusScale ?? 1);
+  chainTubeTaperInput.value = String(authored?.taperScale ?? 1);
+  chainTubeResolutionInput.value = String(authored?.radialSegments ?? defaultResolution);
+  chainTubeRadiusOutput.textContent = Number(chainTubeRadiusInput.value).toFixed(2);
+  chainTubeTaperOutput.textContent = Number(chainTubeTaperInput.value).toFixed(2);
+  chainTubeResolutionOutput.textContent = chainTubeResolutionInput.value;
+  chainTubeResetButton.disabled = regenerationBusy || !authored;
+  for (const input of [chainTubeRadiusInput, chainTubeTaperInput, chainTubeResolutionInput]) {
+    input.disabled = regenerationBusy || !chain;
+  }
+  if (chain) app.dataset.chainTubeSelected = chain.id;
+  else delete app.dataset.chainTubeSelected;
+};
+
+const syncChainTubeControls = (genome: ProcPlantGenome, seed: number, env: ProcPlantEnvironment) => {
+  const clean = genomeWithoutChainTubeOverrides(genome);
+  if (!clean.spaceColonization) {
+    currentChainTubeSnapshot = null;
+    chainTubeActions.hidden = true;
+    delete app.dataset.chainTubeAvailable;
+    delete app.dataset.chainTubeGraphSignature;
+    delete app.dataset.chainTubeCount;
+    return;
+  }
+  const previousSelection = chainTubeSelect.value;
+  currentChainTubeSnapshot = inspectProcPlantSpaceColonizationChains(clean, seed, env);
+  chainTubeSelect.innerHTML = "";
+  currentChainTubeSnapshot.chains.forEach((chain, index) => {
+    const option = document.createElement("option");
+    option.value = chain.id;
+    option.textContent = `Chain ${index + 1} · order ${chain.branchOrder} · ${chain.nodeIds.length} nodes`;
+    chainTubeSelect.appendChild(option);
+  });
+  if (currentChainTubeSnapshot.chains.some((chain) => chain.id === previousSelection)) {
+    chainTubeSelect.value = previousSelection;
+  }
+  chainTubeActions.hidden = false;
+  chainTubeCountOutput.textContent = `${currentChainTubeSnapshot.chains.length}`;
+  app.dataset.chainTubeAvailable = "true";
+  app.dataset.chainTubeGraphSignature = currentChainTubeSnapshot.target.graphSignature;
+  app.dataset.chainTubeCount = String(currentChainTubeSnapshot.chains.length);
+  app.dataset.chainTubeOverrideCount = String(state.chainTubeOverrides?.overrides.length ?? 0);
+  syncChainTubeInputs();
+};
 
 const crownVolumeValues = (): ProcPlantCrownVolumeValues => ({
   width: state.crownWidth,
@@ -1471,6 +1614,7 @@ const refreshCrownVolumeTool = async () => {
       app.dataset.crownVolumeAxis = axis;
     },
     onCommit: (values, axis) => {
+      clearChainTubeOverrides(`changed-crown-${axis}`);
       applyCrownVolumeValues(values);
       setSaveStatus(`Crown ${axis} set to ${values[axis].toFixed(2)}; rebuilding the supported volume dimension.`);
       regenerate();
@@ -1490,6 +1634,7 @@ const refreshCrownVolumeTool = async () => {
       app.dataset.crownVolumeSelected = volumeId;
     },
     onFreeformCommit: (field, volumeId) => {
+      clearChainTubeOverrides("changed-freeform-crown");
       applyCrownField(field);
       if (volumeId) app.dataset.crownVolumeSelected = volumeId;
       else delete app.dataset.crownVolumeSelected;
@@ -2594,8 +2739,10 @@ const performRegeneration = async (request: number) => {
     delete app.dataset.readinessScore;
     delete app.dataset.readinessReady;
   }
-  const genome = selectedGenome();
+  let genome = selectedGenome();
   const generatorSeed = selectedGeneratorSeed();
+  const env = envFromState();
+  genome = reconcileChainTubeOverrides(genome, generatorSeed, env);
   const materialSourceKey = bakedMaterialSourceKey(genome, generatorSeed);
   if (liveBakedMaterials && liveBakedMaterialSourceKey !== materialSourceKey) {
     retiredBakedMaterials.push(liveBakedMaterials);
@@ -2607,7 +2754,6 @@ const performRegeneration = async (request: number) => {
     delete app.dataset.materialLiveTangents;
     materialBakeStatus.textContent = "The baked material was detached because the plant genome or generator seed changed. Bake again for this plant.";
   }
-  const env = envFromState();
   updateAddressState();
   sun.intensity = 1.4 + state.light * 3.4;
   scene.background = new THREE.Color(0xb9d7ee).lerp(new THREE.Color(0x6f7d8d), 1 - state.light);
@@ -2625,7 +2771,10 @@ const performRegeneration = async (request: number) => {
         (error: unknown) => ({ lods: null, error }),
       )
     : null;
-  const biome = await scatterBiome(genome, env, generatorSeed);
+  // Per-chain packages target the exact hero seed and growth signature. The
+  // surrounding biome deliberately varies seed and local light, so it must use
+  // the same genome without hero-scoped chain edits.
+  const biome = await scatterBiome(genomeWithoutChainTubeOverrides(genome), env, generatorSeed);
   if (request !== regenerationRequest) {
     disposeGroup(biome.group);
     return;
@@ -2770,6 +2919,7 @@ const performRegeneration = async (request: number) => {
   app.dataset.heroLodPending = String(shouldCompileHeroLods);
   syncImpostorButtons();
   syncCrownVolumeButton();
+  syncChainTubeControls(genome, generatorSeed, env);
   syncPlacementButtons();
   if (crownVolumeModeVisible) void refreshCrownVolumeTool();
   if (lodResultPromise) {
@@ -2805,6 +2955,7 @@ const setRegenerationBusy = (busy: boolean) => {
   pruneModeButton.disabled = busy;
   syncPlacementButtons();
   syncCrownVolumeButton();
+  if (currentChainTubeSnapshot) syncChainTubeInputs();
   if (busy) {
     pruneSelectedButton.disabled = true;
     undoPruneButton.disabled = true;
@@ -2852,6 +3003,9 @@ const bindRange = (id: keyof LabState, labelId: string) => {
   if (!input) return;
   input.value = String(state[id]);
   const sync = () => {
+    if (["hybrid", "light", "moisture", "crownWidth", "crownHeight", "crownDepth", "crownDensity"].includes(id)) {
+      clearChainTubeOverrides(`changed-${id}`);
+    }
     state[id] = Number(input.value) as never;
     setText(labelId, Number(input.value).toFixed(2));
     regenerate(120);
@@ -2861,10 +3015,12 @@ const bindRange = (id: keyof LabState, labelId: string) => {
 };
 
 primarySelect.addEventListener("change", () => {
+  clearChainTubeOverrides("changed-primary");
   state.primary = primarySelect.value as SpeciesId;
   regenerate();
 });
 secondarySelect.addEventListener("change", () => {
+  clearChainTubeOverrides("changed-secondary");
   state.secondary = secondarySelect.value as SpeciesId;
   regenerate();
 });
@@ -2907,6 +3063,7 @@ inspectGraphButton.addEventListener("click", () => {
 });
 
 seasonSelect.addEventListener("change", () => {
+  clearChainTubeOverrides("changed-season");
   state.season = seasonSelect.value as ProcPlantSeason;
   syncControlsFromState();
   regenerate();
@@ -2914,6 +3071,7 @@ seasonSelect.addEventListener("change", () => {
 
 for (const button of seasonButtons) {
   button.addEventListener("click", () => {
+    clearChainTubeOverrides("changed-season");
     state.season = button.dataset.season as ProcPlantSeason;
     syncControlsFromState();
     regenerate();
@@ -2921,11 +3079,55 @@ for (const button of seasonButtons) {
 }
 
 randomSeedButton.addEventListener("click", () => {
+  clearChainTubeOverrides("changed-seed");
   state.seed = Math.floor(Math.random() * 1_000_000);
   regenerate();
 });
 
 regenerateButton.addEventListener("click", () => regenerate());
+
+const commitChainTubeControls = () => {
+  const snapshot = currentChainTubeSnapshot;
+  const chainId = chainTubeSelect.value;
+  if (!snapshot || !snapshot.chains.some((chain) => chain.id === chainId) || regenerationBusy) return;
+  const clean = genomeWithoutChainTubeOverrides(selectedGenome());
+  const defaultResolution = Math.max(3, Math.min(8, Math.round(clean.spaceColonization?.radialSegments ?? 5)));
+  const radiusScale = Number(chainTubeRadiusInput.value);
+  const taperScale = Number(chainTubeTaperInput.value);
+  const radialSegments = Number(chainTubeResolutionInput.value);
+  let authored = state.chainTubeOverrides;
+  if (!authored || authored.target.graphSignature !== snapshot.target.graphSignature
+    || authored.target.genomeId !== snapshot.target.genomeId || authored.target.seed !== snapshot.target.seed) {
+    authored = createProcPlantChainTubeOverridePackage(snapshot.target);
+  }
+  state.chainTubeOverrides = setProcPlantChainTubeOverride(authored, {
+    chainId,
+    ...(Math.abs(radiusScale - 1) > 0.001 ? { radiusScale } : {}),
+    ...(Math.abs(taperScale - 1) > 0.001 ? { taperScale } : {}),
+    ...(radialSegments !== defaultResolution ? { radialSegments } : {}),
+  });
+  app.dataset.chainTubeOverrideCount = String(state.chainTubeOverrides.overrides.length);
+  syncChainTubeInputs();
+  regenerate(80);
+};
+
+chainTubeSelect.addEventListener("change", syncChainTubeInputs);
+for (const input of [chainTubeRadiusInput, chainTubeTaperInput, chainTubeResolutionInput]) {
+  input.addEventListener("input", () => {
+    chainTubeRadiusOutput.textContent = Number(chainTubeRadiusInput.value).toFixed(2);
+    chainTubeTaperOutput.textContent = Number(chainTubeTaperInput.value).toFixed(2);
+    chainTubeResolutionOutput.textContent = chainTubeResolutionInput.value;
+  });
+  input.addEventListener("change", commitChainTubeControls);
+}
+chainTubeResetButton.addEventListener("click", () => {
+  if (!state.chainTubeOverrides || !chainTubeSelect.value || regenerationBusy) return;
+  state.chainTubeOverrides = removeProcPlantChainTubeOverride(state.chainTubeOverrides, chainTubeSelect.value);
+  if (state.chainTubeOverrides.overrides.length === 0) state.chainTubeOverrides = null;
+  app.dataset.chainTubeOverrideCount = String(state.chainTubeOverrides?.overrides.length ?? 0);
+  syncChainTubeInputs();
+  regenerate();
+});
 
 const weightedRandomSpecies = (rng: () => number): SpeciesId => {
   const ids = allProcPlantPresetIds();
@@ -2935,6 +3137,7 @@ const weightedRandomSpecies = (rng: () => number): SpeciesId => {
 
 const rollBiomeDice = () => {
   if (regenerationBusy) return;
+  clearChainTubeOverrides("rolled-dice");
   const dice = Math.floor(Math.random() * 1_000_000_000);
   const rng = rand(dice);
   state.seed = Math.floor(rng() * 1_000_000);
