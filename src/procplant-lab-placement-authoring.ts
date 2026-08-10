@@ -169,3 +169,8 @@ export const resolveProcPlantLabPlacement = (
     ownerStemId: null,
   };
 };
+export const describeProcPlantLabPlacementMode = (active: boolean, importedHero: boolean) => active
+  ? importedHero
+    ? "Imported-hero decal mode: click a triangle on the static baked trunk. The UV0 quad is bound to that exact primitive and authored-geometry signature."
+    : "Place mode: choose a part, then click a highlighted branch."
+  : "Place mode closed.";

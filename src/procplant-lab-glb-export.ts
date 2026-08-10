@@ -3,11 +3,15 @@ import type {
   ProcPlantMaterializedPlacementDecal,
 } from "./procplant-organ-placement-overrides";
 import type { ProcPlantPlacementDecalPixelSource } from "./procplant-placement-decal-glb";
+import type { ProcPlantThreePlacementDecalBindingHandle } from "./procplant-placement-decal-three";
+import type { ProcPlantImportedHeroDecalPackage } from "./procplant-imported-hero-decal";
+import type { ProcPlantLabHeroPreview } from "./procplant-lab-authoring-imports";
 import type { ProcPlantBakedMaterialBundle } from "./procplant-material-bake";
 import type { ProcPlantWeberPennBuildMetadata } from "./procplants";
 import type { Group } from "three";
 
 export const PROCPLANT_LAB_GLB_PREPARING_MESSAGE = "Preparing GLB with vertex color, sway, tintability, and contract metadata…";
+export const PROCPLANT_LAB_GLB_NO_HERO_MESSAGE = "Generate a plant before exporting GLB.";
 export const reportProcPlantLabGlbExportFailure = (error: unknown) => {
   console.error("[procplants] GLB export failed.", error);
   return `GLB export failed: ${error instanceof Error ? error.message : String(error)}`;
@@ -22,7 +26,7 @@ export const preflightProcPlantLabGlbExport = (options: {
   importedHero: boolean;
   dataset: DOMStringMap;
 }): { allowed: boolean; exportableDecals: boolean; message?: string } => {
-  if (!options.heroReady) return { allowed: false, exportableDecals: false, message: "Generate a plant before exporting GLB." };
+  if (!options.heroReady) return { allowed: false, exportableDecals: false, message: PROCPLANT_LAB_GLB_NO_HERO_MESSAGE };
   const exportableDecals = options.authoredDecals > 0
     && options.activeBinding
     && options.retainedPixels
@@ -62,6 +66,69 @@ export const exportProcPlantLabImportedGlb = async (options: {
   return "Imported hero GLB exported with fitted spine, bark UV, wind, collars, and instanced branch, leaf, and accessory anchors.";
 };
 
+export interface ProcPlantLabImportedHeroDecalGlbInput {
+  preview: ProcPlantLabHeroPreview;
+  audit: Record<string, unknown> | null;
+  authored: ProcPlantImportedHeroDecalPackage | null;
+  binding: ProcPlantThreePlacementDecalBindingHandle | null;
+  pixels: ProcPlantPlacementDecalPixelSource | null;
+  contentHash: string;
+  dataset: DOMStringMap;
+}
+
+/** Imported-hero decal validation and export stay behind the explicit GLB action. */
+export const exportProcPlantLabImportedHeroDecalGlb = async (
+  input: ProcPlantLabImportedHeroDecalGlbInput,
+): Promise<{ allowed: boolean; message: string }> => {
+  const authoredCount = input.authored?.operations.length ?? 0;
+  let decals: ProcPlantMaterializedPlacementDecal[] = [];
+  if (authoredCount > 0) {
+    if (!input.preview.importedDecalTarget || !input.binding || input.binding.disposed || !input.pixels) {
+      input.dataset.lastGlbImportedHeroDecalsRejected = String(authoredCount);
+      return {
+        allowed: false,
+        message: "Imported-hero GLB export stopped: restore the exact static target and matching PNG/WebP/JPEG binding, or undo unresolved decals.",
+      };
+    }
+    const { applyProcPlantImportedHeroDecals } = await import("./procplant-imported-hero-decal");
+    const applied = applyProcPlantImportedHeroDecals(
+      input.preview.importedDecalTarget,
+      input.preview.trunk.geometry,
+      input.authored!,
+      [input.binding.binding],
+    );
+    if (!applied.targetMatched || applied.decals.length !== authoredCount || applied.unsupported.length > 0) {
+      input.dataset.lastGlbImportedHeroDecalsRejected = String(authoredCount);
+      return {
+        allowed: false,
+        message: "Imported-hero GLB export stopped: a primitive signature, triangle, or image binding is stale. No partial decal export was produced.",
+      };
+    }
+    decals = applied.decals;
+  }
+  delete input.dataset.lastGlbImportedHeroDecalsRejected;
+  const authoring = await import("./procplant-lab-authoring-imports");
+  const exported = decals.length > 0
+    ? await authoring.exportProcPlantLabHeroPreviewWithPlacementDecals(input.preview.group, input.audit, decals, input.pixels!)
+    : { bytes: await authoring.exportProcPlantLabHeroPreview(input.preview.group, input.audit), draws: 0, triangles: 0, embeddedBytes: 0 };
+  const url = URL.createObjectURL(new Blob([exported.bytes], { type: "model/gltf-binary" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `procplant-imported-hero-${input.contentHash}.glb`;
+  link.click();
+  URL.revokeObjectURL(url);
+  input.dataset.heroImportLastExportBytes = String(exported.bytes.byteLength);
+  input.dataset.lastGlbImportedHeroDecals = String(exported.draws);
+  input.dataset.lastGlbImportedHeroDecalTriangles = String(exported.triangles);
+  input.dataset.lastGlbImportedHeroDecalEmbeddedBytes = String(exported.embeddedBytes);
+  return {
+    allowed: true,
+    message: decals.length > 0
+      ? `Imported hero GLB exported with ${decals.length} signature-bound UV0 decal draw${decals.length === 1 ? "" : "s"} and deterministic embedded PNG.`
+      : "Imported hero GLB exported with fitted spine, source material, and authored attachments.",
+  };
+};
+
 type ProcPlantAuthoringToolsModule = typeof import("./procplant-authoring-tools");
 
 export interface ProcPlantLabGeneratedGlbInput {
@@ -92,6 +159,36 @@ export interface ProcPlantLabGeneratedGlbResult {
   decalEmbeddedBytes: number | null;
   message: string;
 }
+
+export type ProcPlantLabGeneratedGlbActionInput = Omit<ProcPlantLabGeneratedGlbInput, "authoring" | "placementDecalPixelSource"> & {
+  activeBinding: boolean;
+  placementDecalPixelSource: ProcPlantPlacementDecalPixelSource | null;
+};
+
+/** Complete generated-hero preflight and export action, loaded only after Export GLB. */
+export const runProcPlantLabGeneratedGlbAction = async (input: ProcPlantLabGeneratedGlbActionInput): Promise<string> => {
+  const preflight = preflightProcPlantLabGlbExport({
+    heroReady: true,
+    authoredDecals: input.authoredDecals,
+    activeBinding: input.activeBinding,
+    retainedPixels: Boolean(input.placementDecalPixelSource),
+    materializedDecals: input.placementDecals.length,
+    importedHero: false,
+    dataset: input.dataset,
+  });
+  if (!preflight.allowed) return preflight.message ?? "GLB export is not ready.";
+  try {
+    const authoring = await import("./procplant-authoring-tools");
+    const result = await exportProcPlantLabGeneratedGlb({
+      ...input,
+      authoring,
+      placementDecalPixelSource: preflight.exportableDecals ? input.placementDecalPixelSource : null,
+    });
+    return result.message;
+  } catch (error) {
+    return reportProcPlantLabGlbExportFailure(error);
+  }
+};
 
 /** Export-only GLB assembly kept outside the interactive startup closure. */
 export const exportProcPlantLabGeneratedGlb = async (
