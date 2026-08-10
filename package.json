@@ -128,6 +128,7 @@
     "test:tellus-contract": "node scripts/run-tellus-contract-fixture.mjs",
     "test:browser-smoke": "node scripts/run-browser-ui-smoke.mjs",
     "test:graph-editor-browser": "node scripts/run-graph-editor-controls-browser-smoke.mjs",
+    "test:place-browser": "node scripts/run-place-extensions-browser-smoke.mjs",
     "test:chain-tube-browser-smoke": "node scripts/run-chain-tube-browser-smoke.mjs",
     "test:spline-crown-browser-smoke": "node scripts/run-spline-crown-browser-smoke.mjs",
     "test:production-dag-browser-smoke": "node scripts/run-production-dag-browser-smoke.mjs",

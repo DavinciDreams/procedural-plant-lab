@@ -59,7 +59,7 @@ Good starting experiments:
 - Deterministic non-mutating graph pruning with repaired ancestry and an audit result.
 - Interactive segment picking, reversible graph-backed trimming, and recompilation of the edited hero plant.
 - Screen-space pruning strokes and Shift-drag lassos with stable multi-selection and grouped undo.
-- Opt-in viewport placement adds regeneration-safe branch-relative leaves, compatible flowers, or fruit to graph-backed heroes with target-bound overrides, spacing/cap audits, and undo-last.
+- Opt-in viewport Place Part authoring adds regeneration-safe branch-relative leaves, reproductive/accessory organs, low-poly foliage clusters, moss tufts, and bounded one-segment child branches to graph-backed heroes with target-bound overrides, spacing/cap audits, JSON metadata, and undo-last.
 - Browser-native alpha cutout tracing, deterministic multi-island/hole triangulation, direct point editing and freehand island/hole creation, atlas packing, edge-dilated mip padding, UV/pivot/attachment/bend metadata, and mesh helpers.
 - Low-poly fruit, berry, cone, thorn, and aerial-root organs with branch-relative placement.
 - A reusable instanced placement LOD pool with hysteresis, culling, explicit allocation-free updates, and migration statistics.
@@ -223,7 +223,7 @@ npm run test:tellus-contract
 - `src/procplant-webgpu-indirect-draw.ts` exposes allocation-stable per-LOD compacted-index bindings and records one indexed-indirect draw per LOD without taking ownership of runtime buffers.
 
 The injected-device runtime is available from the explicit `procplants/webgpu` package entry. It is excluded from both the default browser startup graph and `procplants/core`; importing the existing plan API from the root/core entries remains supported. Tellus currently defaults to its faster WebGL renderer and does not exercise this path.
-- `src/procplant-organ-placement-overrides.ts` serializes and applies target-bound branch-relative leaf/flower/fruit placements.
+- `src/procplant-organ-placement-overrides.ts` serializes and applies target-bound branch-relative organ, cluster, moss-tuft, and bounded child-branch placements.
 - `src/procplant-resource-growth.ts` allocates maintenance, reserves, and growth from directional light resources.
 - `src/procplant-crown-light.ts` samples bounded deterministic stem/organ occlusion and adapts it directly to resource growth.
 - `src/procplant-graph-resource-growth.ts` adapts public segment IR to vigor and self-prune recommendations.

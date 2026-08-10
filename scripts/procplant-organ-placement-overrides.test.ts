@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
 import * as THREE from "three";
-import type { ProcPlantGraph } from "../src/procplants";
+import {
+  buildProcPlantTemplateFromGraph,
+  procPlantPresets,
+  type ProcPlantGraph,
+} from "../src/procplants";
 import {
   PROCPLANT_ORGAN_PLACEMENT_CONTRACT,
+  PROCPLANT_ORGAN_PLACEMENT_LEGACY_VERSION,
   PROCPLANT_ORGAN_PLACEMENT_VERSION,
   appendProcPlantOrganPlacement,
   applyProcPlantOrganPlacementOverrides,
@@ -106,6 +111,61 @@ for (const attachment of applied.graph.attachments.slice(graph.attachments.lengt
   assert(Math.abs(attachment.tangent.dot(attachment.right)) < 1e-6);
   assert(attachment.tangent.clone().cross(attachment.right).dot(attachment.up) > 0.9999);
 }
+
+let expandedPackage = createProcPlantOrganPlacementPackage(target);
+for (const input of [
+  { kind: "coniferSpray" as const, segmentId: "trunk:0", axialT: 0.24, azimuth: 0.3, scale: 0.72 },
+  { kind: "branch" as const, segmentId: "trunk:0", axialT: 0.72, azimuth: 1.2, scale: 0.48 },
+]) {
+  const result = appendProcPlantOrganPlacement(expandedPackage, input);
+  assert(result.operation);
+  expandedPackage = result.package;
+}
+const expandedApplied = applyProcPlantOrganPlacementOverrides(graph, target, expandedPackage);
+assert.equal(expandedApplied.appliedOperationIds.length, 2);
+assert.equal(expandedApplied.graph.organs.at(-1)?.kind, "coniferSpray");
+assert.equal(expandedApplied.graph.stems.length, graph.stems.length + 2);
+assert.equal(expandedApplied.graph.segments.length, graph.segments.length + 1);
+assert.equal(expandedApplied.graph.segmentRecords.at(-1)?.parentSegmentId, "trunk:0");
+assert.match(expandedApplied.graph.segmentRecords.at(-1)?.id ?? "", /^placed-branch:/);
+const branchTip = expandedApplied.graph.attachments.at(-1)!;
+assert.equal(branchTip.kind, "branch-tip");
+assert.equal(branchTip.parentSegmentId, expandedApplied.graph.segmentRecords.at(-1)?.id);
+assert(Math.abs(branchTip.tangent.dot(branchTip.right)) < 1e-6);
+assert(Math.abs(branchTip.tangent.dot(branchTip.up)) < 1e-6);
+assert(branchTip.tangent.clone().cross(branchTip.right).dot(branchTip.up) > 0.9999);
+assert.equal(
+  procPlantOrganPlacementGraphSignature(expandedApplied.graph),
+  target.graphSignature,
+  "authored output branches must not invalidate their source topology binding",
+);
+const sourceTemplate = buildProcPlantTemplateFromGraph(procPlantPresets.understoryShrub!, graph).template;
+const expandedTemplate = buildProcPlantTemplateFromGraph(procPlantPresets.understoryShrub!, expandedApplied.graph).template;
+assert(expandedTemplate.idx.length > sourceTemplate.idx.length, "placed branches and clusters must materialize real geometry");
+
+const placedBranchAppend = appendProcPlantOrganPlacement(expandedPackage, {
+  kind: "leaf",
+  segmentId: expandedApplied.graph.segmentRecords.at(-1)!.id,
+  axialT: 0.5,
+  azimuth: 0,
+  scale: 0.2,
+});
+assert.equal(placedBranchAppend.reason, "invalid", "V2 output branches are not stable nested authoring targets");
+
+const legacyPackage: ProcPlantOrganPlacementPackage = {
+  ...createProcPlantOrganPlacementPackage(target),
+  version: PROCPLANT_ORGAN_PLACEMENT_LEGACY_VERSION,
+  operations: [expandedPackage.operations[0]!],
+};
+const legacyExpanded = applyProcPlantOrganPlacementOverrides(graph, target, legacyPackage);
+assert.strictEqual(legacyExpanded.graph, graph);
+assert.equal(legacyExpanded.unsupported[0]?.reason, "unsupported-kind");
+const legacyLeaf = applyProcPlantOrganPlacementOverrides(graph, target, {
+  ...legacyPackage,
+  operations: [first.operation],
+});
+assert.equal(legacyLeaf.changed, true);
+assert.equal(legacyLeaf.graph.organs.at(-1)?.kind, "leaf");
 
 const moved = graphFixture();
 moved.stems[1]!.position.set(2, 2, 1);

@@ -424,11 +424,20 @@ app.innerHTML = `
         <button id="resetPrune" type="button" disabled>Reset Trim</button>
       </div>
       <div class="button-row">
-        <button id="placementMode" type="button" aria-pressed="false" disabled>Place Organ</button>
-        <select id="placementKind" aria-label="Organ type" disabled>
+        <button id="placementMode" type="button" aria-pressed="false" disabled>Place Part</button>
+        <select id="placementKind" aria-label="Plant part type" disabled>
           <option value="leaf">Leaf</option>
           <option value="flower">Flower</option>
           <option value="fruit">Fruit</option>
+          <option value="berry">Berry</option>
+          <option value="cone">Cone</option>
+          <option value="thorn">Thorn</option>
+          <option value="aerialRoot">Aerial root</option>
+          <option value="coniferSpray">Conifer spray cluster</option>
+          <option value="fernFrond">Fern frond cluster</option>
+          <option value="palmFrond">Palm frond cluster</option>
+          <option value="mossTuft">Moss tuft cluster</option>
+          <option value="branch">Branch</option>
         </select>
         <button id="undoPlacement" type="button" disabled>Undo Placement</button>
       </div>
@@ -2620,14 +2629,31 @@ const refreshHeroPruneTool = async () => {
 };
 
 const disposeHeroPlacementTool = () => {
-  if (!heroPlacementTool) return;
-  heroPlacementTool.dispose();
-  heroPlacementTool = null;
+  if (heroPlacementTool) {
+    heroPlacementTool.dispose();
+    heroPlacementTool = null;
+  }
+  app.dataset.organPlacementToolReady = "false";
 };
 
 const placementKind = (): ProcPlantPlaceableOrganKind => {
   const value = placementKindSelect.value;
-  return value === "flower" || value === "fruit" ? value : "leaf";
+  switch (value) {
+    case "flower":
+    case "fruit":
+    case "berry":
+    case "cone":
+    case "thorn":
+    case "aerialRoot":
+    case "coniferSpray":
+    case "fernFrond":
+    case "palmFrond":
+    case "mossTuft":
+    case "branch":
+      return value;
+    default:
+      return "leaf";
+  }
 };
 
 const syncPlacementButtons = () => {
@@ -2643,7 +2669,7 @@ const syncPlacementButtons = () => {
   if (!genome.flower && placementKindSelect.value === "flower") placementKindSelect.value = "leaf";
   placementModeButton.disabled = regenerationBusy || !graphAvailable;
   placementModeButton.setAttribute("aria-pressed", String(placementModeVisible));
-  placementModeButton.textContent = placementModeVisible ? "Exit Place" : "Place Organ";
+  placementModeButton.textContent = placementModeVisible ? "Exit Place" : "Place Part";
   placementKindSelect.disabled = regenerationBusy || !graphAvailable;
   undoPlacementButton.disabled = regenerationBusy || (currentPlacementPackage()?.operations.length ?? 0) === 0;
   app.dataset.organPlacementAvailable = String(graphAvailable);
@@ -2667,6 +2693,7 @@ const refreshHeroPlacementTool = async () => {
   tool.object.scale.copy(target.mesh.scale);
   heroPlacementTool = tool;
   scene.add(tool.object);
+  app.dataset.organPlacementToolReady = "true";
   syncPlacementButtons();
 };
 
@@ -3860,7 +3887,7 @@ placementModeButton.addEventListener("click", () => {
   void refreshHeroPlacementTool();
   setSaveStatus(
     placementModeVisible
-      ? "Place mode: choose an organ type, then click a highlighted branch segment. Placements regenerate from the segment frame."
+      ? "Place mode: choose a supported plant part, then click a highlighted source segment. Branches, clusters, and organs regenerate from the segment frame."
       : "Place mode closed.",
   );
 });
@@ -4001,6 +4028,10 @@ canvas.addEventListener("click", async (event) => {
     setSaveStatus("That segment no longer has a stable graph frame.");
     return;
   }
+  if (segment.id.startsWith("placed-branch:")) {
+    setSaveStatus("Place additional parts on a source branch; authored branches are regenerated outputs rather than stable placement targets.");
+    return;
+  }
   tool.object.updateMatrixWorld(true);
   const localPoint = tool.object.worldToLocal(hit.point.clone());
   const axis = end.position.clone().sub(start.position);
@@ -4033,23 +4064,44 @@ canvas.addEventListener("click", async (event) => {
   placementPackage ??= placementModule.createProcPlantOrganPlacementPackage(source);
   const kind = placementKind();
   if (kind === "flower" && !genome.flower) {
-    setSaveStatus("This plant has no flower geometry; choose Leaf or Fruit.");
+    setSaveStatus("This plant has no flower geometry; choose another supported part.");
     return;
   }
+  const placementScale: Record<ProcPlantPlaceableOrganKind, number> = {
+    leaf: 1,
+    flower: 1,
+    fruit: 0.16,
+    berry: 0.14,
+    cone: 0.22,
+    thorn: 0.18,
+    aerialRoot: 0.38,
+    coniferSpray: 0.72,
+    fernFrond: 0.86,
+    palmFrond: 1,
+    mossTuft: 0.28,
+    branch: 0.48,
+  };
+  const placementColors: Partial<Record<ProcPlantPlaceableOrganKind, { color: number; secondaryColor?: number }>> = {
+    fruit: { color: 0xc7472f, secondaryColor: 0x6e281c },
+    berry: { color: 0x92324d, secondaryColor: 0x4b1728 },
+    cone: { color: 0x76502d, secondaryColor: 0x3f2a19 },
+    thorn: { color: 0x6f5a3c, secondaryColor: 0x3d2f20 },
+    aerialRoot: { color: 0x6a5438, secondaryColor: 0x3b3024 },
+  };
   const appended = placementModule.appendProcPlantOrganPlacement(placementPackage, {
     kind,
     segmentId: segment.id,
     axialT,
     azimuth,
-    scale: kind === "fruit" ? 0.16 : 1,
-    ...(kind === "fruit" ? { color: 0xc7472f, secondaryColor: 0x6e281c } : {}),
+    scale: placementScale[kind],
+    ...placementColors[kind],
   });
   if (!appended.operation) {
     setSaveStatus(
       appended.reason === "spacing"
         ? "That placement is too close to another authored organ on this segment."
         : appended.reason === "cap"
-          ? "The 96-organ authored placement cap has been reached."
+          ? "The 96-part authored placement cap has been reached."
           : "That placement could not be represented safely.",
     );
     return;
@@ -4950,6 +5002,7 @@ document.querySelector<HTMLButtonElement>("#exportJson")!.addEventListener("clic
         : null,
       graphOperations: currentPruneOperations().map((segmentId) => ({ operation: "remove", segmentId })),
       graphOperationGroups: currentPruneHistory().map((segmentIds) => ({ operation: "remove", segmentIds: [...segmentIds] })),
+      organPlacements: currentPlacementPackage(),
       weberPennTrim: heroLodState?.weberPennTrim
         ? {
             target: heroLodState.weberPennTrim.target,
