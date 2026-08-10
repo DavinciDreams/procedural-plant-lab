@@ -17,7 +17,14 @@ import {
   PROCPLANT_FREEFORM_CROWN_CONTRACT,
   PROCPLANT_FREEFORM_CROWN_VERSION,
   type ProcPlantFreeformCrown,
+  type ProcPlantSpaceColonizationResult,
 } from "./procplant-space-colonization";
+import {
+  inspectProcPlantColonizationChains,
+  validateProcPlantChainTubeOverridePackage,
+  type ProcPlantChainTubeOverridePackage,
+  type ProcPlantColonizationChainSnapshot,
+} from "./procplant-chain-tube-overrides";
 import {
   createProcPlantSweptTubeGeometry,
   PROCPLANT_BRANCH_SWAY_ATTRIBUTE,
@@ -256,6 +263,8 @@ export interface ProcPlantSpaceColonizationGene {
   collarStrength?: number;
   collarLength?: number;
   junctionAo?: number;
+  /** Optional graph-signature-bound per-chain tube edits. Omit for exact legacy meshing. */
+  chainTubeOverrides?: ProcPlantChainTubeOverridePackage;
   /** Place non-terminal foliage every N distal skeleton nodes. */
   foliageSpacing?: number;
   /** Number of leaves placed around each terminal twig. */
@@ -5411,12 +5420,11 @@ const templateFromSweptTubeGeometry = (
   return { pos, nrm, uv0, col, tintable, sway, idx };
 };
 
-/** Compile an opt-in volumetric crown into swept branch tubes and leaf instances. */
-const buildSpaceColonizedProcPlantParts = (
+const growSpaceColonizedProcPlant = (
   genome: ProcPlantGenome,
   seed: number,
   env: ProcPlantEnvironment,
-): ProcPlantInstancedParts => {
+): ProcPlantSpaceColonizationResult => {
   const gene = genome.spaceColonization;
   if (!gene) throw new Error("space-colonization genome options are required");
   const center = new THREE.Vector3(...gene.volume.center);
@@ -5446,7 +5454,7 @@ const buildSpaceColonizedProcPlantParts = (
     })),
   } satisfies ProcPlantFreeformCrown : volume;
   const tropism = gene.tropism ? new THREE.Vector3(...gene.tropism) : UP.clone();
-  const growth = growProcPlantSpaceColonization({
+  return growProcPlantSpaceColonization({
     seed,
     volume: crownDomain,
     attractorCount: gene.attractorCount,
@@ -5464,6 +5472,28 @@ const buildSpaceColonizedProcPlantParts = (
     pipeExponent: gene.pipeExponent,
     tipRadius: gene.tipRadius,
   });
+};
+
+export const inspectProcPlantSpaceColonizationChains = (
+  genome: ProcPlantGenome,
+  seed: number,
+  env: ProcPlantEnvironment = defaultPlantEnvironment(),
+): ProcPlantColonizationChainSnapshot => inspectProcPlantColonizationChains(
+  genome.id,
+  seed,
+  growSpaceColonizedProcPlant(genome, seed, env),
+);
+
+/** Compile an opt-in volumetric crown into swept branch tubes and leaf instances. */
+const buildSpaceColonizedProcPlantParts = (
+  genome: ProcPlantGenome,
+  seed: number,
+  env: ProcPlantEnvironment,
+): ProcPlantInstancedParts => {
+  const gene = genome.spaceColonization;
+  if (!gene) throw new Error("space-colonization genome options are required");
+  const growth = growSpaceColonizedProcPlant(genome, seed, env);
+  const shade = 1 - THREE.MathUtils.clamp(env.light, 0, 1);
   const maxDepth = Math.max(1, ...growth.nodes.map((node) => node.depth));
   const nodeIndexById = new Map<string, number>();
   const stems: StemNode[] = growth.nodes.map((node, index) => {
@@ -5524,6 +5554,15 @@ const buildSpaceColonizedProcPlantParts = (
   let stemTemplate: ProcPlantTemplate = new TemplateBuilder().build();
   const radialSegments = Math.max(3, Math.min(8, Math.round(gene.radialSegments ?? 5)));
   const barkColor = gene.barkColor ?? 0x6d5135;
+  const chainSnapshot = gene.chainTubeOverrides
+    ? inspectProcPlantColonizationChains(genome.id, seed, growth)
+    : null;
+  const chainOverrides = chainSnapshot && gene.chainTubeOverrides
+    ? new Map(validateProcPlantChainTubeOverridePackage(gene.chainTubeOverrides, chainSnapshot).overrides.map((override) => [override.chainId, override]))
+    : null;
+  const chainByFirstEdge = chainSnapshot
+    ? new Map(chainSnapshot.chains.map((chain) => [`${chain.startNodeId}\0${chain.nodeIds[1]}`, chain]))
+    : null;
   const appendChain = (startId: string, firstChildId: string, branchOrder: number) => {
     const chain = [nodeById.get(startId)!, nodeById.get(firstChildId)!];
     let current = chain[1]!;
@@ -5534,15 +5573,20 @@ const buildSpaceColonizedProcPlantParts = (
       children = childrenById.get(current.id) ?? [];
     }
     const baseT = chain[0]!.depth / maxDepth;
+    const chainDescriptor = chainByFirstEdge?.get(`${startId}\0${firstChildId}`);
+    const chainOverride = chainDescriptor ? chainOverrides?.get(chainDescriptor.id) : undefined;
+    if (chainByFirstEdge && !chainDescriptor) throw new Error(`compiled colonization chain is missing ${startId}>${firstChildId}`);
+    const radiusScale = chainOverride?.radiusScale ?? 1;
+    const taperScale = chainOverride?.taperScale ?? 1;
     const geometry = createProcPlantSweptTubeGeometry(
-      chain.map((node) => ({
+      chain.map((node, index) => ({
         position: node.position,
-        radius: node.radius,
+        radius: node.radius * radiusScale * THREE.MathUtils.lerp(1, taperScale, index / Math.max(1, chain.length - 1)),
         age: node.depth / maxDepth,
         branchOrder,
       })),
       {
-        radialSegments,
+        radialSegments: chainOverride?.radialSegments ?? radialSegments,
         seed: (seed + growth.nodes.indexOf(chain[0]!) * 2654435761 + branchOrder * 2246822519) >>> 0,
         irregularity: gene.barkIrregularity ?? 0.05,
         irregularityFrequency: 1.6 + branchOrder * 0.17,
@@ -7893,6 +7937,9 @@ const reducedLodGenome = (genome: ProcPlantGenome): ProcPlantGenome => ({
   spaceColonization: genome.spaceColonization
     ? {
         ...genome.spaceColonization,
+        // A reduced LOD has a different growth signature, so hero-scoped
+        // per-chain edits apply to LOD0 only and cannot leak onto another DAG.
+        chainTubeOverrides: undefined,
         attractorCount: Math.max(48, Math.round(genome.spaceColonization.attractorCount * 0.58)),
         maxSteps: Math.max(24, Math.round(genome.spaceColonization.maxSteps * 0.72)),
         maxNodes: Math.max(48, Math.round(genome.spaceColonization.maxNodes * 0.58)),

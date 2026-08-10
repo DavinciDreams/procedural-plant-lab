@@ -1,5 +1,6 @@
 export * from "./procplant-contract";
 export * from "./procplant-crown-light";
+export * from "./procplant-chain-tube-overrides";
 export * from "./procplant-cutout";
 export * from "./procplants";
 export * from "./biome-mix";
