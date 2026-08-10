@@ -20,6 +20,7 @@ import type {
   ProcPlantMaterialNode,
   ProcPlantMaterialValueType,
 } from "./procplant-material-graph";
+import { compileProcPlantMaterialShaderPlan } from "./procplant-material-shader";
 
 export const PROCPLANT_MATERIAL_GRAPH_EDITOR_UI_CONTRACT = "procplants.material-graph-editor-ui" as const;
 export const PROCPLANT_MATERIAL_GRAPH_EDITOR_UI_VERSION = 1 as const;
@@ -29,6 +30,10 @@ export interface ProcPlantMaterialGraphEditorRenderOptions {
   container: HTMLElement;
   state: ProcPlantMaterialGraphEditorState;
   onStateChanged: (state: ProcPlantMaterialGraphEditorState) => void;
+  shaderPreview?: {
+    enabled: boolean;
+    onEnabledChanged: (enabled: boolean) => void;
+  };
 }
 
 const CHANNEL_TYPES: Record<ProcPlantMaterialChannel, ProcPlantMaterialValueType> = {
@@ -199,6 +204,42 @@ export const renderProcPlantMaterialGraphEditor = (options: ProcPlantMaterialGra
   const note = document.createElement("p");
   note.className = "graph-editor-note";
   note.textContent = "Edit the deterministic material DAG, then use Bake PBR Material to rebuild the live bark and organ surfaces. Invalid types, cycles, and dangling references are rejected without changing the graph.";
+
+  const shaderPlan = compileProcPlantMaterialShaderPlan(state.compiled);
+  const shaderPreview = document.createElement("fieldset");
+  shaderPreview.className = "material-shader-preview";
+  shaderPreview.dataset.ready = String(shaderPlan.ready);
+  shaderPreview.dataset.hash = shaderPlan.contentHash;
+  const shaderLegend = document.createElement("legend");
+  shaderLegend.textContent = "Generated live shader preview";
+  const shaderToggleLabel = document.createElement("label");
+  const shaderToggle = document.createElement("input");
+  shaderToggle.type = "checkbox";
+  shaderToggle.checked = options.shaderPreview?.enabled ?? false;
+  shaderToggle.disabled = !options.shaderPreview || (!shaderPlan.ready && !shaderToggle.checked);
+  shaderToggle.setAttribute("aria-describedby", "materialShaderPreviewStatus");
+  shaderToggle.addEventListener("change", () => options.shaderPreview?.onEnabledChanged(shaderToggle.checked));
+  shaderToggleLabel.append(shaderToggle, " Use generated shader on the next live material bake");
+  const shaderStatus = document.createElement("output");
+  shaderStatus.id = "materialShaderPreviewStatus";
+  shaderStatus.className = "material-shader-preview-status";
+  shaderStatus.setAttribute("aria-live", "polite");
+  shaderStatus.textContent = shaderPlan.ready
+    ? `${shaderPlan.surfaces.length} surfaces ready | ${shaderPlan.textures.length} source textures | ${shaderPlan.contentHash}. Export remains baked.`
+    : `Shader preview blocked by ${shaderPlan.diagnostics.filter((diagnostic) => diagnostic.blocking).length} diagnostics. The baked renderer remains active.`;
+  shaderPreview.append(shaderLegend, shaderToggleLabel, shaderStatus);
+  if (shaderPlan.diagnostics.length > 0) {
+    const diagnostics = document.createElement("ul");
+    diagnostics.className = "material-shader-diagnostics";
+    diagnostics.setAttribute("aria-label", "Generated shader diagnostics");
+    for (const diagnostic of shaderPlan.diagnostics) {
+      const item = document.createElement("li");
+      item.dataset.blocking = String(diagnostic.blocking);
+      item.textContent = `${diagnostic.blocking ? "Blocking" : "Info"}: ${diagnostic.message}`;
+      diagnostics.append(item);
+    }
+    shaderPreview.append(diagnostics);
+  }
 
   const actions = document.createElement("div");
   actions.className = "graph-editor-actions";
@@ -438,7 +479,7 @@ export const renderProcPlantMaterialGraphEditor = (options: ProcPlantMaterialGra
   applyJson.addEventListener("click", () => commit(importProcPlantMaterialGraphEditorJson(state, json.value), "Canonical material graph JSON applied."));
   jsonDetails.append(jsonSummary, json, applyJson);
 
-  container.replaceChildren(summary, note, actions, status, list, surfaces, jsonDetails);
+  container.replaceChildren(summary, note, shaderPreview, actions, status, list, surfaces, jsonDetails);
   container.dataset.hash = state.compiled.contentHash;
   container.dataset.changed = String(state.changed);
   return state;

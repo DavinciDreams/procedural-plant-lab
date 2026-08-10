@@ -86,6 +86,7 @@ import type {
 } from "./procplant-organ-placement-overrides";
 import type { ProcPlantBakedMaterialBundle } from "./procplant-material-bake";
 import type { ProcPlantThreeBakedMaterialSet } from "./procplant-three-material-adapter";
+import type { ProcPlantThreeMaterialShaderSetInstallation } from "./procplant-three-material-shader";
 import type {
   ProcPlantHeroSpineEditor,
   ProcPlantHeroSpineEditorState,
@@ -503,6 +504,7 @@ const organMaterial = installProcPlantWindShader(new THREE.MeshLambertMaterial({
 let liveBakedMaterials: ProcPlantThreeBakedMaterialSet | null = null;
 let liveBakedMaterialSourceKey: string | null = null;
 const retiredBakedMaterials: ProcPlantThreeBakedMaterialSet[] = [];
+const liveMaterialShaderInstallations = new WeakMap<ProcPlantThreeBakedMaterialSet, ProcPlantThreeMaterialShaderSetInstallation>();
 let disposeLiveBakedMaterials: ((prepared: ProcPlantThreeBakedMaterialSet) => void) | null = null;
 let createLiveProcPlantThreeGeometry: typeof import("./procplant-three-geometry").createProcPlantThreeGeometry | null = null;
 const activeBarkMaterial = () => liveBakedMaterials?.bark ?? plantMaterial;
@@ -605,6 +607,7 @@ let materialBakeAudit: Record<string, unknown> | null = null;
 let materialBakeBundle: ProcPlantBakedMaterialBundle | null = null;
 let materialGraphEditorState: ProcPlantMaterialGraphEditorState | null = null;
 let materialGraphEditorSourceKey: string | null = null;
+let materialShaderPreviewEnabled = false;
 const authoredCutouts: Array<Record<string, unknown>> = [];
 interface ActiveCutoutSource {
   id: string;
@@ -1607,9 +1610,28 @@ const renderMaterialGraphEditor = async () => {
       app.dataset.materialGraphChanged = String(nextState.changed);
       void renderMaterialGraphEditor();
     },
+    shaderPreview: {
+      enabled: materialShaderPreviewEnabled,
+      onEnabledChanged: (enabled) => {
+        materialShaderPreviewEnabled = enabled;
+        app.dataset.materialShaderPreviewEnabled = String(enabled);
+        if (!enabled && liveBakedMaterials) {
+          liveMaterialShaderInstallations.get(liveBakedMaterials)?.dispose();
+          liveMaterialShaderInstallations.delete(liveBakedMaterials);
+          delete app.dataset.materialShaderPreviewHash;
+          app.dataset.materialShaderPreviewActive = "false";
+          materialBakeStatus.textContent = "Generated shader preview disabled; the validated baked MeshStandard materials remain active.";
+        } else if (enabled) {
+          materialBakeStatus.textContent = "Generated shader preview enabled. Bake PBR Material to install it on the live plant; export remains baked.";
+        }
+        void renderMaterialGraphEditor();
+      },
+    },
   });
   app.dataset.materialGraphHash = materialGraphEditorState.compiled.contentHash;
   app.dataset.materialGraphChanged = String(materialGraphEditorState.changed);
+  app.dataset.materialShaderPlanReady = materialGraphEditor.querySelector<HTMLElement>(".material-shader-preview")?.dataset.ready ?? "false";
+  app.dataset.materialShaderPlanHash = materialGraphEditor.querySelector<HTMLElement>(".material-shader-preview")?.dataset.hash ?? "";
 };
 
 const templateToGeometry = (template: ProcPlantTemplate) => {
@@ -3608,7 +3630,7 @@ bakeMaterialButton.addEventListener("click", async () => {
   bakeMaterialButton.disabled = true;
   materialBakeStatus.textContent = "Evaluating the material DAG, packing deterministic PNG channels, and installing live PBR surfaces...";
   try {
-    const { downloadProcPlantLabMaterials } = await import("./procplant-lab-authoring-imports");
+    const { createProcPlantLabMaterialAuthoringSource, downloadProcPlantLabMaterials } = await import("./procplant-lab-authoring-imports");
     const [materialAdapter, geometryAdapter] = await Promise.all([
       import("./procplant-three-material-adapter"),
       import("./procplant-three-geometry"),
@@ -3624,11 +3646,42 @@ bakeMaterialButton.addEventListener("click", async () => {
       : undefined;
     const baked = downloadProcPlantLabMaterials(genome, generatorSeed, editorGraph);
     const nextLiveMaterials = createProcPlantThreeBakedMaterials(baked.bundle, { ormUvChannel: 1 });
-    nextLiveMaterials.bark.vertexColors = true;
-    nextLiveMaterials.organ.vertexColors = true;
-    installProcPlantWindShader(nextLiveMaterials.bark, windUniforms);
-    installProcPlantWindShader(nextLiveMaterials.organ, windUniforms);
-    disposeLiveBakedMaterials = disposeProcPlantThreeBakedMaterials;
+    try {
+      nextLiveMaterials.bark.vertexColors = true;
+      nextLiveMaterials.organ.vertexColors = true;
+      installProcPlantWindShader(nextLiveMaterials.bark, windUniforms);
+      installProcPlantWindShader(nextLiveMaterials.organ, windUniforms);
+      if (materialShaderPreviewEnabled) {
+        if (!materialGraphEditorState || materialGraphEditorSourceKey !== bakedMaterialSourceKey(genome, generatorSeed)) {
+          throw new Error("generated shader preview requires the current material editor graph");
+        }
+        const [shaderCompiler, shaderAdapter] = await Promise.all([
+          import("./procplant-material-shader"),
+          import("./procplant-three-material-shader"),
+        ]);
+        const plan = shaderCompiler.compileProcPlantMaterialShaderPlan(materialGraphEditorState.compiled);
+        if (!plan.ready) throw new Error(plan.diagnostics.filter((diagnostic) => diagnostic.blocking).map((diagnostic) => diagnostic.message).join("; "));
+        const source = createProcPlantLabMaterialAuthoringSource(genome, generatorSeed);
+        const resources = shaderAdapter.createProcPlantThreeMaterialShaderResources(plan, source.pixelSources);
+        const installation = shaderAdapter.installProcPlantThreeMaterialShaderSet(nextLiveMaterials.materialsBySlot, plan, resources);
+        liveMaterialShaderInstallations.set(nextLiveMaterials, installation);
+        app.dataset.materialShaderPreviewHash = plan.contentHash;
+        app.dataset.materialShaderPreviewActive = "true";
+      } else {
+        delete app.dataset.materialShaderPreviewHash;
+        app.dataset.materialShaderPreviewActive = "false";
+      }
+    } catch (error) {
+      liveMaterialShaderInstallations.get(nextLiveMaterials)?.dispose();
+      liveMaterialShaderInstallations.delete(nextLiveMaterials);
+      disposeProcPlantThreeBakedMaterials(nextLiveMaterials);
+      throw error;
+    }
+    disposeLiveBakedMaterials = (prepared) => {
+      liveMaterialShaderInstallations.get(prepared)?.dispose();
+      liveMaterialShaderInstallations.delete(prepared);
+      disposeProcPlantThreeBakedMaterials(prepared);
+    };
     if (liveBakedMaterials) retiredBakedMaterials.push(liveBakedMaterials);
     liveBakedMaterials = nextLiveMaterials;
     liveBakedMaterialSourceKey = bakedMaterialSourceKey(genome, generatorSeed);
