@@ -9,7 +9,10 @@ import {
   createProcPlantHeroSpineGeometry,
   type ProcPlantHeroSpineAuthoringAudit,
 } from "./procplant-hero-spine-authoring";
-import { compileProcPlantMaterialGraph } from "./procplant-material-graph";
+import {
+  compileProcPlantMaterialGraph,
+  type ProcPlantMaterialGraph,
+} from "./procplant-material-graph";
 import {
   bakeProcPlantMaterials,
   type ProcPlantBakedMaterialBundle,
@@ -127,10 +130,15 @@ export const createProcPlantLabHeroPreview = (
   };
 };
 
-export const bakeProcPlantLabMaterials = (
+export interface ProcPlantLabMaterialAuthoringSource {
+  graph: ProcPlantMaterialGraph;
+  pixelSources: ProcPlantMaterialPixelSource[];
+}
+
+export const createProcPlantLabMaterialAuthoringSource = (
   genome: ProcPlantGenome,
   seed: number,
-): ProcPlantBakedMaterialBundle => {
+): ProcPlantLabMaterialAuthoringSource => {
   const bark = new THREE.Color(genome.weberPenn?.barkColor ?? 0x6b4b32);
   const leafA = new THREE.Color(genome.leaf.colorA);
   const leafB = new THREE.Color(genome.leaf.colorB);
@@ -205,7 +213,19 @@ export const bakeProcPlantLabMaterials = (
     ],
     metadata: { genomeId: genome.id, seed, source: "procplants-lab" },
   } as const;
-  return bakeProcPlantMaterials(compileProcPlantMaterialGraph(graph), [barkNormal, leafNormal], { width: 256, height: 256 });
+  return { graph, pixelSources: [barkNormal, leafNormal] };
+};
+
+export const bakeProcPlantLabMaterials = (
+  genome: ProcPlantGenome,
+  seed: number,
+  graph?: ProcPlantMaterialGraph,
+): ProcPlantBakedMaterialBundle => {
+  const source = createProcPlantLabMaterialAuthoringSource(genome, seed);
+  const selectedGraph = graph ?? source.graph;
+  const textureIds = new Set(selectedGraph.textures.map((texture) => texture.id));
+  const pixelSources = source.pixelSources.filter((image) => textureIds.has(image.textureId));
+  return bakeProcPlantMaterials(compileProcPlantMaterialGraph(selectedGraph), pixelSources, { width: 256, height: 256 });
 };
 
 export interface ProcPlantLabMaterialDownload {
@@ -245,8 +265,9 @@ export const createProcPlantLabHeroExportScene = (
 export const downloadProcPlantLabMaterials = (
   genome: ProcPlantGenome,
   seed: number,
+  graph?: ProcPlantMaterialGraph,
 ): ProcPlantLabMaterialDownload => {
-  const baked = bakeProcPlantLabMaterials(genome, seed);
+  const baked = bakeProcPlantLabMaterials(genome, seed, graph);
   const fileName = `procplant-${genome.id}-${seed}-materials.gltf`;
   const blobBytes = baked.gltfBytes.slice().buffer as ArrayBuffer;
   const url = URL.createObjectURL(new Blob([blobBytes], { type: "model/gltf+json" }));

@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
-import { bakeProcPlantLabMaterials } from "../src/procplant-lab-authoring-imports";
+import {
+  bakeProcPlantLabMaterials,
+  createProcPlantLabMaterialAuthoringSource,
+} from "../src/procplant-lab-authoring-imports";
+import {
+  createProcPlantMaterialGraphEditorState,
+  replaceProcPlantMaterialEditorNode,
+  undoProcPlantMaterialGraphEditor,
+} from "../src/procplant-material-graph-editor";
 import { procPlantPresets } from "../src/procplants";
 
 const first = bakeProcPlantLabMaterials(procPlantPresets.cloverGroundcover, 0x51face);
@@ -31,4 +39,20 @@ for (const image of normals) {
 }
 
 assert.ok(normals[0]!.contentHash !== normals[1]!.contentHash, "bark and leaf normal maps must remain distinct");
+
+const source = createProcPlantLabMaterialAuthoringSource(procPlantPresets.cloverGroundcover, 0x51face);
+const editor = createProcPlantMaterialGraphEditorState(source.graph);
+const edited = replaceProcPlantMaterialEditorNode(editor, "barkRoughLow", { id: "barkRoughLow", kind: "scalar", value: 0.2 });
+assert.equal(edited.ok, true);
+if (!edited.ok) throw new Error(edited.error);
+const editedBakeA = bakeProcPlantLabMaterials(procPlantPresets.cloverGroundcover, 0x51face, edited.state.graph);
+const editedBakeB = bakeProcPlantLabMaterials(procPlantPresets.cloverGroundcover, 0x51face, edited.state.graph);
+assert.notEqual(editedBakeA.contentHash, first.contentHash, "an editor change must produce a different material bundle");
+assert.equal(editedBakeA.contentHash, editedBakeB.contentHash, "edited material rebakes must remain deterministic");
+const undoneBake = bakeProcPlantLabMaterials(
+  procPlantPresets.cloverGroundcover,
+  0x51face,
+  undoProcPlantMaterialGraphEditor(edited.state).graph,
+);
+assert.equal(undoneBake.contentHash, first.contentHash, "undo must restore the exact generated material bytes");
 console.log(`procplant lab PBR material tests passed (${first.images.length} images; ${first.contentHash})`);

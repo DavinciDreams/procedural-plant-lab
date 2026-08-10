@@ -330,6 +330,82 @@ canvas {
   font-size: 10px;
 }
 
+.material-graph-editor {
+  max-height: min(62vh, 720px);
+  overflow: auto;
+}
+
+.material-node-list {
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.material-node-list li.active {
+  grid-column: 1 / -1;
+}
+
+.material-node-editor select,
+.material-node-editor button,
+.material-surface-editor select,
+.material-surface-editor button,
+.material-graph-json button,
+.graph-editor-actions select {
+  min-height: 28px;
+  padding: 4px 7px;
+  font-size: 10px;
+}
+
+.material-surface-editor {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.material-surface-editor h3 {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #eef9ed;
+  font-size: 12px;
+}
+
+.material-surface-editor fieldset {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 7px;
+  border: 1px solid rgb(238 247 236 / 10%);
+}
+
+.material-surface-editor legend {
+  padding: 0 4px;
+  color: #f0d891;
+}
+
+.material-surface-editor label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(90px, 1.25fr);
+  align-items: center;
+  gap: 6px;
+}
+
+.material-graph-json {
+  margin-top: 10px;
+}
+
+.material-graph-json textarea {
+  display: block;
+  width: 100%;
+  min-height: 180px;
+  margin: 7px 0;
+  padding: 7px;
+  resize: vertical;
+  border: 1px solid rgb(238 247 236 / 14%);
+  border-radius: 4px;
+  background: #111a13;
+  color: #dbeada;
+  font: 10px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
 .field {
   display: grid;
   gap: 6px;
