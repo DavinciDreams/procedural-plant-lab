@@ -46,10 +46,13 @@ const core = await import(`${pathToFileURL(corePath).href}?smoke=${Date.now()}`)
 const full = await import(`${pathToFileURL(fullPath).href}?smoke=${Date.now()}`);
 for (const symbol of [
   "PROCPLANT_GENERATOR_CONTRACT_REVISION",
+  "PROCPLANT_SUPPORTED_INSTANCE_KINDS",
+  "isProcPlantSupportedInstanceKind",
   "TELLUS_PROCPLANT_PACKAGE_CONTRACT",
   "buildProcPlantGraph",
   "compileProcPlantLods",
   "buildProcPlantRuntimePackage",
+  "buildProcPlantInstancePrototype",
   "PROCPLANT_EXPORT_PROFILES",
   "applyProcPlantVariant",
   "makeEcologyBiomeMix",
@@ -75,7 +78,13 @@ assert.equal(typeof full.runProcPlantCli, "function");
 assert.equal(typeof full.exportProcPlantGlb, "function");
 assert.equal(typeof full.createProcPlantCutout, "function");
 assert.equal(core.TELLUS_PROCPLANT_PACKAGE_CONTRACT, "tellus.procplants.package.v1");
-assert.equal(core.PROCPLANT_GENERATOR_CONTRACT_REVISION, 2);
+assert.equal(core.PROCPLANT_GENERATOR_CONTRACT_REVISION, 3);
+assert.equal(new Set(core.PROCPLANT_SUPPORTED_INSTANCE_KINDS).size, core.PROCPLANT_SUPPORTED_INSTANCE_KINDS.length);
+assert.equal(core.isProcPlantSupportedInstanceKind("fernFrond"), true);
+assert.equal(core.isProcPlantSupportedInstanceKind("unknown"), false);
+const fernPrototype = core.buildProcPlantInstancePrototype("fernFrond", core.procPlantPresets.phiFern);
+assert.equal(fernPrototype.idx.length / 3, 44);
+assert.equal(fernPrototype.uv0.length, fernPrototype.pos.length / 3 * 2);
 const mix = core.makeEcologyBiomeMix("grassland", 612072);
 const tellusMix = core.toTellusProcPlantBiomeMix(mix);
 assert.equal(tellusMix.version, 1);
@@ -83,7 +92,7 @@ assert.equal(tellusMix.source, "ecology");
 assert.ok(tellusMix.entries.length > 0);
 const tellusPackage = core.buildTellusProcPlantPackage({ ...mix, entries: [] });
 assert.equal(tellusPackage.contract, "tellus.procplants.package.v1");
-assert.equal(tellusPackage.generatorContractRevision, 2);
+assert.equal(tellusPackage.generatorContractRevision, 3);
 assert.equal(tellusPackage.deterministic, true);
 assert.deepEqual(tellusPackage.catalog, []);
 

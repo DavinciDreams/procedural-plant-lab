@@ -1,4 +1,5 @@
 import type { ProcPlantGenome } from "./procplants";
+import { PROCPLANT_GENERATOR_CONTRACT_REVISION } from "./procplant-contract";
 import {
   cloneProcPlantFreeformCrown,
   validateProcPlantFreeformCrown,
@@ -110,9 +111,11 @@ export const createProcPlantAuthoringGraph = (
           ? "mossTuft"
           : genome.habit === "conifer"
             ? "coniferSpray"
-            : genome.habit === "palm"
-              ? "palmFrond"
-              : "leaf",
+            : genome.habit === "fern"
+              ? "fernFrond"
+              : genome.habit === "palm"
+                ? "palmFrond"
+                : "leaf",
       },
     },
     {
@@ -169,7 +172,7 @@ export const createProcPlantAuthoringGraph = (
       enabled: true,
       dependsOn: [ids.lod],
       count: 1,
-      parameters: { generatorContractRevision: 2 },
+      parameters: { generatorContractRevision: PROCPLANT_GENERATOR_CONTRACT_REVISION },
     },
   ], seed >>> 0, { kind: "procplant-genome", id: genome.id, version: 1 });
 };

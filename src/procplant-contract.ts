@@ -3,7 +3,7 @@
  * serialized Tellus packages. Increment this for incompatible changes to
  * genomes, attachment IR, instance kinds, or compiled geometry semantics.
  */
-export const PROCPLANT_GENERATOR_CONTRACT_REVISION = 2 as const;
+export const PROCPLANT_GENERATOR_CONTRACT_REVISION = 3 as const;
 
 export const PROCPLANT_RUNTIME_LOD_CONTRACT = "procplants.runtime-lod-selection" as const;
 export const PROCPLANT_RUNTIME_LOD_VERSION = 1 as const;

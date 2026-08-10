@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { PROCPLANT_GENERATOR_CONTRACT_REVISION } from "./procplant-contract";
 import {
   createProcPlantLeafGeometry,
   type ProcPlantGenome,
@@ -230,7 +231,7 @@ export const createProcPlantLabHeroExportScene = (
   exportScene.userData.procplant = {
     contract: "procplants.hero-spine-authoring",
     version: 1,
-    generatorContractRevision: 2,
+    generatorContractRevision: PROCPLANT_GENERATOR_CONTRACT_REVISION,
     audit,
   };
   const authoredRoot = preview.clone(true);

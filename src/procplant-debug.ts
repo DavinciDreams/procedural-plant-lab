@@ -34,6 +34,7 @@ const attachmentKindColors: Record<ProcPlantAttachmentKind, number> = {
   grassBlade: 0xa9df4f,
   fernLeaflet: 0x2fbf86,
   coniferSpray: 0x27845d,
+  fernFrond: 0x36a86f,
   palmFrond: 0x58b96d,
   fruit: 0xe95b3c,
   berry: 0xa32f62,

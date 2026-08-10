@@ -114,6 +114,7 @@ const foliageKinds = new Set<ProcPlantAttachmentKind>([
   "grassBlade",
   "fernLeaflet",
   "coniferSpray",
+  "fernFrond",
   "palmFrond",
   "mossTuft",
 ]);

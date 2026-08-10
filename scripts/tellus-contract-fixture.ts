@@ -17,7 +17,7 @@ import {
 } from "../src/procplant-surface-partition";
 
 export const TELLUS_GOLDEN_FIXTURE_SCHEMA = "procplants-tellus-golden-contract" as const;
-export const TELLUS_GOLDEN_FIXTURE_VERSION = 2 as const;
+export const TELLUS_GOLDEN_FIXTURE_VERSION = 3 as const;
 export const TELLUS_GOLDEN_FIXTURE_SEED = 612_072;
 export const TELLUS_GOLDEN_FIXTURE_PRESETS = [
   "phiFern",

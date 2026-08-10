@@ -14,6 +14,7 @@ import {
   createProcPlantFlobotCupBloomGeometry,
   createProcPlantFlobotPetal2BloomGeometry,
   createProcPlantFlobotPinkBloomGeometry,
+  createProcPlantFernFrondGeometry,
   createProcPlantFoxgloveBloomGeometry,
   createProcPlantHibiscusBloomGeometry,
   createProcPlantConiferSprayGeometry,
@@ -1615,7 +1616,7 @@ const instanceKey = (kind: ProcPlantInstance["kind"], genome: ProcPlantGenome) =
   if (kind === "grassBlade") {
     return [kind, genome.leaf.widthRatio.toFixed(3), genome.leaf.curl.toFixed(3)].join(":");
   }
-  if (kind === "coniferSpray" || kind === "palmFrond" || kind === "mossTuft") {
+  if (kind === "coniferSpray" || kind === "fernFrond" || kind === "palmFrond" || kind === "mossTuft") {
     return [kind, genome.id, genome.leaf.widthRatio.toFixed(3), genome.leaf.curl.toFixed(3)].join(":");
   }
   return kind;
@@ -1636,6 +1637,7 @@ const geometryForBucket = (bucket: InstanceBucket): THREE.BufferGeometry => {
     return createProcPlantGrassBladeGeometry(bucket.genome.leaf.widthRatio, bucket.genome.leaf.curl);
   }
   if (bucket.kind === "coniferSpray") return createProcPlantConiferSprayGeometry();
+  if (bucket.kind === "fernFrond") return createProcPlantFernFrondGeometry();
   if (bucket.kind === "palmFrond") return createProcPlantPalmFrondGeometry();
   if (bucket.kind === "mossTuft") return createProcPlantMossTuftGeometry();
   if (bucket.kind === "fruit") return createProcPlantFruitGeometry();
