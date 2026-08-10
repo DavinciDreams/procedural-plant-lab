@@ -296,7 +296,7 @@ const pointInTriangle2 = (p: readonly number[], a: readonly number[], b: readonl
   const d1 = orient2(p, a, b);
   const d2 = orient2(p, b, c);
   const d3 = orient2(p, c, a);
-  return (d1 >= -epsilon && d2 >= -epsilon && d3 >= -epsilon) || (d1 <= epsilon && d2 <= epsilon && d3 <= epsilon);
+  return (d1 > epsilon && d2 > epsilon && d3 > epsilon) || (d1 < -epsilon && d2 < -epsilon && d3 < -epsilon);
 };
 
 const segmentsIntersect2 = (a: readonly number[], b: readonly number[], c: readonly number[], d: readonly number[], epsilon: number) => {
@@ -465,7 +465,11 @@ export const auditProcPlantMeshTopology = (
       if (secondBounds.min.y > firstBounds.max.y + positionEpsilon || secondBounds.max.y < firstBounds.min.y - positionEpsilon
         || secondBounds.min.z > firstBounds.max.z + positionEpsilon || secondBounds.max.z < firstBounds.min.z - positionEpsilon) continue;
       const secondVertices = triangleVertices[secondIndex]!;
-      if (firstVertices.some((vertex) => secondVertices.includes(vertex))) continue;
+      // Edge-neighbour triangles meet by construction and are not
+      // self-intersections. A pair sharing only one vertex still needs the
+      // bounded narrow-phase test: its remaining edges can cross elsewhere.
+      const sharedVertices = firstVertices.filter((vertex) => secondVertices.includes(vertex)).length;
+      if (sharedVertices >= 2) continue;
       intersectionTests++;
       if (intersectionTests > maxIntersectionTests) {
         intersectionCheckComplete = false;
