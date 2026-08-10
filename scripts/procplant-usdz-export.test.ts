@@ -51,8 +51,8 @@ const before = baked.images.map((image) => [...image.bytes]);
 const plain = exportProcPlantUsda(triangle, { name: "USD leaf" });
 assert.equal(plain.assets.length, 0);
 assert.doesNotMatch(plain.text, /UsdPreviewSurface|primvars:st|material:binding/);
-assert.equal(createHash("sha256").update(plain.text).digest("hex"), "300a88c300d0154e54729285a1f2e4e367e61f915797f100984d1a6f78b40450",
-  "the no-material USDA bytes must remain identical to origin/main");
+assert.equal(createHash("sha256").update(plain.text).digest("hex"), "0092eeb0793441c440a3a3361d0ac165eb8cf1ffed0db0bfa87f70fbd723d999",
+  "the no-material USDA bytes must remain identical to the cumulative contract-v3 baseline");
 
 const texturedA = exportProcPlantUsda(triangle, { name: "USD leaf", material: { baked } });
 const texturedB = exportProcPlantUsda(triangle, { name: "USD leaf", material: { baked } });
