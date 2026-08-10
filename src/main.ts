@@ -123,6 +123,7 @@ import type {
   ProcPlantThreePlacementDecalBindingHandle,
   ProcPlantThreePlacementDecalDrawPackage,
 } from "./procplant-placement-decal-three";
+import type { ProcPlantPlacementDecalPixelSource } from "./procplant-placement-decal-glb";
 import type { ProcPlantVineGuidePackage } from "./procplant-vine-guide-authoring";
 import type { ProcPlantBakedMaterialBundle } from "./procplant-material-bake";
 import type { ProcPlantThreeBakedMaterialSet } from "./procplant-three-material-adapter";
@@ -380,6 +381,7 @@ app.innerHTML = `
           <button id="crownVolumeSubtract" type="button" disabled>Add Cutout Lobe</button>
           <button id="crownVolumeRemove" type="button" disabled>Remove Selected Lobe</button>
           <button id="fitCrownMask" type="button" aria-expanded="false" aria-controls="crownMaskFitEditor" disabled>Fit Crown Mask</button>
+          <button id="fitCrownVoxelMask" type="button" aria-expanded="false" aria-controls="crownVoxelMaskFitEditor" disabled>Fit Voxel Mask</button>
           <small>Axis handles scale the field. Gold points move individual bounded crown lobes.</small>
           <div id="crownLobeControls" class="advanced-grid crown-lobe-controls" hidden>
             <div class="field"><label for="crownLobeWidth"><span>Lobe width</span><span id="crownLobeWidthValue"></span></label><input id="crownLobeWidth" type="range" min="0.05" max="10" value="1" step="0.05" /></div>
@@ -410,6 +412,7 @@ app.innerHTML = `
           </div>
         </div>
         <section id="crownMaskFitEditor" class="graph-preview" aria-live="polite" hidden></section>
+        <section id="crownVoxelMaskFitEditor" class="graph-preview" aria-live="polite" hidden></section>
       </details>
       <div class="button-row">
         <button id="randomSeed" type="button">Random Seed</button>
@@ -461,6 +464,7 @@ app.innerHTML = `
         <button id="clearPlacementDecal" type="button" disabled>Clear Decal Binding</button>
         <input id="placementDecalFile" type="file" accept="image/png,image/webp,image/jpeg" hidden />
         <button id="vineGuideMode" type="button" aria-pressed="false" disabled>Place Vine Guide</button>
+        <button id="vineGuideSupportMode" type="button" aria-pressed="false" disabled>Support: Authoring Plane</button>
         <button id="undoVineGuide" type="button" disabled>Undo Guide Point</button>
         <button id="resetVineGuide" type="button" disabled>Reset Vine Guide</button>
       </div>
@@ -653,6 +657,7 @@ let heroMesh: THREE.Mesh | null = null;
 interface HeroLodState {
   mesh: THREE.Mesh;
   placementDecals: ProcPlantThreePlacementDecalDrawPackage | null;
+  placementDecalRecords: ProcPlantMaterializedPlacementDecal[];
   graph: ProcPlantGraph | null;
   weberPennTrim: ProcPlantWeberPennBuildMetadata | null;
   stats: ProcPlantStats;
@@ -735,12 +740,14 @@ const pruneOperations = new Map<string, string[][]>();
 const weberPennTrimTargets = new Map<string, ProcPlantWeberPennTrimTarget>();
 const organPlacementPackages = new Map<string, ProcPlantOrganPlacementPackage>();
 let livePlacementDecalBinding: ProcPlantThreePlacementDecalBindingHandle | null = null;
+let livePlacementDecalPixelSource: ProcPlantPlacementDecalPixelSource | null = null;
 let livePlacementDecalFileName = "";
 const retiredPlacementDecalBindings: ProcPlantThreePlacementDecalBindingHandle[] = [];
 let vineGuidePackage: ProcPlantVineGuidePackage | null = null;
 let pruneModeVisible = false;
 let placementModeVisible = false;
 let vineGuideModeVisible = false;
+let vineGuideStaticSupportEnabled = false;
 let crownVolumeModeVisible = false;
 let debugIrVisible = false;
 let debugFramesVisible = false;
@@ -944,6 +951,7 @@ const clearPlacementDecalButton = document.querySelector<HTMLButtonElement>("#cl
 const placementDecalFileInput = document.querySelector<HTMLInputElement>("#placementDecalFile")!;
 const placementDecalStatus = document.querySelector<HTMLOutputElement>("#placementDecalStatus")!;
 const vineGuideModeButton = document.querySelector<HTMLButtonElement>("#vineGuideMode")!;
+const vineGuideSupportModeButton = document.querySelector<HTMLButtonElement>("#vineGuideSupportMode")!;
 const undoVineGuideButton = document.querySelector<HTMLButtonElement>("#undoVineGuide")!;
 const resetVineGuideButton = document.querySelector<HTMLButtonElement>("#resetVineGuide")!;
 let pendingVineGuideSerialized: string | null = null;
@@ -953,6 +961,8 @@ const crownVolumeSubtractButton = document.querySelector<HTMLButtonElement>("#cr
 const crownVolumeRemoveButton = document.querySelector<HTMLButtonElement>("#crownVolumeRemove")!;
 const fitCrownMaskButton = document.querySelector<HTMLButtonElement>("#fitCrownMask")!;
 const crownMaskFitEditor = document.querySelector<HTMLElement>("#crownMaskFitEditor")!;
+const fitCrownVoxelMaskButton = document.querySelector<HTMLButtonElement>("#fitCrownVoxelMask")!;
+const crownVoxelMaskFitEditor = document.querySelector<HTMLElement>("#crownVoxelMaskFitEditor")!;
 const crownVolumeActions = document.querySelector<HTMLElement>("#crownVolumeActions")!;
 const crownSplineControls = document.querySelector<HTMLElement>("#crownSplineControls")!;
 const crownSplineAddButton = document.querySelector<HTMLButtonElement>("#crownSplineAdd")!;
@@ -1256,9 +1266,11 @@ type ProcPlantMaterialGraphEditorUiModule = typeof import("./procplant-material-
 type ProcPlantAuthoringToolsModule = typeof import("./procplant-authoring-tools");
 type ProcPlantCrownVolumeToolModule = typeof import("./procplant-crown-volume-tool");
 type ProcPlantCrownMaskFitUiModule = typeof import("./procplant-crown-mask-fit-ui");
+type ProcPlantCrownVoxelMaskFitUiModule = typeof import("./procplant-crown-voxel-mask-fit-ui");
 type ProcPlantOrganPlacementModule = typeof import("./procplant-organ-placement-overrides");
 type ProcPlantPlacementDecalThreeModule = typeof import("./procplant-placement-decal-three");
 type ProcPlantVineGuideAuthoringModule = typeof import("./procplant-vine-guide-authoring");
+type ProcPlantVineSurfaceAuthoringModule = typeof import("./procplant-vine-surface-authoring");
 type ProcPlantGeneratorGraphOperation = import("./procplant-generator-graph").ProcPlantGeneratorGraphOperation;
 let procPlantRulesModule: ProcPlantRulesModule | null = null;
 let procPlantRulesPromise: Promise<ProcPlantRulesModule> | null = null;
@@ -1276,12 +1288,17 @@ let procPlantCrownVolumeToolPromise: Promise<ProcPlantCrownVolumeToolModule> | n
 let procPlantCrownMaskFitUiModule: ProcPlantCrownMaskFitUiModule | null = null;
 let procPlantCrownMaskFitUiPromise: Promise<ProcPlantCrownMaskFitUiModule> | null = null;
 let crownMaskFitUi: import("./procplant-crown-mask-fit-ui").ProcPlantCrownMaskFitUi | null = null;
+let procPlantCrownVoxelMaskFitUiModule: ProcPlantCrownVoxelMaskFitUiModule | null = null;
+let procPlantCrownVoxelMaskFitUiPromise: Promise<ProcPlantCrownVoxelMaskFitUiModule> | null = null;
+let crownVoxelMaskFitUi: import("./procplant-crown-voxel-mask-fit-ui").ProcPlantCrownVoxelMaskFitUi | null = null;
 let procPlantOrganPlacementModule: ProcPlantOrganPlacementModule | null = null;
 let procPlantOrganPlacementPromise: Promise<ProcPlantOrganPlacementModule> | null = null;
 let procPlantPlacementDecalThreeModule: ProcPlantPlacementDecalThreeModule | null = null;
 let procPlantPlacementDecalThreePromise: Promise<ProcPlantPlacementDecalThreeModule> | null = null;
 let procPlantVineGuideAuthoringModule: ProcPlantVineGuideAuthoringModule | null = null;
 let procPlantVineGuideAuthoringPromise: Promise<ProcPlantVineGuideAuthoringModule> | null = null;
+let procPlantVineSurfaceAuthoringModule: ProcPlantVineSurfaceAuthoringModule | null = null;
+let procPlantVineSurfaceAuthoringPromise: Promise<ProcPlantVineSurfaceAuthoringModule> | null = null;
 const graphOverrideOperations = new Map<string, ProcPlantGeneratorGraphOperation[]>();
 const loadProcPlantGraphEditorUi = () => {
   if (procPlantGraphEditorUiModule) return Promise.resolve(procPlantGraphEditorUiModule);
@@ -1356,6 +1373,18 @@ const loadProcPlantCrownMaskFitUi = () => {
   });
   return procPlantCrownMaskFitUiPromise;
 };
+const loadProcPlantCrownVoxelMaskFitUi = () => {
+  if (procPlantCrownVoxelMaskFitUiModule) return Promise.resolve(procPlantCrownVoxelMaskFitUiModule);
+  if (procPlantCrownVoxelMaskFitUiPromise) return procPlantCrownVoxelMaskFitUiPromise;
+  procPlantCrownVoxelMaskFitUiPromise = import("./procplant-crown-voxel-mask-fit-ui").then((module) => {
+    procPlantCrownVoxelMaskFitUiModule = module;
+    app.dataset.crownVoxelMaskFitUiLoaded = "true";
+    return module;
+  }).finally(() => {
+    procPlantCrownVoxelMaskFitUiPromise = null;
+  });
+  return procPlantCrownVoxelMaskFitUiPromise;
+};
 const loadProcPlantOrganPlacement = () => {
   if (procPlantOrganPlacementModule) return Promise.resolve(procPlantOrganPlacementModule);
   if (procPlantOrganPlacementPromise) return procPlantOrganPlacementPromise;
@@ -1391,6 +1420,18 @@ const loadProcPlantVineGuideAuthoring = () => {
     procPlantVineGuideAuthoringPromise = null;
   });
   return procPlantVineGuideAuthoringPromise;
+};
+const loadProcPlantVineSurfaceAuthoring = () => {
+  if (procPlantVineSurfaceAuthoringModule) return Promise.resolve(procPlantVineSurfaceAuthoringModule);
+  if (procPlantVineSurfaceAuthoringPromise) return procPlantVineSurfaceAuthoringPromise;
+  procPlantVineSurfaceAuthoringPromise = import("./procplant-vine-surface-authoring").then((module) => {
+    procPlantVineSurfaceAuthoringModule = module;
+    app.dataset.vineSurfaceAuthoringLoaded = "true";
+    return module;
+  }).finally(() => {
+    procPlantVineSurfaceAuthoringPromise = null;
+  });
+  return procPlantVineSurfaceAuthoringPromise;
 };
 const loadProcPlantRules = () => {
   if (procPlantRulesModule) return Promise.resolve(procPlantRulesModule);
@@ -1855,6 +1896,7 @@ const commitCrownSplineField = (field: ProcPlantFreeformCrown | null, message: s
 
 let crownVolumeToolRequest = 0;
 let crownMaskFitUiRequest = 0;
+let crownVoxelMaskFitUiRequest = 0;
 const syncCrownLobeControls = () => {
   const control = crownVolumeTool?.getSelectedControlVolume() ?? null;
   crownLobeControls.hidden = !control;
@@ -1912,12 +1954,20 @@ const syncCrownVolumeButton = () => {
   crownVolumeActions.hidden = !available;
   crownVolumeModeButton.disabled = regenerationBusy || !available;
   fitCrownMaskButton.disabled = regenerationBusy || !available;
+  fitCrownVoxelMaskButton.disabled = regenerationBusy || !available;
   if (!available && !crownMaskFitEditor.hidden) {
     crownMaskFitUi?.dispose();
     crownMaskFitUi = null;
     crownMaskFitEditor.hidden = true;
     fitCrownMaskButton.setAttribute("aria-expanded", "false");
     fitCrownMaskButton.textContent = "Fit Crown Mask";
+  }
+  if (!available && !crownVoxelMaskFitEditor.hidden) {
+    crownVoxelMaskFitUi?.dispose();
+    crownVoxelMaskFitUi = null;
+    crownVoxelMaskFitEditor.hidden = true;
+    fitCrownVoxelMaskButton.setAttribute("aria-expanded", "false");
+    fitCrownVoxelMaskButton.textContent = "Fit Voxel Mask";
   }
   crownVolumeModeButton.setAttribute("aria-pressed", String(crownVolumeModeVisible));
   crownVolumeModeButton.textContent = crownVolumeModeVisible ? "Hide Crown Handles" : "Crown Handles";
@@ -3002,6 +3052,9 @@ const syncVineGuideButtons = () => {
   vineGuideModeButton.disabled = regenerationBusy || !available;
   vineGuideModeButton.setAttribute("aria-pressed", String(vineGuideModeVisible && available));
   vineGuideModeButton.textContent = vineGuideModeVisible ? "Finish Vine Guide" : "Place Vine Guide";
+  vineGuideSupportModeButton.disabled = regenerationBusy || !available;
+  vineGuideSupportModeButton.setAttribute("aria-pressed", String(vineGuideStaticSupportEnabled));
+  vineGuideSupportModeButton.textContent = vineGuideStaticSupportEnabled ? "Support: Static Ground" : "Support: Authoring Plane";
   undoVineGuideButton.disabled = regenerationBusy || !vineGuidePackage?.points.length;
   resetVineGuideButton.disabled = regenerationBusy || !vineGuidePackage;
   app.dataset.vineGuideAvailable = String(available);
@@ -3060,6 +3113,23 @@ const installHeroImportPreview = (authored: ProcPlantLabHeroPreview, fileName: s
     attachmentMaterialization: authored.attachmentMaterialization.audit,
     sourceMaterial: authored.sourceMaterialAudit,
   };
+  if (authored.sourceMaterialAudit.ktx2DecodedImages > 0) {
+    const material = Array.isArray(authored.trunk.material) ? authored.trunk.material[0] : authored.trunk.material;
+    const textures = material instanceof THREE.MeshStandardMaterial
+      ? [material.map, material.metalnessMap, material.roughnessMap, material.normalMap, material.aoMap, material.emissiveMap]
+        .filter((texture): texture is THREE.Texture => texture instanceof THREE.CompressedTexture)
+      : [];
+    let uploads = 0;
+    for (const texture of new Set(textures)) {
+      const previousUpdate = texture.onUpdate;
+      texture.onUpdate = (updatedTexture) => {
+        previousUpdate?.(updatedTexture);
+        uploads++;
+        app.dataset.heroImportSourceMaterialKtx2Uploads = String(uploads);
+      };
+    }
+    app.dataset.heroImportSourceMaterialKtx2Uploads = "0";
+  }
   scene.add(authored.group);
   if (heroMesh) heroMesh.visible = false;
   if (heroLodState?.placementDecals) heroLodState.placementDecals.root.visible = false;
@@ -3077,6 +3147,8 @@ const installHeroImportPreview = (authored: ProcPlantLabHeroPreview, fileName: s
   app.dataset.heroImportSourceMaterial = String(authored.sourceMaterialAudit.sourceMaterialApplied);
   app.dataset.heroImportSourceMaterialTextures = String(authored.sourceMaterialAudit.textureBindings);
   app.dataset.heroImportSourceMaterialImages = String(authored.sourceMaterialAudit.decodedImages);
+  app.dataset.heroImportSourceMaterialKtx2Images = String(authored.sourceMaterialAudit.ktx2DecodedImages);
+  app.dataset.heroImportSourceMaterialKtx2Decoder = authored.sourceMaterialAudit.ktx2Decoder ?? "";
   if (heroSpineEditor) {
     heroSpineEditor.setTarget(authored.trunk);
     heroSpineEditor.copyDisplayTransform(authored.group);
@@ -3113,6 +3185,9 @@ const disposeHeroImportPreview = () => {
   delete app.dataset.heroImportSourceMaterial;
   delete app.dataset.heroImportSourceMaterialTextures;
   delete app.dataset.heroImportSourceMaterialImages;
+  delete app.dataset.heroImportSourceMaterialKtx2Images;
+  delete app.dataset.heroImportSourceMaterialKtx2Decoder;
+  delete app.dataset.heroImportSourceMaterialKtx2Uploads;
   delete app.dataset.heroImportLastExportBytes;
   delete app.dataset.heroImportLastExportMaterials;
   delete app.dataset.heroImportLastExportTextures;
@@ -3648,6 +3723,7 @@ const performRegeneration = async (request: number) => {
   const nextHeroLodState: HeroLodState = {
     mesh: nextHero,
     placementDecals: nextPlacementDecals,
+    placementDecalRecords: materializedPlacementDecals,
     graph: heroBuild?.graph ?? null,
     weberPennTrim,
     stats: heroBuild?.stats ?? biome.heroStats ?? {
@@ -4232,6 +4308,15 @@ const closeCrownMaskFitUi = () => {
   fitCrownMaskButton.textContent = "Fit Crown Mask";
 };
 
+const closeCrownVoxelMaskFitUi = () => {
+  crownVoxelMaskFitUiRequest++;
+  crownVoxelMaskFitUi?.dispose();
+  crownVoxelMaskFitUi = null;
+  crownVoxelMaskFitEditor.hidden = true;
+  fitCrownVoxelMaskButton.setAttribute("aria-expanded", "false");
+  fitCrownVoxelMaskButton.textContent = "Fit Voxel Mask";
+};
+
 fitCrownMaskButton.addEventListener("click", async () => {
   if (!crownMaskFitEditor.hidden) {
     closeCrownMaskFitUi();
@@ -4240,6 +4325,7 @@ fitCrownMaskButton.addEventListener("click", async () => {
   }
   const gene = selectedSourceGenome().spaceColonization;
   if (!gene || regenerationBusy) return;
+  if (!crownVoxelMaskFitEditor.hidden) closeCrownVoxelMaskFitUi();
   const request = ++crownMaskFitUiRequest;
   crownMaskFitEditor.hidden = false;
   crownMaskFitEditor.textContent = "Loading bounded crown-mask fitter…";
@@ -4279,6 +4365,64 @@ fitCrownMaskButton.addEventListener("click", async () => {
     },
   });
   crownMaskFitEditor.querySelector<HTMLInputElement>('input[type="file"]')?.focus();
+});
+
+fitCrownVoxelMaskButton.addEventListener("click", async () => {
+  if (!crownVoxelMaskFitEditor.hidden) {
+    closeCrownVoxelMaskFitUi();
+    setSaveStatus("Crown voxel-mask fitter closed.");
+    return;
+  }
+  const gene = selectedSourceGenome().spaceColonization;
+  if (!gene || regenerationBusy) return;
+  if (!crownMaskFitEditor.hidden) closeCrownMaskFitUi();
+  const request = ++crownVoxelMaskFitUiRequest;
+  crownVoxelMaskFitEditor.hidden = false;
+  crownVoxelMaskFitEditor.textContent = "Loading bounded crown voxel-mask viewport…";
+  fitCrownVoxelMaskButton.setAttribute("aria-expanded", "true");
+  fitCrownVoxelMaskButton.textContent = "Hide Voxel Mask Fit";
+  let module: ProcPlantCrownVoxelMaskFitUiModule;
+  try {
+    module = await loadProcPlantCrownVoxelMaskFitUi();
+  } catch (error) {
+    if (request !== crownVoxelMaskFitUiRequest) return;
+    crownVoxelMaskFitEditor.textContent = error instanceof Error ? error.message : String(error);
+    app.dataset.crownVoxelMaskFitStatus = "load-error";
+    return;
+  }
+  if (request !== crownVoxelMaskFitUiRequest || crownVoxelMaskFitEditor.hidden) return;
+  const worldDimensions = gene.volume.shape === "ellipsoid"
+    ? gene.volume.dimensions.map((value) => value * 2) as [number, number, number]
+    : [...gene.volume.dimensions] as [number, number, number];
+  try {
+    crownVoxelMaskFitUi = module.createProcPlantCrownVoxelMaskFitUi({
+      container: crownVoxelMaskFitEditor,
+      initialCenter: [...gene.volume.center],
+      initialWorldDimensions: worldDimensions,
+      onApply: (fit) => {
+        if (regenerationBusy) {
+          setSaveStatus("Wait for the current plant rebuild before applying a crown voxel mask.");
+          return;
+        }
+        applyCrownField(fit.crown);
+        syncCrownLobeControls();
+        syncCrownSplineControls();
+        app.dataset.crownVoxelMaskFitStatus = "applied";
+        setSaveStatus(`Applied ${fit.audit.lobeCount} bounded ${fit.audit.constraint === "lobes" ? "crown volumes" : "spline bands"} from explicit voxel occupancy.`);
+        regenerate();
+      },
+      onClose: () => {
+        closeCrownVoxelMaskFitUi();
+        setSaveStatus("Crown voxel-mask fitter closed.");
+      },
+    });
+  } catch (error) {
+    if (request !== crownVoxelMaskFitUiRequest) return;
+    crownVoxelMaskFitEditor.textContent = `Voxel-mask viewport unavailable: ${error instanceof Error ? error.message : String(error)}`;
+    app.dataset.crownVoxelMaskFitStatus = "viewport-error";
+    return;
+  }
+  crownVoxelMaskFitEditor.querySelector<HTMLInputElement>('input[type="file"]')?.focus();
 });
 
 crownVolumeAddButton.addEventListener("click", () => {
@@ -4422,8 +4566,20 @@ vineGuideModeButton.addEventListener("click", async () => {
   syncVineGuideButtons();
   refreshVineGuideVisualization();
   setSaveStatus(vineGuideModeVisible
-    ? "Vine guide mode: click points on the camera-facing plane; orbit between clicks to change depth. This authors a static centerline only."
+    ? vineGuideStaticSupportEnabled
+      ? "Vine guide mode: click the static ground support. Points are materialized with 0.02 local-unit clearance; no live attachment is retained."
+      : "Vine guide mode: click points on the camera-facing plane; orbit between clicks to change depth. This authors a static centerline only."
     : "Vine guide mode closed.");
+});
+
+vineGuideSupportModeButton.addEventListener("click", async () => {
+  if (regenerationBusy || !selectedSourceGenome().vine) return;
+  vineGuideStaticSupportEnabled = !vineGuideStaticSupportEnabled;
+  if (vineGuideStaticSupportEnabled) await loadProcPlantVineSurfaceAuthoring();
+  syncVineGuideButtons();
+  setSaveStatus(vineGuideStaticSupportEnabled
+    ? "Static support snapping is enabled for the immutable ground mesh. Every click must pass the bounded surface and clearance audit."
+    : "Static support snapping is disabled; clicks use the camera-facing authoring plane.");
 });
 
 undoVineGuideButton.addEventListener("click", async () => {
@@ -4481,12 +4637,16 @@ canvas.addEventListener("click", async (event) => {
   const planePoint = vineGuidePackage?.points.at(-1)
     ? heroLodState.mesh.localToWorld(new THREE.Vector3(...vineGuidePackage.points.at(-1)!.position))
     : controls.target.clone();
-  const worldPoint = raycaster.ray.intersectPlane(
-    new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal, planePoint),
-    new THREE.Vector3(),
-  );
+  const worldPoint = vineGuideStaticSupportEnabled
+    ? raycaster.intersectObject(ground, false)[0]?.point.clone() ?? null
+    : raycaster.ray.intersectPlane(
+        new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal, planePoint),
+        new THREE.Vector3(),
+      );
   if (!worldPoint) {
-    setSaveStatus("The viewport ray did not intersect the static guide authoring plane.");
+    setSaveStatus(vineGuideStaticSupportEnabled
+      ? "The viewport ray did not hit the registered static ground support. No point was added."
+      : "The viewport ray did not intersect the static guide authoring plane.");
     return;
   }
   const localPoint = heroLodState.mesh.worldToLocal(worldPoint.clone());
@@ -4495,13 +4655,46 @@ canvas.addEventListener("click", async (event) => {
     module.createProcPlantVineGuideTarget(sourceGenome, state.seed),
   );
   try {
-    vineGuidePackage = module.appendProcPlantVineGuidePoint(vineGuidePackage, position);
+    if (vineGuideStaticSupportEnabled) {
+      const surface = await loadProcPlantVineSurfaceAuthoring();
+      ground.updateMatrixWorld(true);
+      heroLodState.mesh.updateMatrixWorld(true);
+      const supportToHero = heroLodState.mesh.matrixWorld.clone().invert().multiply(ground.matrixWorld);
+      const support = surface.createProcPlantVineStaticMeshSupportIndex({
+        id: "lab-static-ground",
+        positions: ground.geometry.getAttribute("position").array,
+        indices: ground.geometry.index?.array,
+        worldMatrix: supportToHero.elements,
+      }, { maxTriangles: 256, maxVertices: 512 });
+      const appended = surface.appendProcPlantVineGuidePointOnStaticSupport(
+        vineGuidePackage,
+        position,
+        { meshes: [support] },
+        { supportIds: [support.id], clearance: 0.02, maxSnapDistance: 0.05 },
+      );
+      if (!appended.changed) {
+        app.dataset.vineGuideCollision = appended.snap.reason ?? "unsupported";
+        setSaveStatus(`Static support snap rejected: ${appended.snap.reason ?? "unsupported"}. No point was added.`);
+        return;
+      }
+      vineGuidePackage = appended.authored;
+      app.dataset.vineGuideProjection = "static-mesh-surface";
+      app.dataset.vineGuideCollision = "static-clearance-verified";
+      app.dataset.vineGuideSupportId = appended.snap.supportId ?? "";
+      app.dataset.vineGuideSupportClearance = String(appended.snap.clearance);
+      app.dataset.vineGuideVerifiedClearance = String(appended.snap.verifiedClearance ?? "");
+    } else {
+      vineGuidePackage = module.appendProcPlantVineGuidePoint(vineGuidePackage, position);
+      app.dataset.vineGuideProjection = "camera-facing-plane";
+      app.dataset.vineGuideCollision = "static-none";
+      delete app.dataset.vineGuideSupportId;
+      delete app.dataset.vineGuideSupportClearance;
+      delete app.dataset.vineGuideVerifiedClearance;
+    }
   } catch (error) {
     setSaveStatus(error instanceof Error ? error.message : String(error));
     return;
   }
-  app.dataset.vineGuideProjection = "camera-facing-plane";
-  app.dataset.vineGuideCollision = "static-none";
   app.dataset.vineGuideStatus = vineGuidePackage.points.length < 2 ? "draft" : "pending-regeneration";
   app.dataset.vineGuideTargetMatched = "true";
   syncVineGuideButtons();
@@ -4881,6 +5074,7 @@ const rebuildHeroImportFromEditor = async (nextState: ProcPlantHeroSpineEditorSt
       state.seed,
       activeOrganMaterial(),
       procPlantHeroSpineEditorStateToSpine(nextState),
+      renderer,
     );
     configureWindMesh(authored.trunk);
     if (authored.leaves) configureWindMesh(authored.leaves, authored.leafMatrices, authored.leafSways, PROCPLANT_WIND_BAND_LEAF);
@@ -4963,6 +5157,8 @@ heroGlbFileInput.addEventListener("change", async () => {
       selectedGenome(),
       state.seed,
       activeOrganMaterial(),
+      undefined,
+      renderer,
     );
     configureWindMesh(authored.trunk);
     if (authored.leaves) configureWindMesh(authored.leaves, authored.leafMatrices, authored.leafSways, PROCPLANT_WIND_BAND_LEAF);
@@ -5473,9 +5669,19 @@ exportGlbButton.addEventListener("click", async () => {
     return;
   }
   const authoredDecals = currentPlacementPackage()?.operations.filter((operation) => operation.kind === "decal").length ?? 0;
-  if (authoredDecals > 0) {
+  const exportableDecals = authoredDecals > 0
+    && livePlacementDecalBinding
+    && !livePlacementDecalBinding.disposed
+    && livePlacementDecalPixelSource
+    && heroLodState.placementDecalRecords.length === authoredDecals;
+  if (authoredDecals > 0 && !exportableDecals) {
     app.dataset.lastGlbPlacementDecalsRejected = String(authoredDecals);
-    setSaveStatus("GLB export stopped: live placement decals use renderer-owned image bindings. Export JSON metadata or remove the decals; this path does not invent glTF material adoption.");
+    setSaveStatus("GLB export stopped: every decal needs the exact active binding plus retained source bytes and decoded pixels. Rebind the matching image or remove the unresolved decals.");
+    return;
+  }
+  if (authoredDecals > 0 && heroImportPreview) {
+    app.dataset.lastGlbPlacementDecalsRejected = String(authoredDecals);
+    setSaveStatus("GLB export stopped: placement decals are not adopted onto imported-hero exports. Remove them or export the generated hero; no material target is guessed.");
     return;
   }
   delete app.dataset.lastGlbPlacementDecalsRejected;
@@ -5529,30 +5735,51 @@ exportGlbButton.addEventListener("click", async () => {
     } as const;
     const authoring = await loadProcPlantAuthoringTools();
     let glb: ArrayBuffer;
-    if (materialBakeBundle) {
+    if (materialBakeBundle || exportableDecals) {
       const prepared = authoring.prepareProcPlantGlbExport(activeLod.template, exportOptions);
+      const decalPrepared = exportableDecals
+        ? authoring.prepareProcPlantPlacementDecalGlbDraws(heroLodState.placementDecalRecords, livePlacementDecalPixelSource!)
+        : null;
+      if (decalPrepared) prepared.scene.add(decalPrepared.root);
       try {
-        const { exportProcPlantGlbWithBakedMaterials } = await import("./procplant-glb-material-binding");
-        const slotByMeshName: Record<string, string> = {};
-        const groupSlotsByMeshName: Record<string, readonly string[]> = {};
-        for (const mesh of prepared.meshes) {
-          const slots = mesh.userData.procplantSurfaces?.slots as string[] | undefined;
-          if (Array.isArray(mesh.material)) groupSlotsByMeshName[mesh.name] = ["bark", "leaf"];
-          else slotByMeshName[mesh.name] = slots?.[0] === "organ" ? "leaf" : "bark";
+        if (materialBakeBundle) {
+          const { exportProcPlantGlbWithBakedMaterials } = await import("./procplant-glb-material-binding");
+          const slotByMeshName: Record<string, string> = {};
+          const groupSlotsByMeshName: Record<string, readonly string[]> = {};
+          for (const mesh of prepared.meshes) {
+            const slots = mesh.userData.procplantSurfaces?.slots as string[] | undefined;
+            if (Array.isArray(mesh.material)) groupSlotsByMeshName[mesh.name] = ["bark", "leaf"];
+            else slotByMeshName[mesh.name] = slots?.[0] === "organ" ? "leaf" : "bark";
+          }
+          app.dataset.lastGlbSurfaceGroups = String(prepared.meshes.reduce(
+            (sum, mesh) => sum + (Array.isArray(mesh.material) ? mesh.geometry.groups.length : 1),
+            0,
+          ));
+          const bound = await exportProcPlantGlbWithBakedMaterials(
+            { scene: prepared.scene, meshes: prepared.meshes },
+            materialBakeBundle,
+            { slotByMeshName, groupSlotsByMeshName },
+          );
+          glb = bound.bytes;
+          app.dataset.lastGlbMaterialHash = bound.contentHash;
+          app.dataset.lastGlbMaterialAssignments = String(bound.assignments.length);
+        } else {
+          glb = await authoring.exportProcPlantScenesGlb(prepared.scene);
         }
-        app.dataset.lastGlbSurfaceGroups = String(prepared.meshes.reduce(
-          (sum, mesh) => sum + (Array.isArray(mesh.material) ? mesh.geometry.groups.length : 1),
-          0,
-        ));
-        const bound = await exportProcPlantGlbWithBakedMaterials(
-          { scene: prepared.scene, meshes: prepared.meshes },
-          materialBakeBundle,
-          { slotByMeshName, groupSlotsByMeshName },
-        );
-        glb = bound.bytes;
-        app.dataset.lastGlbMaterialHash = bound.contentHash;
-        app.dataset.lastGlbMaterialAssignments = String(bound.assignments.length);
+        if (decalPrepared && livePlacementDecalPixelSource) {
+          const adopted = await authoring.bindProcPlantPlacementDecalsIntoGlb(
+            glb,
+            decalPrepared,
+            livePlacementDecalPixelSource,
+          );
+          glb = adopted.bytes;
+          app.dataset.lastGlbPlacementDecals = String(adopted.draws);
+          app.dataset.lastGlbPlacementDecalTriangles = String(adopted.triangles);
+          app.dataset.lastGlbPlacementDecalHash = adopted.contentHash;
+          app.dataset.lastGlbPlacementDecalEmbeddedBytes = String(adopted.embeddedBytes);
+        }
       } finally {
+        decalPrepared?.dispose();
         authoring.disposePreparedProcPlantGlbExport(prepared);
       }
     } else {
@@ -5564,9 +5791,11 @@ exportGlbButton.addEventListener("click", async () => {
     link.download = `procplant-${state.primary}-${state.seed}-lod${activeLod.level}.glb`;
     link.click();
     URL.revokeObjectURL(url);
-    setSaveStatus(materialBakeBundle
-      ? `GLB exported from ${activeLod.label} geometry with separate embedded bark/leaf PBR primitives and tangents.`
-      : `GLB exported from ${activeLod.label} geometry with separate bark/organ surfaces.`);
+    setSaveStatus(exportableDecals
+      ? `GLB exported from ${activeLod.label} geometry with ${authoredDecals} exact UV0 decal draw${authoredDecals === 1 ? "" : "s"} and a deterministic embedded PNG.`
+      : materialBakeBundle
+        ? `GLB exported from ${activeLod.label} geometry with separate embedded bark/leaf PBR primitives and tangents.`
+        : `GLB exported from ${activeLod.label} geometry with separate bark/organ surfaces.`);
   } catch (error) {
     console.error("[procplants] GLB export failed.", error);
     setSaveStatus(`GLB export failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -5651,6 +5880,11 @@ document.querySelector<HTMLButtonElement>("#exportJson")!.addEventListener("clic
             sourceFile: livePlacementDecalFileName,
             width: Number(app.dataset.placementDecalBindingWidth ?? 0),
             height: Number(app.dataset.placementDecalBindingHeight ?? 0),
+            pixelExportReady: Boolean(livePlacementDecalPixelSource),
+            sourceMimeType: livePlacementDecalPixelSource?.sourceMimeType,
+            sourceSha256: livePlacementDecalPixelSource?.sourceSha256,
+            rgbaSha256: livePlacementDecalPixelSource?.rgbaSha256,
+            pngSha256: livePlacementDecalPixelSource?.pngSha256,
             liveDraws: heroLodState?.placementDecals?.audit.draws ?? 0,
             liveTriangles: heroLodState?.placementDecals?.audit.triangles ?? 0,
           }
@@ -5748,10 +5982,11 @@ placementDecalFileInput.addEventListener("change", async () => {
     }
     if (file.size < 1 || file.size > 32 * 1024 * 1024) throw new Error("Decal image bytes must be between 1 byte and 32 MiB.");
     const bytes = await file.arrayBuffer();
-    const [hash, decoded, decalRenderer] = await Promise.all([
+    const [hash, decoded, decalRenderer, decalGlb] = await Promise.all([
       placementDecalContentHash(bytes),
       createImageBitmap(new Blob([bytes], { type: file.type })),
       loadProcPlantPlacementDecalThree(),
+      import("./procplant-placement-decal-glb"),
     ]);
     bitmap = decoded;
     if (bitmap.width < 1 || bitmap.height < 1 || bitmap.width > 4096 || bitmap.height > 4096 || bitmap.width * bitmap.height > 16_777_216) {
@@ -5786,15 +6021,29 @@ placementDecalFileInput.addEventListener("change", async () => {
       polygonOffsetFactor: -1,
       polygonOffsetUnits: -1,
     }), windUniforms, hierarchicalWindShaderOptions);
-    const nextBinding = decalRenderer.createProcPlantThreePlacementDecalBinding({
-      binding: {
+    const binding = {
         contract: "procplants.placement-decal-binding",
         version: 1,
         materialId: `lab-decal-material-${hash}`,
         textureId: `lab-decal-texture-${hash}`,
         uvSet: 0,
         uvRect: [0, 0, 1, 1],
-      },
+      } as const;
+    const decodedRgba = new Uint8Array(context.getImageData(0, 0, canvasSource.width, canvasSource.height).data);
+    const nextPixelSource = await decalGlb.createProcPlantPlacementDecalPixelSource({
+      binding,
+      sourceMimeType: file.type as "image/png" | "image/webp" | "image/jpeg",
+      sourceName: file.name,
+      sourceBytes: new Uint8Array(bytes),
+      width: canvasSource.width,
+      height: canvasSource.height,
+      rgba: decodedRgba,
+      roughness: 0.82,
+      metalness: 0,
+      alphaCutoff: file.type === "image/jpeg" ? 0 : 0.08,
+    });
+    const nextBinding = decalRenderer.createProcPlantThreePlacementDecalBinding({
+      binding,
       material,
       texture,
       materialOwnership: "owned",
@@ -5804,13 +6053,14 @@ placementDecalFileInput.addEventListener("change", async () => {
     texture = null;
     if (livePlacementDecalBinding) retiredPlacementDecalBindings.push(livePlacementDecalBinding);
     livePlacementDecalBinding = nextBinding;
+    livePlacementDecalPixelSource = nextPixelSource;
     livePlacementDecalFileName = file.name;
     app.dataset.placementDecalBindingHash = hash;
     app.dataset.placementDecalBindingMaterial = nextBinding.metadata.materialId;
     app.dataset.placementDecalBindingTexture = nextBinding.metadata.textureId;
     app.dataset.placementDecalBindingWidth = String(canvasSource.width);
     app.dataset.placementDecalBindingHeight = String(canvasSource.height);
-    placementDecalStatus.textContent = `${file.name}: renderer-owned ${canvasSource.width}x${canvasSource.height} UV0 texture/material binding ready; live JSON export records metadata only.`;
+    placementDecalStatus.textContent = `${file.name}: renderer-owned ${canvasSource.width}x${canvasSource.height} UV0 binding ready with retained source provenance and deterministic PNG GLB export.`;
     syncPlacementButtons();
     regenerate();
   } catch (error) {
@@ -5828,6 +6078,7 @@ clearPlacementDecalButton.addEventListener("click", () => {
   if (!livePlacementDecalBinding) return;
   retiredPlacementDecalBindings.push(livePlacementDecalBinding);
   livePlacementDecalBinding = null;
+  livePlacementDecalPixelSource = null;
   livePlacementDecalFileName = "";
   delete app.dataset.placementDecalBindingHash;
   delete app.dataset.placementDecalBindingMaterial;
@@ -5913,6 +6164,7 @@ window.addEventListener("pagehide", () => {
   heroLodState?.placementDecals?.dispose();
   livePlacementDecalBinding?.dispose();
   livePlacementDecalBinding = null;
+  livePlacementDecalPixelSource = null;
   for (const retired of retiredPlacementDecalBindings) retired.dispose();
   retiredPlacementDecalBindings.length = 0;
   if (liveBakedMaterials) disposeLiveBakedMaterials?.(liveBakedMaterials);

@@ -126,6 +126,41 @@ try {
 
         document.querySelector('#resetVineGuide').click();
         await waitForIdle();
+        document.querySelector('#vineGuideSupportMode').click();
+        for (let i = 0; i < 120 && app.dataset.vineSurfaceAuthoringLoaded !== 'true'; i++) await wait(50);
+        click(0.43, 0.74);
+        await wait(100);
+        click(0.57, 0.70);
+        await waitForIdle();
+        let supportBlob = null;
+        URL.createObjectURL = (blob) => { supportBlob = blob; return 'blob:vine-support-smoke'; };
+        HTMLAnchorElement.prototype.click = () => {};
+        document.querySelector('#exportJson').click();
+        for (let i = 0; i < 120 && !supportBlob; i++) await wait(50);
+        const supportExport = JSON.parse(await supportBlob.text());
+        let supportGlb = null;
+        URL.createObjectURL = (blob) => { supportGlb = blob; return 'blob:vine-support-glb-smoke'; };
+        document.querySelector('#exportGlb').click();
+        for (let i = 0; i < 240 && !supportGlb; i++) await wait(50);
+        const supportGlbBytes = new Uint8Array(await supportGlb.arrayBuffer());
+        URL.createObjectURL = originalCreateObjectUrl;
+        HTMLAnchorElement.prototype.click = originalAnchorClick;
+        const supportProof = {
+          status: app.dataset.vineGuideStatus,
+          points: Number(app.dataset.vineGuidePointCount),
+          projection: app.dataset.vineGuideProjection,
+          collision: app.dataset.vineGuideCollision,
+          supportId: app.dataset.vineGuideSupportId,
+          clearance: Number(app.dataset.vineGuideSupportClearance),
+          verifiedClearance: Number(app.dataset.vineGuideVerifiedClearance),
+          y: supportExport.authoring.vineGuide.points.map((point) => point.position[1]),
+          exactGuide: JSON.stringify(supportExport.authoring.vineGuide.points.map((point) => point.position)) === JSON.stringify(supportExport.genome.vine.guide),
+          serializedHasLiveBinding: JSON.stringify(supportExport.authoring.vineGuide).includes('lab-static-ground'),
+          glbBytes: supportGlbBytes.byteLength,
+          glbMagic: String.fromCharCode(...supportGlbBytes.slice(0, 4)),
+        };
+        document.querySelector('#resetVineGuide').click();
+        await waitForIdle();
         return {
           draftStatus,
           draftPoints,
@@ -140,6 +175,7 @@ try {
           resetPoints: Number(app.dataset.vineGuidePointCount),
           resetPersisted: new URL(location.href).searchParams.has('vg'),
           persistedUrl,
+          supportProof,
         };
       })()
     `,
@@ -160,6 +196,20 @@ try {
   assert.equal(result.resetStatus, "canonical");
   assert.equal(result.resetPoints, 0);
   assert.equal(result.resetPersisted, false);
+  assert.equal(result.supportProof.status, "applied");
+  assert.equal(result.supportProof.points, 2);
+  assert.equal(result.supportProof.projection, "static-mesh-surface");
+  assert.equal(result.supportProof.collision, "static-clearance-verified");
+  assert.equal(result.supportProof.supportId, "lab-static-ground");
+  assert.equal(result.supportProof.clearance, 0.02);
+  assert.ok(result.supportProof.verifiedClearance >= -1e-8);
+  assert.ok(result.supportProof.y.every(Number.isFinite));
+  assert.ok(Math.max(...result.supportProof.y) - Math.min(...result.supportProof.y) < 1e-5,
+    `both snapped points must share the static ground offset: ${JSON.stringify(result.supportProof)}`);
+  assert.equal(result.supportProof.exactGuide, true);
+  assert.equal(result.supportProof.serializedHasLiveBinding, false);
+  assert.ok(result.supportProof.glbBytes > 1_000);
+  assert.equal(result.supportProof.glbMagic, "glTF");
   await command("Page.navigate", { url: result.persistedUrl });
   const restored = await waitFor(async () => {
     const probe = await command("Runtime.evaluate", {

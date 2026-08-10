@@ -62,11 +62,40 @@ await assert.rejects(
 );
 assert.equal(ktxDecoded, 0, "KTX2 must fail before a generic bitmap decoder is attempted");
 
+const compressed = new THREE.CompressedTexture(
+  [{ data: Uint8Array.of(255, 0, 0, 255), width: 1, height: 1 }],
+  1,
+  1,
+  THREE.RGBAFormat,
+);
+let compressedDisposals = 0;
+compressed.addEventListener("dispose", () => compressedDisposals++);
+const ktxPrepared = await prepareProcPlantHeroSourceMaterial(
+  ktx,
+  0,
+  async () => { throw new Error("bitmap decoder must not receive KTX2"); },
+  async (bytes) => {
+    assert.equal(bytes, ktx.textures[0]!.bytes);
+    return compressed;
+  },
+  "test-three-ktx2",
+);
+assert.equal(ktxPrepared.audit.decodedImages, 1);
+assert.equal(ktxPrepared.audit.bitmapDecodedImages, 0);
+assert.equal(ktxPrepared.audit.ktx2DecodedImages, 1);
+assert.equal(ktxPrepared.audit.ktx2Decoder, "test-three-ktx2");
+assert.ok(ktxPrepared.material.map?.isCompressedTexture);
+assert.deepEqual(ktxPrepared.material.map?.offset.toArray(), [0.125, 0.25]);
+assert.deepEqual(ktxPrepared.material.map?.repeat.toArray(), [2, 3]);
+assert.equal(ktxPrepared.material.map?.rotation, 0.5);
+ktxPrepared.dispose();
+assert.equal(compressedDisposals, 1, "renderer-decoded KTX2 texture must dispose once");
+
 const fallback = await prepareProcPlantHeroSourceMaterial(imported, null, async () => image);
 assert.equal(fallback.audit.sourceMaterialApplied, false);
 assert.equal(fallback.textures.length, 0);
 fallback.dispose();
 
 console.log("ok 1 - imported PBR factors, color space, sampler, UV0 transform, and disposal are preserved");
-console.log("ok 2 - KTX2 ingestion has an explicit renderer-decoder boundary and does not imply authoring");
+console.log("ok 2 - KTX2 fails closed without a renderer decoder and preserves binding state with an injected decoder");
 console.log("1..2");

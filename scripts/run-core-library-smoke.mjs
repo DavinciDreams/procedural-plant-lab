@@ -70,6 +70,7 @@ for (const excluded of [
   "createProcPlantCutout",
   "createProcPlantDebugOverlay",
   "createProcPlantGraphEditor",
+  "snapProcPlantVineGuidePointToStaticSupport",
 ]) {
   assert.equal(excluded in core, false, `core entry must not export ${excluded}`);
 }

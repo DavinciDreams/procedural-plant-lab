@@ -4,8 +4,13 @@
 export { createProcPlantDebugOverlay } from "./procplant-debug";
 export {
   disposePreparedProcPlantGlbExport,
+  exportProcPlantScenesGlb,
   exportProcPlantGlb,
   prepareProcPlantGlbExport,
 } from "./procplant-export";
+export {
+  bindProcPlantPlacementDecalsIntoGlb,
+  prepareProcPlantPlacementDecalGlbDraws,
+} from "./procplant-placement-decal-glb";
 export { createProcPlantPruneTool } from "./procplant-prune-tool";
 export { pruneProcPlantGraph } from "./procplant-pruning";

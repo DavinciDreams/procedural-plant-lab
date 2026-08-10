@@ -26,6 +26,19 @@ rebuild or restore the canonical vine as appropriate. The versioned package is
 restored from the bounded `vg` URL parameter, and JSON export includes it
 alongside the applied genome.
 
-This contract does not perform mesh picking, support-surface snapping, live
-collision, attachment solving, physics, growth deformation, or surface
-conformance. Those remain separate renderer/scene-query work.
+The optional Support: Static Ground mode instead ray-picks the lab's immutable
+ground mesh, transforms its indexed geometry into hero-local space, and builds a
+bounded static BVH snapshot. `procplant-vine-surface-authoring.ts` also accepts
+caller-owned primitive obstacle snapshots and prebuilt mesh indexes. It chooses
+the nearest explicitly eligible support, rejects points beyond the snap radius,
+offsets by the requested clearance, then re-queries every supplied obstacle.
+Any remaining penetration fails closed without changing the package. Cross-kind
+IDs must be unique, object count and query work are bounded, and input snapshots
+are not mutated.
+
+Successful snaps append only the materialized local-space point to the existing
+V1 package. Support IDs, meshes, and query state are deliberately not serialized,
+so JSON and GLB export cannot imply an attachment that does not exist. Rebuild a
+mesh index and re-snap after any support deformation. This is static authoring,
+not live collision, attachment solving, physics, growth deformation, or ongoing
+surface conformance.

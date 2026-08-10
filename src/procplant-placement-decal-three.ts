@@ -156,7 +156,11 @@ const exactDecalMatch = (
     binding.uvRect[0], binding.uvRect[1],
   ][index]);
 
-const geometryFromDecal = (decal: ProcPlantMaterializedPlacementDecal) => {
+/**
+ * Build the exact bounded UV0 quad used by both the live renderer and the
+ * standards-valid GLB adoption path. The caller owns the returned geometry.
+ */
+export const createProcPlantThreePlacementDecalGeometry = (decal: ProcPlantMaterializedPlacementDecal) => {
   const { template } = decal;
   const vertexCount = template.pos.length / 3;
   if (
@@ -218,7 +222,7 @@ export const createProcPlantThreePlacementDecalDraws = (
   const geometries: THREE.BufferGeometry[] = [];
   try {
     for (const decal of [...decals].sort((left, right) => left.operationId.localeCompare(right.operationId))) {
-      const geometry = geometryFromDecal(decal);
+      const geometry = createProcPlantThreePlacementDecalGeometry(decal);
       geometries.push(geometry);
       const mesh = new THREE.Mesh(geometry, bindingHandle.material);
       mesh.name = `procplant-placement-decal:${decal.operationId}`;
