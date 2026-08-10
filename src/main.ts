@@ -1417,13 +1417,18 @@ const applyOverrides = (genome: ProcPlantGenome): ProcPlantGenome => {
 const applyGraphGenomeOverrides = (genome: ProcPlantGenome): ProcPlantGenome => {
   const operations = graphOverrideOperations.get(genome.id);
   if (!operations?.length || !procPlantGraphEditorUiModule) return genome;
-  return procPlantGraphEditorUiModule.compileProcPlantGraphEditorState(genome, state.seed, operations).applyAudit.genome;
+  // Edited production graphs compile concrete stage artifacts for the authored
+  // hero. Keep the source genome intact instead of projecting DAG semantics
+  // back into unrelated genome fields and scatter cohorts.
+  return genome;
 };
 
 const graphExecutionSeedForGenome = (genome: ProcPlantGenome): number => {
   const operations = graphOverrideOperations.get(genome.id);
   if (!operations?.length || !procPlantGraphEditorUiModule) return state.seed;
-  return procPlantGraphEditorUiModule.compileProcPlantGraphEditorState(genome, state.seed, operations).applyAudit.executionSeed;
+  // Production graph nodes own independent deterministic streams. Do not fold
+  // their overrides back into one global seed for unrelated preview systems.
+  return state.seed;
 };
 
 const selectedSourceGenome = (): ProcPlantGenome => {
@@ -2987,6 +2992,26 @@ const performRegeneration = async (request: number) => {
     delete app.dataset.materialLiveTangents;
     materialBakeStatus.textContent = "The baked material was detached because the plant genome or generator seed changed. Bake again for this plant.";
   }
+  const env = envFromState();
+  const graphSourceGenome = selectedBaseGenome(false);
+  const generatorOverrides = graphOverrideOperations.get(graphSourceGenome.id) ?? [];
+  const productionDag = generatorOverrides.length > 0 && procPlantGraphEditorUiModule
+    ? procPlantGraphEditorUiModule.compileProcPlantGraphEditorState(
+        graphSourceGenome,
+        state.seed,
+        generatorOverrides,
+        env,
+      ).production
+    : null;
+  app.dataset.productionDagPath = productionDag?.path ?? "legacy-canonical";
+  app.dataset.productionDagArtifacts = String(productionDag?.records.filter((record) => record.status === "executed").length ?? 0);
+  if (productionDag) {
+    app.dataset.productionDagWork = String(productionDag.work);
+    app.dataset.productionDagHash = productionDag.previewHash;
+  } else {
+    delete app.dataset.productionDagWork;
+    delete app.dataset.productionDagHash;
+  }
   updateAddressState();
   sun.intensity = 1.4 + state.light * 3.4;
   scene.background = new THREE.Color(0xb9d7ee).lerp(new THREE.Color(0x6f7d8d), 1 - state.light);
@@ -2997,7 +3022,7 @@ const performRegeneration = async (request: number) => {
   const authoredPlacements = currentPlacementPackage();
   const authoringToolsPromise = authoredPrunes.length > 0 ? loadProcPlantAuthoringTools() : null;
   const placementModulePromise = authoredPlacements?.operations.length ? loadProcPlantOrganPlacement() : null;
-  const shouldCompileHeroLods = authoredPrunes.length === 0 && !authoredPlacements?.operations.length;
+  const shouldCompileHeroLods = authoredPrunes.length === 0 && !authoredPlacements?.operations.length && !productionDag;
   const lodResultPromise = shouldCompileHeroLods
     ? heroLodCompiler.compile(genome, generatorSeed, env).then(
         (lods) => ({ lods, error: null }),
@@ -3015,7 +3040,7 @@ const performRegeneration = async (request: number) => {
 
   // Finish both replacements before removing the visible scene. This keeps a
   // failed or superseded build from leaving a partially-empty preview.
-  let heroBuild = biome.heroTemplate ? null : buildProcPlantTemplate(genome, generatorSeed, env);
+  let heroBuild = productionDag?.build ?? (biome.heroTemplate ? null : buildProcPlantTemplate(genome, generatorSeed, env));
   if (heroBuild && authoredPrunes.length > 0 && !genome.weberPenn && !genome.branchModules) {
     const { pruneProcPlantGraph } = await authoringToolsPromise!;
     if (request !== regenerationRequest) {
@@ -3045,17 +3070,19 @@ const performRegeneration = async (request: number) => {
     delete app.dataset.organPlacementApplied;
     delete app.dataset.organPlacementUnsupported;
   }
-  const template = biome.heroTemplate ?? heroBuild!.template;
-  const heroLods: ProcPlantCompiledLod[] = [{
-    level: 0,
-    label: "full",
-    distance: 0,
-    template,
-    triangles: template.idx.length / 3,
-    vertices: template.pos.length / 3,
-  }];
+  const template = productionDag?.build.template ?? biome.heroTemplate ?? heroBuild!.template;
+  const heroLods: ProcPlantCompiledLod[] = productionDag && authoredPrunes.length === 0 && !authoredPlacements?.operations.length
+    ? productionDag.lods
+    : [{
+        level: 0,
+        label: "full",
+        distance: 0,
+        template,
+        triangles: template.idx.length / 3,
+        vertices: template.pos.length / 3,
+      }];
   const heroScale = heroScaleForGenome(genome);
-  const heroGeometries = [templateToGeometry(template)];
+  const heroGeometries = heroLods.map((lod) => templateToGeometry(lod.template));
   let nextHero: THREE.Mesh;
   let nextController: ProcPlantLodController;
   try {
@@ -4646,6 +4673,7 @@ document.querySelector<HTMLButtonElement>("#exportJson")!.addEventListener("clic
     graphSourceGenome,
     state.seed,
     generatorOverrides,
+    env,
   );
   const generatorGraph = graphEditorState.graph;
   const generatorApplyAudit = graphEditorState.applyAudit;
@@ -4656,7 +4684,7 @@ document.querySelector<HTMLButtonElement>("#exportJson")!.addEventListener("clic
         maturity: state.maturity,
         wetness: state.wetness,
         snowLoad: state.snow,
-        seed: generatorApplyAudit.executionSeed,
+        seed: state.seed,
       })
     : null;
   const payload = {
@@ -4669,7 +4697,7 @@ document.querySelector<HTMLButtonElement>("#exportJson")!.addEventListener("clic
     },
     stats: { ...currentStats },
     genome,
-    runtime: buildProcPlantRuntimePackage(genome, generatorApplyAudit.executionSeed, env),
+    runtime: buildProcPlantRuntimePackage(genome, state.seed, env),
     authoring: {
       variant: { season: state.season, health: state.health, maturity: state.maturity },
       organVariants,
@@ -4704,6 +4732,15 @@ document.querySelector<HTMLButtonElement>("#exportJson")!.addEventListener("clic
         unsupported: generatorApplyAudit.unsupported,
       },
       generatorPreview: graphEditorState.preview,
+      productionDag: graphEditorState.production
+        ? {
+            version: graphEditorState.production.version,
+            path: graphEditorState.production.path,
+            work: graphEditorState.production.work,
+            previewHash: graphEditorState.production.previewHash,
+            records: graphEditorState.production.records,
+          }
+        : null,
     },
     url: currentShareUrl(true),
   };

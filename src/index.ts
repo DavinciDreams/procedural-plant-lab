@@ -47,6 +47,7 @@ export * from "./procplant-impostor-image";
 export * from "./procplant-junction-collar";
 export * from "./procplant-prune-tool";
 export * from "./procplant-pruning";
+export * from "./procplant-production-dag";
 export * from "./procplant-png-alpha";
 export * from "./procplant-rules";
 export * from "./procplant-resource-growth";

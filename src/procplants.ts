@@ -2957,7 +2957,7 @@ const branchRelativeFoliageFrame = (
   return { direction, right, radial: around };
 };
 
-const buildProcPlantGraphIr = (
+export const buildProcPlantGraphIr = (
   stems: StemNode[],
   segments: Array<[number, number]>,
   organs: Organ[],
@@ -7907,6 +7907,40 @@ const createPlantClusterTemplate = (source: ProcPlantTemplate): ProcPlantTemplat
     ], color, true, 0.68);
   }
   return builder.build();
+};
+
+/** Build bounded runtime LOD artifacts from an already-compiled full template. */
+export const compileProcPlantLodsFromTemplate = (
+  genome: ProcPlantGenome,
+  source: ProcPlantTemplate,
+  levels: readonly (0 | 1 | 2 | 3)[] = [0, 1, 2, 3],
+): ProcPlantCompiledLod[] => {
+  const selected = [...new Set(levels)].sort((left, right) => left - right);
+  if (selected.length < 1 || selected.some((level) => !Number.isInteger(level) || level < 0 || level > 3)) {
+    throw new Error("ProcPlant template LOD levels must contain unique indices 0..3");
+  }
+  const fullTriangles = source.idx.length / 3;
+  if (fullTriangles <= 6) throw new Error(`ProcPlant LOD compilation requires more than 6 source triangles; received ${fullTriangles}`);
+  const treeScale = genome.habit === "tree" || genome.habit === "conifer" || genome.habit === "palm" ? 1.5 : 0.75;
+  const templates: Record<0 | 1 | 2 | 3, ProcPlantTemplate> = {
+    0: cloneTemplate(source),
+    1: createPlantClusterTemplate(source),
+    2: createPlantCardTemplate(source, true),
+    3: createPlantCardTemplate(source, false),
+  };
+  const labels = ["full", "clustered", "billboard-cross", "impostor"] as const;
+  const distances = [0, 18 * treeScale, 42 * treeScale, 86 * treeScale] as const;
+  return selected.map((level) => {
+    const template = templates[level];
+    return {
+      level,
+      label: labels[level],
+      distance: distances[level],
+      template,
+      triangles: template.idx.length / 3,
+      vertices: template.pos.length / 3,
+    };
+  });
 };
 
 const reducedLodGenome = (genome: ProcPlantGenome): ProcPlantGenome => ({
