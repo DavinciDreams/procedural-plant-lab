@@ -442,6 +442,8 @@ app.innerHTML = `
           <option value="palmFrond">Palm frond cluster</option>
           <option value="mossTuft">Moss tuft cluster</option>
           <option value="branch">Branch</option>
+          <option value="knot">Bark knot</option>
+          <option value="decal" disabled>Decal (texture binding required)</option>
         </select>
         <button id="undoPlacement" type="button" disabled>Undo Placement</button>
       </div>
@@ -2779,6 +2781,8 @@ const placementKind = (): ProcPlantPlaceableOrganKind => {
     case "palmFrond":
     case "mossTuft":
     case "branch":
+    case "knot":
+    case "decal":
       return value;
     default:
       return "leaf";
@@ -4234,8 +4238,8 @@ canvas.addEventListener("click", async (event) => {
     setSaveStatus("That segment no longer has a stable graph frame.");
     return;
   }
-  if (segment.id.startsWith("placed-branch:")) {
-    setSaveStatus("Place additional parts on a source branch; authored branches are regenerated outputs rather than stable placement targets.");
+  if (segment.id.startsWith("placed-branch:") || segment.id.startsWith("placed-knot:")) {
+    setSaveStatus("Place additional parts on a source branch; authored outputs are regenerated rather than stable placement targets.");
     return;
   }
   tool.object.updateMatrixWorld(true);
@@ -4273,6 +4277,10 @@ canvas.addEventListener("click", async (event) => {
     setSaveStatus("This plant has no flower geometry; choose another supported part.");
     return;
   }
+  if (kind === "decal") {
+    setSaveStatus("Decal placement requires an exact renderer-owned material and UV0 texture binding; no binding is active in the lab.");
+    return;
+  }
   const placementScale: Record<ProcPlantPlaceableOrganKind, number> = {
     leaf: 1,
     flower: 1,
@@ -4286,6 +4294,8 @@ canvas.addEventListener("click", async (event) => {
     palmFrond: 1,
     mossTuft: 0.28,
     branch: 0.48,
+    knot: 0.18,
+    decal: 0.18,
   };
   const placementColors: Partial<Record<ProcPlantPlaceableOrganKind, { color: number; secondaryColor?: number }>> = {
     fruit: { color: 0xc7472f, secondaryColor: 0x6e281c },

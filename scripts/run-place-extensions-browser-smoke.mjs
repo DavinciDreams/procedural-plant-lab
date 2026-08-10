@@ -112,6 +112,7 @@ try {
       for (let i = 0; i < 120 && app?.dataset.organPlacementAvailable !== 'true'; i++) await wait(100);
       const initialResources = performance.getEntriesByType('resource').map((entry) => entry.name);
       const options = [...document.querySelectorAll('#placementKind option')].map((option) => option.value);
+      const decalDisabled = document.querySelector('#placementKind option[value="decal"]')?.disabled;
       const button = document.querySelector('#placementMode');
       const select = document.querySelector('#placementKind');
       const undo = document.querySelector('#undoPlacement');
@@ -147,6 +148,10 @@ try {
       select.dispatchEvent(new Event('change', { bubbles: true }));
       const branchPlaced = await clickUntilCount(2);
       const branchTriangles = Number(app.dataset.heroTemplateTriangles);
+      select.value = 'knot';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      const knotPlaced = await clickUntilCount(3);
+      const knotTriangles = Number(app.dataset.heroTemplateTriangles);
       const applied = Number(app.dataset.organPlacementApplied ?? 0);
       const unsupported = Number(app.dataset.organPlacementUnsupported ?? -1);
 
@@ -164,21 +169,28 @@ try {
 
       undo.click();
       await idle();
+      const afterKnotUndo = Number(app.dataset.heroTemplateTriangles);
+      undo.click();
+      await idle();
       const afterBranchUndo = Number(app.dataset.heroTemplateTriangles);
       undo.click();
       await idle();
       const resetTriangles = Number(app.dataset.heroTemplateTriangles);
       return {
         options,
+        decalDisabled,
         label: select.getAttribute('aria-label'),
         buttonText: button.textContent,
         initialLazy: initialResources.some((url) => url.includes('procplant-organ-placement-overrides')),
         loadedLazy: performance.getEntriesByType('resource').some((entry) => entry.name.includes('procplant-organ-placement-overrides')),
         clusterPlaced,
         branchPlaced,
+        knotPlaced,
         baselineTriangles,
         clusterTriangles,
         branchTriangles,
+        knotTriangles,
+        afterKnotUndo,
         afterBranchUndo,
         resetTriangles,
         applied,
@@ -198,18 +210,22 @@ try {
   const result = response.result?.result?.value;
   assert.ok(result);
   console.log(JSON.stringify(result));
-  assert.deepEqual(result.options, ["leaf", "flower", "fruit", "berry", "cone", "thorn", "aerialRoot", "coniferSpray", "fernFrond", "palmFrond", "mossTuft", "branch"]);
+  assert.deepEqual(result.options, ["leaf", "flower", "fruit", "berry", "cone", "thorn", "aerialRoot", "coniferSpray", "fernFrond", "palmFrond", "mossTuft", "branch", "knot", "decal"]);
+  assert.equal(result.decalDisabled, true);
   assert.equal(result.label, "Plant part type");
   assert.equal(result.initialLazy, false);
   assert.equal(result.loadedLazy, true);
   assert.equal(result.clusterPlaced, true);
   assert.equal(result.branchPlaced, true);
+  assert.equal(result.knotPlaced, true);
   assert.ok(result.clusterTriangles > result.baselineTriangles);
   assert.ok(result.branchTriangles > result.clusterTriangles);
-  assert.equal(result.applied, 2);
+  assert.ok(result.knotTriangles > result.branchTriangles);
+  assert.equal(result.applied, 3);
   assert.equal(result.unsupported, 0);
   assert.equal(result.exportedVersion, 2);
-  assert.deepEqual(result.exportedKinds, ["coniferSpray", "branch"]);
+  assert.deepEqual(result.exportedKinds, ["coniferSpray", "branch", "knot"]);
+  assert.equal(result.afterKnotUndo, result.branchTriangles);
   assert.equal(result.afterBranchUndo, result.clusterTriangles);
   assert.equal(result.resetTriangles, result.baselineTriangles);
   assert.equal(result.finalCount, 0);
