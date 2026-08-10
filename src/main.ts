@@ -123,6 +123,7 @@ import type {
   ProcPlantThreePlacementDecalBindingHandle,
   ProcPlantThreePlacementDecalDrawPackage,
 } from "./procplant-placement-decal-three";
+import type { ProcPlantPlacementDecalPixelSource } from "./procplant-placement-decal-glb";
 import type { ProcPlantVineGuidePackage } from "./procplant-vine-guide-authoring";
 import type { ProcPlantBakedMaterialBundle } from "./procplant-material-bake";
 import type { ProcPlantThreeBakedMaterialSet } from "./procplant-three-material-adapter";
@@ -656,6 +657,7 @@ let heroMesh: THREE.Mesh | null = null;
 interface HeroLodState {
   mesh: THREE.Mesh;
   placementDecals: ProcPlantThreePlacementDecalDrawPackage | null;
+  placementDecalRecords: ProcPlantMaterializedPlacementDecal[];
   graph: ProcPlantGraph | null;
   weberPennTrim: ProcPlantWeberPennBuildMetadata | null;
   stats: ProcPlantStats;
@@ -738,6 +740,7 @@ const pruneOperations = new Map<string, string[][]>();
 const weberPennTrimTargets = new Map<string, ProcPlantWeberPennTrimTarget>();
 const organPlacementPackages = new Map<string, ProcPlantOrganPlacementPackage>();
 let livePlacementDecalBinding: ProcPlantThreePlacementDecalBindingHandle | null = null;
+let livePlacementDecalPixelSource: ProcPlantPlacementDecalPixelSource | null = null;
 let livePlacementDecalFileName = "";
 const retiredPlacementDecalBindings: ProcPlantThreePlacementDecalBindingHandle[] = [];
 let vineGuidePackage: ProcPlantVineGuidePackage | null = null;
@@ -3698,6 +3701,7 @@ const performRegeneration = async (request: number) => {
   const nextHeroLodState: HeroLodState = {
     mesh: nextHero,
     placementDecals: nextPlacementDecals,
+    placementDecalRecords: materializedPlacementDecals,
     graph: heroBuild?.graph ?? null,
     weberPennTrim,
     stats: heroBuild?.stats ?? biome.heroStats ?? {
@@ -5640,9 +5644,19 @@ exportGlbButton.addEventListener("click", async () => {
     return;
   }
   const authoredDecals = currentPlacementPackage()?.operations.filter((operation) => operation.kind === "decal").length ?? 0;
-  if (authoredDecals > 0) {
+  const exportableDecals = authoredDecals > 0
+    && livePlacementDecalBinding
+    && !livePlacementDecalBinding.disposed
+    && livePlacementDecalPixelSource
+    && heroLodState.placementDecalRecords.length === authoredDecals;
+  if (authoredDecals > 0 && !exportableDecals) {
     app.dataset.lastGlbPlacementDecalsRejected = String(authoredDecals);
-    setSaveStatus("GLB export stopped: live placement decals use renderer-owned image bindings. Export JSON metadata or remove the decals; this path does not invent glTF material adoption.");
+    setSaveStatus("GLB export stopped: every decal needs the exact active binding plus retained source bytes and decoded pixels. Rebind the matching image or remove the unresolved decals.");
+    return;
+  }
+  if (authoredDecals > 0 && heroImportPreview) {
+    app.dataset.lastGlbPlacementDecalsRejected = String(authoredDecals);
+    setSaveStatus("GLB export stopped: placement decals are not adopted onto imported-hero exports. Remove them or export the generated hero; no material target is guessed.");
     return;
   }
   delete app.dataset.lastGlbPlacementDecalsRejected;
@@ -5696,30 +5710,51 @@ exportGlbButton.addEventListener("click", async () => {
     } as const;
     const authoring = await loadProcPlantAuthoringTools();
     let glb: ArrayBuffer;
-    if (materialBakeBundle) {
+    if (materialBakeBundle || exportableDecals) {
       const prepared = authoring.prepareProcPlantGlbExport(activeLod.template, exportOptions);
+      const decalPrepared = exportableDecals
+        ? authoring.prepareProcPlantPlacementDecalGlbDraws(heroLodState.placementDecalRecords, livePlacementDecalPixelSource!)
+        : null;
+      if (decalPrepared) prepared.scene.add(decalPrepared.root);
       try {
-        const { exportProcPlantGlbWithBakedMaterials } = await import("./procplant-glb-material-binding");
-        const slotByMeshName: Record<string, string> = {};
-        const groupSlotsByMeshName: Record<string, readonly string[]> = {};
-        for (const mesh of prepared.meshes) {
-          const slots = mesh.userData.procplantSurfaces?.slots as string[] | undefined;
-          if (Array.isArray(mesh.material)) groupSlotsByMeshName[mesh.name] = ["bark", "leaf"];
-          else slotByMeshName[mesh.name] = slots?.[0] === "organ" ? "leaf" : "bark";
+        if (materialBakeBundle) {
+          const { exportProcPlantGlbWithBakedMaterials } = await import("./procplant-glb-material-binding");
+          const slotByMeshName: Record<string, string> = {};
+          const groupSlotsByMeshName: Record<string, readonly string[]> = {};
+          for (const mesh of prepared.meshes) {
+            const slots = mesh.userData.procplantSurfaces?.slots as string[] | undefined;
+            if (Array.isArray(mesh.material)) groupSlotsByMeshName[mesh.name] = ["bark", "leaf"];
+            else slotByMeshName[mesh.name] = slots?.[0] === "organ" ? "leaf" : "bark";
+          }
+          app.dataset.lastGlbSurfaceGroups = String(prepared.meshes.reduce(
+            (sum, mesh) => sum + (Array.isArray(mesh.material) ? mesh.geometry.groups.length : 1),
+            0,
+          ));
+          const bound = await exportProcPlantGlbWithBakedMaterials(
+            { scene: prepared.scene, meshes: prepared.meshes },
+            materialBakeBundle,
+            { slotByMeshName, groupSlotsByMeshName },
+          );
+          glb = bound.bytes;
+          app.dataset.lastGlbMaterialHash = bound.contentHash;
+          app.dataset.lastGlbMaterialAssignments = String(bound.assignments.length);
+        } else {
+          glb = await authoring.exportProcPlantScenesGlb(prepared.scene);
         }
-        app.dataset.lastGlbSurfaceGroups = String(prepared.meshes.reduce(
-          (sum, mesh) => sum + (Array.isArray(mesh.material) ? mesh.geometry.groups.length : 1),
-          0,
-        ));
-        const bound = await exportProcPlantGlbWithBakedMaterials(
-          { scene: prepared.scene, meshes: prepared.meshes },
-          materialBakeBundle,
-          { slotByMeshName, groupSlotsByMeshName },
-        );
-        glb = bound.bytes;
-        app.dataset.lastGlbMaterialHash = bound.contentHash;
-        app.dataset.lastGlbMaterialAssignments = String(bound.assignments.length);
+        if (decalPrepared && livePlacementDecalPixelSource) {
+          const adopted = await authoring.bindProcPlantPlacementDecalsIntoGlb(
+            glb,
+            decalPrepared,
+            livePlacementDecalPixelSource,
+          );
+          glb = adopted.bytes;
+          app.dataset.lastGlbPlacementDecals = String(adopted.draws);
+          app.dataset.lastGlbPlacementDecalTriangles = String(adopted.triangles);
+          app.dataset.lastGlbPlacementDecalHash = adopted.contentHash;
+          app.dataset.lastGlbPlacementDecalEmbeddedBytes = String(adopted.embeddedBytes);
+        }
       } finally {
+        decalPrepared?.dispose();
         authoring.disposePreparedProcPlantGlbExport(prepared);
       }
     } else {
@@ -5731,9 +5766,11 @@ exportGlbButton.addEventListener("click", async () => {
     link.download = `procplant-${state.primary}-${state.seed}-lod${activeLod.level}.glb`;
     link.click();
     URL.revokeObjectURL(url);
-    setSaveStatus(materialBakeBundle
-      ? `GLB exported from ${activeLod.label} geometry with separate embedded bark/leaf PBR primitives and tangents.`
-      : `GLB exported from ${activeLod.label} geometry with separate bark/organ surfaces.`);
+    setSaveStatus(exportableDecals
+      ? `GLB exported from ${activeLod.label} geometry with ${authoredDecals} exact UV0 decal draw${authoredDecals === 1 ? "" : "s"} and a deterministic embedded PNG.`
+      : materialBakeBundle
+        ? `GLB exported from ${activeLod.label} geometry with separate embedded bark/leaf PBR primitives and tangents.`
+        : `GLB exported from ${activeLod.label} geometry with separate bark/organ surfaces.`);
   } catch (error) {
     console.error("[procplants] GLB export failed.", error);
     setSaveStatus(`GLB export failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -5818,6 +5855,11 @@ document.querySelector<HTMLButtonElement>("#exportJson")!.addEventListener("clic
             sourceFile: livePlacementDecalFileName,
             width: Number(app.dataset.placementDecalBindingWidth ?? 0),
             height: Number(app.dataset.placementDecalBindingHeight ?? 0),
+            pixelExportReady: Boolean(livePlacementDecalPixelSource),
+            sourceMimeType: livePlacementDecalPixelSource?.sourceMimeType,
+            sourceSha256: livePlacementDecalPixelSource?.sourceSha256,
+            rgbaSha256: livePlacementDecalPixelSource?.rgbaSha256,
+            pngSha256: livePlacementDecalPixelSource?.pngSha256,
             liveDraws: heroLodState?.placementDecals?.audit.draws ?? 0,
             liveTriangles: heroLodState?.placementDecals?.audit.triangles ?? 0,
           }
@@ -5915,10 +5957,11 @@ placementDecalFileInput.addEventListener("change", async () => {
     }
     if (file.size < 1 || file.size > 32 * 1024 * 1024) throw new Error("Decal image bytes must be between 1 byte and 32 MiB.");
     const bytes = await file.arrayBuffer();
-    const [hash, decoded, decalRenderer] = await Promise.all([
+    const [hash, decoded, decalRenderer, decalGlb] = await Promise.all([
       placementDecalContentHash(bytes),
       createImageBitmap(new Blob([bytes], { type: file.type })),
       loadProcPlantPlacementDecalThree(),
+      import("./procplant-placement-decal-glb"),
     ]);
     bitmap = decoded;
     if (bitmap.width < 1 || bitmap.height < 1 || bitmap.width > 4096 || bitmap.height > 4096 || bitmap.width * bitmap.height > 16_777_216) {
@@ -5953,15 +5996,29 @@ placementDecalFileInput.addEventListener("change", async () => {
       polygonOffsetFactor: -1,
       polygonOffsetUnits: -1,
     }), windUniforms, hierarchicalWindShaderOptions);
-    const nextBinding = decalRenderer.createProcPlantThreePlacementDecalBinding({
-      binding: {
+    const binding = {
         contract: "procplants.placement-decal-binding",
         version: 1,
         materialId: `lab-decal-material-${hash}`,
         textureId: `lab-decal-texture-${hash}`,
         uvSet: 0,
         uvRect: [0, 0, 1, 1],
-      },
+      } as const;
+    const decodedRgba = new Uint8Array(context.getImageData(0, 0, canvasSource.width, canvasSource.height).data);
+    const nextPixelSource = await decalGlb.createProcPlantPlacementDecalPixelSource({
+      binding,
+      sourceMimeType: file.type as "image/png" | "image/webp" | "image/jpeg",
+      sourceName: file.name,
+      sourceBytes: new Uint8Array(bytes),
+      width: canvasSource.width,
+      height: canvasSource.height,
+      rgba: decodedRgba,
+      roughness: 0.82,
+      metalness: 0,
+      alphaCutoff: file.type === "image/jpeg" ? 0 : 0.08,
+    });
+    const nextBinding = decalRenderer.createProcPlantThreePlacementDecalBinding({
+      binding,
       material,
       texture,
       materialOwnership: "owned",
@@ -5971,13 +6028,14 @@ placementDecalFileInput.addEventListener("change", async () => {
     texture = null;
     if (livePlacementDecalBinding) retiredPlacementDecalBindings.push(livePlacementDecalBinding);
     livePlacementDecalBinding = nextBinding;
+    livePlacementDecalPixelSource = nextPixelSource;
     livePlacementDecalFileName = file.name;
     app.dataset.placementDecalBindingHash = hash;
     app.dataset.placementDecalBindingMaterial = nextBinding.metadata.materialId;
     app.dataset.placementDecalBindingTexture = nextBinding.metadata.textureId;
     app.dataset.placementDecalBindingWidth = String(canvasSource.width);
     app.dataset.placementDecalBindingHeight = String(canvasSource.height);
-    placementDecalStatus.textContent = `${file.name}: renderer-owned ${canvasSource.width}x${canvasSource.height} UV0 texture/material binding ready; live JSON export records metadata only.`;
+    placementDecalStatus.textContent = `${file.name}: renderer-owned ${canvasSource.width}x${canvasSource.height} UV0 binding ready with retained source provenance and deterministic PNG GLB export.`;
     syncPlacementButtons();
     regenerate();
   } catch (error) {
@@ -5995,6 +6053,7 @@ clearPlacementDecalButton.addEventListener("click", () => {
   if (!livePlacementDecalBinding) return;
   retiredPlacementDecalBindings.push(livePlacementDecalBinding);
   livePlacementDecalBinding = null;
+  livePlacementDecalPixelSource = null;
   livePlacementDecalFileName = "";
   delete app.dataset.placementDecalBindingHash;
   delete app.dataset.placementDecalBindingMaterial;
@@ -6080,6 +6139,7 @@ window.addEventListener("pagehide", () => {
   heroLodState?.placementDecals?.dispose();
   livePlacementDecalBinding?.dispose();
   livePlacementDecalBinding = null;
+  livePlacementDecalPixelSource = null;
   for (const retired of retiredPlacementDecalBindings) retired.dispose();
   retiredPlacementDecalBindings.length = 0;
   if (liveBakedMaterials) disposeLiveBakedMaterials?.(liveBakedMaterials);

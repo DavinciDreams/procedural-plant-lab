@@ -95,6 +95,7 @@ import {
   fitProcPlantCrownMask,
   fitProcPlantCrownVoxelMask,
   buildProcPlantTemplateWithCrownLightPruning,
+  PROCPLANT_PLACEMENT_DECAL_GLB_CONTRACT,
   appendProcPlantVineGuidePoint,
   applyProcPlantVineGuidePackage,
   createProcPlantVineGuidePackage,
@@ -140,6 +141,7 @@ if (maskFit.crown.volumes.length !== 2) throw new Error("crown-mask fit export d
 if (voxelFit.crown.volumes.length !== 2) throw new Error("crown voxel-mask fit export drift");
 if (optInBuild.crownLightPruning.status !== "disabled") throw new Error("full-entry crown-pruning contract drift");
 if (decalExportSupport !== "metadata-only") throw new Error("placement decal renderer type export drift");
+if (PROCPLANT_PLACEMENT_DECAL_GLB_CONTRACT !== "procplants.placement-decal-glb") throw new Error("placement decal GLB export drift");
 if (authoredVine.status !== "applied" || authoredVine.genome.vine?.guide?.length !== 2) throw new Error("vine guide authoring export drift");
 console.log(JSON.stringify({ revision: PROCPLANT_GENERATOR_CONTRACT_REVISION, kind, triangles: prototype.idx.length / 3 }));
 `);

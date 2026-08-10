@@ -49,6 +49,7 @@ export * from "./procplant-glb-material-binding";
 export * from "./procplant-instanced-export";
 export * from "./procplant-organ-placement-overrides";
 export * from "./procplant-placement-decal-three";
+export * from "./procplant-placement-decal-glb";
 export * from "./procplant-vine-guide-authoring";
 export * from "./procplant-vine-surface-authoring";
 export * from "./procplant-organ-variants";

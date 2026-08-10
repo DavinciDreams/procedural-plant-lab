@@ -114,6 +114,7 @@ try {
       const options = [...document.querySelectorAll('#placementKind option')].map((option) => option.value);
       const decalDisabled = document.querySelector('#placementKind option[value="decal"]')?.disabled;
       const initialDecalLazy = initialResources.some((url) => url.includes('procplant-placement-decal-three'));
+      const initialDecalGlbLazy = initialResources.some((url) => url.includes('procplant-placement-decal-glb'));
       const button = document.querySelector('#placementMode');
       const select = document.querySelector('#placementKind');
       const undo = document.querySelector('#undoPlacement');
@@ -187,10 +188,27 @@ try {
       URL.createObjectURL = (blob) => { glbBlob = blob; return originalCreateObjectUrl(blob); };
       HTMLAnchorElement.prototype.click = function () {};
       document.querySelector('#exportGlb').click();
-      await wait(250);
+      for (let i = 0; i < 300 && !glbBlob; i++) await wait(100);
       URL.createObjectURL = originalCreateObjectUrl;
       HTMLAnchorElement.prototype.click = originalAnchorClick;
-      const glbRejectedStatus = document.querySelector('#saveStatus')?.textContent ?? null;
+      const glbStatus = document.querySelector('#saveStatus')?.textContent ?? null;
+      let glbDecalExtras = null;
+      let glbDecalPrimitive = null;
+      let glbImageMime = null;
+      let glbByteLength = 0;
+      if (glbBlob) {
+        const glbBuffer = await glbBlob.arrayBuffer();
+        glbByteLength = glbBuffer.byteLength;
+        const glbView = new DataView(glbBuffer);
+        const jsonLength = glbView.getUint32(12, true);
+        const glbJson = JSON.parse(new TextDecoder().decode(new Uint8Array(glbBuffer, 20, jsonLength)).trim());
+        glbDecalExtras = glbJson.asset?.extras?.procplantsPlacementDecals ?? null;
+        const decalNode = glbJson.nodes?.find((node) => node.name?.startsWith('procplant-placement-decal-glb-draw:'));
+        glbDecalPrimitive = decalNode ? glbJson.meshes?.[decalNode.mesh]?.primitives?.[0] ?? null : null;
+        const decalMaterial = glbDecalPrimitive ? glbJson.materials?.[glbDecalPrimitive.material] : null;
+        const decalTexture = decalMaterial ? glbJson.textures?.[decalMaterial.pbrMetallicRoughness?.baseColorTexture?.index] : null;
+        glbImageMime = decalTexture ? glbJson.images?.[decalTexture.source]?.mimeType ?? null : null;
+      }
 
       undo.click();
       await idle();
@@ -226,6 +244,8 @@ try {
         options,
         decalDisabled,
         initialDecalLazy,
+        initialDecalGlbLazy,
+        loadedDecalGlbLazy: performance.getEntriesByType('resource').some((entry) => entry.name.includes('procplant-placement-decal-glb')),
         decalEnabled,
         label: select.getAttribute('aria-label'),
         buttonText: button.textContent,
@@ -245,7 +265,11 @@ try {
         decalUv0Pairs,
         webglError,
         glbCreated: Boolean(glbBlob),
-        glbRejectedStatus,
+        glbStatus,
+        glbByteLength,
+        glbDecalExtras,
+        glbDecalPrimitive,
+        glbImageMime,
         afterDecalUndo,
         afterDecalUndoDraws,
         afterKnotUndo,
@@ -272,6 +296,8 @@ try {
   assert.deepEqual(result.options, ["leaf", "flower", "fruit", "berry", "cone", "thorn", "aerialRoot", "coniferSpray", "fernFrond", "palmFrond", "mossTuft", "branch", "knot", "decal"]);
   assert.equal(result.decalDisabled, true);
   assert.equal(result.initialDecalLazy, false);
+  assert.equal(result.initialDecalGlbLazy, false);
+  assert.equal(result.loadedDecalGlbLazy, true);
   assert.equal(result.decalEnabled, true);
   assert.equal(result.label, "Plant part type");
   assert.equal(result.initialLazy, false);
@@ -288,8 +314,15 @@ try {
   assert.equal(result.decalTriangles, 2);
   assert.equal(result.decalUv0Pairs, 4);
   assert.equal(result.webglError, 0);
-  assert.equal(result.glbCreated, false, "live bindings must fail closed instead of inventing GLB material adoption");
-  assert.match(result.glbRejectedStatus, /GLB export stopped: live placement decals/);
+  assert.equal(result.glbCreated, true, "retained real pixels must produce a self-contained GLB");
+  assert.ok(result.glbByteLength > 0);
+  assert.match(result.glbStatus, /exact UV0 decal draw/);
+  assert.equal(result.glbDecalExtras?.draws?.length, 1);
+  assert.equal(result.glbDecalExtras?.sourceMimeType, "image/png");
+  assert.match(result.glbDecalExtras?.sourceSha256, /^sha256:[0-9a-f]{64}$/);
+  assert.match(result.glbDecalExtras?.rgbaSha256, /^sha256:[0-9a-f]{64}$/);
+  assert.equal(result.glbDecalPrimitive?.attributes?.TEXCOORD_0 >= 0, true);
+  assert.equal(result.glbImageMime, "image/png");
   assert.equal(result.afterDecalUndo, result.baselineTriangles);
   assert.equal(result.afterDecalUndoDraws, 0);
   assert.equal(result.applied, 3);
@@ -303,6 +336,10 @@ try {
   assert.equal(result.exportedDecalBinding?.liveDraws, 1);
   assert.equal(result.exportedDecalBinding?.liveTriangles, 2);
   assert.equal(result.exportedDecalBinding?.exportSupport, "metadata-only");
+  assert.equal(result.exportedDecalBinding?.pixelExportReady, true);
+  assert.match(result.exportedDecalBinding?.sourceSha256, /^sha256:[0-9a-f]{64}$/);
+  assert.match(result.exportedDecalBinding?.rgbaSha256, /^sha256:[0-9a-f]{64}$/);
+  assert.match(result.exportedDecalBinding?.pngSha256, /^sha256:[0-9a-f]{64}$/);
   assert.equal(result.afterKnotUndo, result.branchTriangles);
   assert.equal(result.afterBranchUndo, result.clusterTriangles);
   assert.equal(result.resetTriangles, result.baselineTriangles);
