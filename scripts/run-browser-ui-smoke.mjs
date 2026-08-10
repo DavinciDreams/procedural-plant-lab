@@ -118,7 +118,7 @@ try {
       const row = [...document.querySelectorAll('.graph-node-list > li')]
         .find((entry) => entry.querySelector('.graph-node small')?.textContent?.startsWith('architecture'));
       row.querySelector('.graph-node').click();
-      const input = row.querySelector('.graph-node-editor input[type=number]');
+      const input = row.querySelector('.graph-node-editor input[aria-label$=" count"]');
       const before = Number(input.value);
       input.value = String(before + 1);
       input.dispatchEvent(new Event('change', { bubbles: true }));
@@ -371,7 +371,7 @@ try {
       return {
         rows: document.querySelectorAll('#graphPreview .graph-node-list > li').length,
         before,
-        after: Number(current.querySelector('.graph-node-editor input[type=number]').value),
+        after: Number(current.querySelector('.graph-node-editor input[aria-label$=" count"]').value),
         summary: document.querySelector('#graphPreview .graph-summary')?.textContent ?? '',
         hash: document.querySelector('#graphPreview')?.dataset.hash ?? '',
         triangles: document.querySelector('#triangles')?.textContent ?? '',

@@ -60,8 +60,11 @@ const forbiddenStaticEntries = [
   "src/procplant-lab-authoring-imports.ts",
 ];
 for (const key of forbiddenStaticEntries) {
-  assert.ok(manifest[key], `expected lazy manifest entry ${key}`);
-  assert.equal(interactiveKeys.includes(key), false, `${key} must remain outside the interactive static closure`);
+  const manifestKey = manifest[key]
+    ? key
+    : Object.keys(manifest).find((candidate) => candidate.replaceAll("\\", "/").endsWith(`/${key}`));
+  assert.ok(manifestKey, `expected lazy manifest entry ${key}`);
+  assert.equal(interactiveKeys.includes(manifestKey), false, `${key} must remain outside the interactive static closure`);
 }
 assert.equal(interactive.files.some((file) => /webgpu/i.test(file)), false,
   "opt-in WebGPU code must remain outside the WebGL lab startup closure");

@@ -257,6 +257,14 @@ canvas {
   border-color: #9bd36f;
 }
 
+.graph-preview button:focus-visible,
+.graph-preview select:focus-visible,
+.graph-preview input:focus-visible,
+.graph-preview textarea:focus-visible {
+  outline: 2px solid #f0d891;
+  outline-offset: 2px;
+}
+
 .graph-editor-note,
 .graph-editor-status {
   display: block;
@@ -300,8 +308,44 @@ canvas {
 
 .graph-editor-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 6px;
+}
+
+.graph-subgraph-clipboard,
+.graph-placement-editor,
+.graph-scope-editor {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 7px;
+  border: 1px solid rgb(238 247 236 / 10%);
+}
+
+.graph-subgraph-clipboard legend,
+.graph-placement-editor legend,
+.graph-scope-editor legend {
+  padding: 0 4px;
+  color: #91a78e;
+}
+
+.graph-subgraph-clipboard label,
+.graph-subgraph-clipboard textarea,
+.graph-subgraph-clipboard small {
+  grid-column: 1 / -1;
+}
+
+.graph-subgraph-clipboard textarea {
+  display: block;
+  width: 100%;
+  min-height: 72px;
+  margin-top: 4px;
+  resize: vertical;
+  color: #eef9ed;
+  background: #111a13;
+  border: 1px solid rgb(238 247 236 / 18%);
 }
 
 .graph-node-editor {
@@ -320,6 +364,13 @@ canvas {
 .graph-node-editor label {
   display: flex;
   align-items: center;
+  gap: 5px;
+  min-height: 24px;
+}
+
+.graph-node-actions {
+  display: flex;
+  flex-wrap: wrap;
   gap: 5px;
 }
 
@@ -351,8 +402,12 @@ canvas {
 
 .graph-dependency-editor select,
 .graph-dependency-editor button,
+.graph-node-actions button,
+.graph-placement-editor select,
+.graph-scope-editor select,
 .graph-curve-editor button,
 .graph-editor-actions button {
+  min-width: 24px;
   min-height: 28px;
   padding: 4px 7px;
   font-size: 10px;

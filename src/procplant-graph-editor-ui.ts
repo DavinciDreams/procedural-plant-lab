@@ -2,7 +2,12 @@ import { defaultPlantEnvironment, type ProcPlantEnvironment, type ProcPlantGenom
 import * as authoringGraphModule from "./procplant-authoring-graph";
 import * as generatorGraphModule from "./procplant-generator-graph";
 import * as productionDagModule from "./procplant-production-dag";
-import type { ProcPlantGeneratorGraphOperation } from "./procplant-generator-graph";
+import type { ProcPlantGeneratorGraphOperation, ProcPlantParentScope } from "./procplant-generator-graph";
+import {
+  copyProcPlantGraphEditorSubgraph,
+  mergeProcPlantGraphEditorOperations,
+  pasteProcPlantGraphEditorSubgraph,
+} from "./procplant-graph-editor-controls";
 
 export { authoringGraphModule, generatorGraphModule };
 
@@ -22,6 +27,8 @@ export interface ProcPlantGraphEditorRenderOptions {
   onOperationsChanged: (operations: ProcPlantGeneratorGraphOperation[]) => void;
   onReset: () => void;
 }
+
+let graphEditorClipboardContents = "";
 
 export const compileProcPlantGraphEditorState = (
   sourceGenome: ProcPlantGenome,
@@ -44,20 +51,6 @@ export const compileProcPlantGraphEditorState = (
   };
 };
 
-const operationMatches = (
-  left: ProcPlantGeneratorGraphOperation,
-  right: ProcPlantGeneratorGraphOperation,
-) => {
-  if (left.nodeId !== right.nodeId) return false;
-  const dependency = (operation: ProcPlantGeneratorGraphOperation) =>
-    operation.op === "add-dependency" || operation.op === "remove-dependency" ? operation.dependencyId : null;
-  const leftDependency = dependency(left);
-  const rightDependency = dependency(right);
-  return leftDependency !== null || rightDependency !== null
-    ? leftDependency === rightDependency
-    : left.op === right.op;
-};
-
 export const renderProcPlantGraphEditor = (options: ProcPlantGraphEditorRenderOptions) => {
   const { canonicalGraph, graph, preview, applyAudit, production } = compileProcPlantGraphEditorState(
     options.sourceGenome,
@@ -72,7 +65,7 @@ export const renderProcPlantGraphEditor = (options: ProcPlantGraphEditorRenderOp
 
   const editorNote = document.createElement("p");
   editorNote.className = "graph-editor-note";
-  editorNote.textContent = "Edited graph-native backends compile through typed stage artifacts. Guided vines expose a strict static-centerline chain with independently seeded foliage and reproductive organs; their branch stage stays disabled and live guide/collision edits fail closed. Other specialized backends and invalid artifact edges remain unsupported.";
+  editorNote.textContent = "This authoring graph has fixed, compiler-owned stage slots. Add/remove activates or deactivates a validated slot; copy/paste projects controls onto matching stages without inventing new topology. Edited graph-native backends compile through typed artifacts, while unsupported placement, scope, dependency, and specialized-backend changes fail closed with a diagnostic.";
   const editorActions = document.createElement("div");
   editorActions.className = "graph-editor-actions";
   const resetGraphButton = document.createElement("button");
@@ -84,16 +77,31 @@ export const renderProcPlantGraphEditor = (options: ProcPlantGraphEditorRenderOp
   const editorStatus = document.createElement("output");
   editorStatus.className = "graph-editor-status";
   editorStatus.setAttribute("aria-live", "polite");
+  editorStatus.setAttribute("aria-atomic", "true");
+  const clipboardEditor = document.createElement("fieldset");
+  clipboardEditor.className = "graph-subgraph-clipboard";
+  const clipboardLegend = document.createElement("legend");
+  clipboardLegend.textContent = "Subgraph copy / paste";
+  const clipboardLabel = document.createElement("label");
+  clipboardLabel.textContent = "Validated subgraph JSON";
+  const clipboardInput = document.createElement("textarea");
+  clipboardInput.rows = 4;
+  clipboardInput.spellcheck = false;
+  clipboardInput.value = graphEditorClipboardContents;
+  clipboardInput.setAttribute("aria-describedby", "graph-clipboard-help");
+  clipboardInput.addEventListener("input", () => { graphEditorClipboardContents = clipboardInput.value; });
+  const clipboardHelp = document.createElement("small");
+  clipboardHelp.id = "graph-clipboard-help";
+  clipboardHelp.textContent = "Copy a node and its dependencies, then paste onto a same-stage node in this or another species.";
+  clipboardLabel.append(clipboardInput);
+  clipboardEditor.append(clipboardLegend, clipboardLabel, clipboardHelp);
   const list = document.createElement("ol");
   list.className = "graph-node-list";
   const nodeById = new Map(preview.nodes.map((node) => [node.id, node]));
   const graphNodeById = new Map(graph.nodes.map((node) => [node.id, node]));
 
   const commitOperations = (operations: ProcPlantGeneratorGraphOperation[]) => {
-    let next = [...options.operations];
-    for (const operation of operations) {
-      next = [...next.filter((existing) => !operationMatches(existing, operation)), operation];
-    }
+    const next = mergeProcPlantGraphEditorOperations(options.operations, operations);
     try {
       compileProcPlantGraphEditorState(options.sourceGenome, options.seed, next);
       editorStatus.textContent = `${operations.map((operation) => operation.op).join(" + ")} applied to the authoring graph.`;
@@ -103,6 +111,25 @@ export const renderProcPlantGraphEditor = (options: ProcPlantGraphEditorRenderOp
     }
   };
   const commitOperation = (operation: ProcPlantGeneratorGraphOperation) => commitOperations([operation]);
+  const inactiveNodes = graph.nodes.filter((node) => !node.enabled);
+  if (inactiveNodes.length > 0) {
+    const addNodeSelect = document.createElement("select");
+    addNodeSelect.setAttribute("aria-label", "Canonical node to add");
+    for (const node of inactiveNodes) {
+      const option = document.createElement("option");
+      option.value = node.id;
+      option.textContent = `${node.label} (${node.stage})`;
+      addNodeSelect.append(option);
+    }
+    const addNodeButton = document.createElement("button");
+    addNodeButton.type = "button";
+    addNodeButton.dataset.graphAction = "add-node";
+    addNodeButton.textContent = "Add node";
+    addNodeButton.addEventListener("click", () => commitOperation({
+      op: "set-enabled", nodeId: addNodeSelect.value, value: true,
+    }));
+    editorActions.append(addNodeSelect, addNodeButton);
+  }
 
   for (const nodeId of preview.order) {
     const node = nodeById.get(nodeId);
@@ -113,6 +140,7 @@ export const renderProcPlantGraphEditor = (options: ProcPlantGraphEditorRenderOp
     const button = document.createElement("button");
     button.type = "button";
     button.className = "graph-node";
+    button.setAttribute("aria-expanded", "false");
     const count = document.createElement("span");
     count.className = "graph-node-count";
     count.textContent = node.count.toLocaleString();
@@ -123,9 +151,13 @@ export const renderProcPlantGraphEditor = (options: ProcPlantGraphEditorRenderOp
     button.append(label, count, stage);
     button.addEventListener("click", () => {
       const active = item.classList.toggle("active");
+      button.setAttribute("aria-expanded", String(active));
       for (const other of list.querySelectorAll<HTMLElement>("li")) {
         if (other !== item) other.classList.remove("active", "dependency");
         else other.classList.remove("dependency");
+      }
+      for (const otherButton of list.querySelectorAll<HTMLButtonElement>(".graph-node")) {
+        if (otherButton !== button) otherButton.setAttribute("aria-expanded", "false");
       }
       if (active) {
         for (const dependency of node.dependencies) {
@@ -136,6 +168,52 @@ export const renderProcPlantGraphEditor = (options: ProcPlantGraphEditorRenderOp
 
     const nodeEditor = document.createElement("div");
     nodeEditor.className = "graph-node-editor";
+    nodeEditor.id = `graph-node-editor-${graphNode.id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+    button.setAttribute("aria-controls", nodeEditor.id);
+    const nodeActions = document.createElement("div");
+    nodeActions.className = "graph-node-actions";
+    const copySubgraphButton = document.createElement("button");
+    copySubgraphButton.type = "button";
+    copySubgraphButton.dataset.graphAction = "copy-subgraph";
+    copySubgraphButton.textContent = "Copy subgraph";
+    copySubgraphButton.setAttribute("aria-label", `Copy ${node.label} subgraph`);
+    copySubgraphButton.addEventListener("click", () => {
+      try {
+        graphEditorClipboardContents = copyProcPlantGraphEditorSubgraph(graph, graphNode.id);
+        clipboardInput.value = graphEditorClipboardContents;
+        editorStatus.textContent = `${node.label} and its dependencies copied as validated subgraph JSON.`;
+      } catch (error) {
+        editorStatus.textContent = error instanceof Error ? error.message : String(error);
+      }
+    });
+    const pasteSubgraphButton = document.createElement("button");
+    pasteSubgraphButton.type = "button";
+    pasteSubgraphButton.dataset.graphAction = "paste-subgraph";
+    pasteSubgraphButton.textContent = "Paste subgraph here";
+    pasteSubgraphButton.setAttribute("aria-label", `Paste compatible subgraph onto ${node.label}`);
+    pasteSubgraphButton.addEventListener("click", () => {
+      try {
+        const contents = clipboardInput.value.trim() || graphEditorClipboardContents;
+        if (!contents) throw new Error("Copy a subgraph or paste validated subgraph JSON first.");
+        graphEditorClipboardContents = contents;
+        commitOperations(pasteProcPlantGraphEditorSubgraph(graph, contents, graphNode.id));
+      } catch (error) {
+        editorStatus.textContent = error instanceof Error ? error.message : String(error);
+      }
+    });
+    nodeActions.append(copySubgraphButton, pasteSubgraphButton);
+    if (graphNode.stage !== "source" && graphNode.stage !== "output") {
+      const presenceButton = document.createElement("button");
+      presenceButton.type = "button";
+      presenceButton.dataset.graphAction = graphNode.enabled ? "remove-node" : "add-node";
+      presenceButton.textContent = graphNode.enabled ? "Remove node" : "Add node";
+      presenceButton.setAttribute("aria-label", `${graphNode.enabled ? "Remove" : "Add"} ${node.label} generator node`);
+      presenceButton.addEventListener("click", () => commitOperation({
+        op: "set-enabled", nodeId: graphNode.id, value: !graphNode.enabled,
+      }));
+      nodeActions.append(presenceButton);
+    }
+    nodeEditor.append(nodeActions);
     const enabledLabel = document.createElement("label");
     const enabledInput = document.createElement("input");
     enabledInput.type = "checkbox";
@@ -146,6 +224,120 @@ export const renderProcPlantGraphEditor = (options: ProcPlantGraphEditorRenderOp
     enabledLabel.append(enabledInput, " enabled");
     nodeEditor.append(enabledLabel);
 
+    if (graphNode.placement) {
+      const placementEditor = document.createElement("fieldset");
+      placementEditor.className = "graph-placement-editor";
+      const placementLegend = document.createElement("legend");
+      placementLegend.textContent = "validated placement";
+      const modesByStage: Partial<Record<typeof graphNode.stage, readonly string[]>> = {
+        source: ["origin"],
+        architecture: ["origin", "nodes"],
+        branching: ["nodes", "tips"],
+        foliage: ["nodes", "tips"],
+        reproductive: ["nodes", "tips"],
+        lod: ["volume"],
+      };
+      const placementModeLabel = document.createElement("label");
+      placementModeLabel.textContent = "mode ";
+      const placementMode = document.createElement("select");
+      placementMode.setAttribute("aria-label", `${node.label} placement mode`);
+      for (const mode of modesByStage[graphNode.stage] ?? [graphNode.placement.mode]) {
+        const option = document.createElement("option");
+        option.value = mode;
+        option.textContent = mode;
+        option.selected = graphNode.placement.mode === mode;
+        placementMode.append(option);
+      }
+      placementMode.addEventListener("change", () => commitOperation({
+        op: "set-placement",
+        nodeId: graphNode.id,
+        value: { ...graphNode.placement!, mode: placementMode.value as typeof graphNode.placement.mode },
+      }));
+      placementModeLabel.append(placementMode);
+      placementEditor.append(placementLegend, placementModeLabel);
+      for (const key of ["density", "spacing", "jitter", "rotation"] as const) {
+        const placementLabel = document.createElement("label");
+        placementLabel.textContent = `${key} `;
+        const input = document.createElement("input");
+        input.type = "number";
+        input.step = "0.01";
+        input.placeholder = "unset";
+        input.value = graphNode.placement[key] === undefined ? "" : String(graphNode.placement[key]);
+        input.setAttribute("aria-label", `${node.label} placement ${key}`);
+        input.addEventListener("change", () => {
+          const value = input.value.trim() === "" ? undefined : Number(input.value);
+          if (value !== undefined && !Number.isFinite(value)) {
+            editorStatus.textContent = `${key} must be finite or blank.`;
+            return;
+          }
+          const nextPlacement = { ...graphNode.placement! };
+          if (value === undefined) delete nextPlacement[key];
+          else nextPlacement[key] = value;
+          commitOperation({ op: "set-placement", nodeId: graphNode.id, value: nextPlacement });
+        });
+        placementLabel.append(input);
+        placementEditor.append(placementLabel);
+      }
+      nodeEditor.append(placementEditor);
+    }
+
+    if (graphNode.parentScope) {
+      const scopeEditor = document.createElement("fieldset");
+      scopeEditor.className = "graph-scope-editor";
+      const scopeLegend = document.createElement("legend");
+      scopeLegend.textContent = "validated parent scope";
+      const scopeModeLabel = document.createElement("label");
+      scopeModeLabel.textContent = "mode ";
+      const scopeMode = document.createElement("select");
+      scopeMode.setAttribute("aria-label", `${node.label} parent scope mode`);
+      for (const mode of ["root", "all", "tips", "nodes", "stages"] as const) {
+        const option = document.createElement("option");
+        option.value = mode;
+        option.textContent = mode;
+        option.selected = graphNode.parentScope.mode === mode;
+        scopeMode.append(option);
+      }
+      const scopeForMode = (mode: string): ProcPlantParentScope => {
+        const maxDepth = graphNode.parentScope?.maxDepth;
+        if (mode === "nodes") return { mode, nodeIds: [...graphNode.dependsOn], ...(maxDepth === undefined ? {} : { maxDepth }) };
+        if (mode === "stages") return {
+          mode,
+          stages: [...new Set(graphNode.dependsOn.map((id) => graphNodeById.get(id)!.stage))],
+          ...(maxDepth === undefined ? {} : { maxDepth }),
+        };
+        return { mode: mode as "root" | "all" | "tips", ...(maxDepth === undefined ? {} : { maxDepth }) };
+      };
+      scopeMode.addEventListener("change", () => commitOperation({
+        op: "set-parent-scope", nodeId: graphNode.id, value: scopeForMode(scopeMode.value),
+      }));
+      scopeModeLabel.append(scopeMode);
+      const depthLabel = document.createElement("label");
+      depthLabel.textContent = "max depth ";
+      const depthInput = document.createElement("input");
+      depthInput.type = "number";
+      depthInput.min = "0";
+      depthInput.step = "1";
+      depthInput.placeholder = "unbounded";
+      depthInput.value = graphNode.parentScope.maxDepth === undefined ? "" : String(graphNode.parentScope.maxDepth);
+      depthInput.addEventListener("change", () => {
+        const value = depthInput.value.trim() === "" ? undefined : Number(depthInput.value);
+        if (value !== undefined && (!Number.isInteger(value) || value < 0)) {
+          editorStatus.textContent = "Parent max depth must be a non-negative integer or blank.";
+          return;
+        }
+        const scope = scopeForMode(graphNode.parentScope!.mode);
+        if (value === undefined) delete (scope as { maxDepth?: number }).maxDepth;
+        else (scope as { maxDepth?: number }).maxDepth = value;
+        commitOperation({ op: "set-parent-scope", nodeId: graphNode.id, value: scope });
+      });
+      depthLabel.append(depthInput);
+      scopeEditor.append(scopeLegend, scopeModeLabel, depthLabel);
+      const scopeHelp = document.createElement("small");
+      scopeHelp.textContent = "nodes/stages scopes follow this node's validated dependency inputs.";
+      scopeEditor.append(scopeHelp);
+      nodeEditor.append(scopeEditor);
+    }
+
     if (graphNode.count !== undefined) {
       const countLabel = document.createElement("label");
       countLabel.textContent = "count ";
@@ -154,6 +346,7 @@ export const renderProcPlantGraphEditor = (options: ProcPlantGraphEditorRenderOp
       countInput.min = "0";
       countInput.step = "1";
       countInput.value = String(graphNode.count);
+      countInput.setAttribute("aria-label", `${node.label} count`);
       countInput.addEventListener("change", () => {
         const value = Number(countInput.value);
         if (!Number.isInteger(value) || value < 0) {
@@ -186,26 +379,6 @@ export const renderProcPlantGraphEditor = (options: ProcPlantGraphEditorRenderOp
       });
       seedLabel.append(seedInput);
       nodeEditor.append(seedLabel);
-    }
-
-    if (graphNode.stage === "branching" && graphNode.parentScope?.maxDepth !== undefined) {
-      const depthLabel = document.createElement("label");
-      depthLabel.textContent = "parent max depth ";
-      const depthInput = document.createElement("input");
-      depthInput.type = "number";
-      depthInput.min = "0";
-      depthInput.step = "1";
-      depthInput.value = String(graphNode.parentScope.maxDepth);
-      depthInput.addEventListener("change", () => {
-        const value = Number(depthInput.value);
-        if (!Number.isInteger(value) || value < 0) {
-          editorStatus.textContent = "Parent max depth must be a non-negative integer.";
-          return;
-        }
-        commitOperation({ op: "set-parent-scope", nodeId: graphNode.id, value: { ...graphNode.parentScope!, maxDepth: value } });
-      });
-      depthLabel.append(depthInput);
-      nodeEditor.append(depthLabel);
     }
 
     if (graphNode.curve) {
@@ -395,7 +568,7 @@ export const renderProcPlantGraphEditor = (options: ProcPlantGraphEditorRenderOp
     list.append(item);
   }
 
-  options.container.replaceChildren(summary, editorNote, editorActions, editorStatus, list);
+  options.container.replaceChildren(summary, editorNote, editorActions, editorStatus, clipboardEditor, list);
   options.container.dataset.hash = preview.hash;
   options.container.dataset.productionPath = production?.path ?? "legacy-canonical";
   options.container.dataset.productionArtifacts = String(production?.records.filter((record) => record.status === "executed").length ?? 0);
