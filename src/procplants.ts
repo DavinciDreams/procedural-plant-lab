@@ -7605,14 +7605,76 @@ const templateBoundsAndColor = (template: ProcPlantTemplate) => {
   return { box, color };
 };
 
-const createPlantCardTemplate = (source: ProcPlantTemplate, crossed: boolean): ProcPlantTemplate => {
+type ProcPlantCardOrientation = "upright" | "ground-parallel";
+
+const PROCPLANT_GROUND_COVER_LOD_PRESETS = new Set([
+  "phiFern",
+  "brackenFernMat",
+  "cloverGroundcover",
+  "woodSorrelCarpet",
+  "woodlandAnemoneCarpet",
+  "creepingPhloxCarpet",
+  "wildStrawberryGroundcover",
+  "maidenhairFernPatch",
+  "woodlandVioletCarpet",
+  "trilliumPatch",
+  "horsetailColony",
+]);
+
+const plantCardOrientation = (
+  genome: ProcPlantGenome,
+  source: ProcPlantTemplate,
+): ProcPlantCardOrientation => {
+  if (!PROCPLANT_GROUND_COVER_LOD_PRESETS.has(genome.id)) return "upright";
+  const { box } = templateBoundsAndColor(source);
+  const size = box.getSize(new THREE.Vector3());
+  const footprint = Math.max(size.x, size.z);
+  const height = Math.max(0.08, size.y);
+  return footprint / height >= 3 ? "ground-parallel" : "upright";
+};
+
+const createPlantCardTemplate = (
+  source: ProcPlantTemplate,
+  crossed: boolean,
+  orientation: ProcPlantCardOrientation,
+): ProcPlantTemplate => {
   const { box, color } = templateBoundsAndColor(source);
   const center = box.getCenter(new THREE.Vector3());
   const size = box.getSize(new THREE.Vector3());
+  const builder = new TemplateBuilder();
+  if (orientation === "ground-parallel") {
+    const y = box.min.y + Math.min(0.06, size.y * 0.35);
+    const addGroundQuad = (
+      minX: number,
+      maxX: number,
+      minZ: number,
+      maxZ: number,
+      uv0: readonly [
+        readonly [number, number],
+        readonly [number, number],
+        readonly [number, number],
+        readonly [number, number],
+      ],
+    ) => builder.addQuad([
+      new THREE.Vector3(minX, y, minZ),
+      new THREE.Vector3(minX, y, maxZ),
+      new THREE.Vector3(maxX, y, maxZ),
+      new THREE.Vector3(maxX, y, minZ),
+    ], color, true, 0.2, uv0);
+    if (!crossed) {
+      addGroundQuad(box.min.x, box.max.x, box.min.z, box.max.z, [[0, 0], [0, 1], [1, 1], [1, 0]]);
+    } else if (size.x >= size.z) {
+      addGroundQuad(box.min.x, center.x, box.min.z, box.max.z, [[0, 0], [0, 1], [0.5, 1], [0.5, 0]]);
+      addGroundQuad(center.x, box.max.x, box.min.z, box.max.z, [[0.5, 0], [0.5, 1], [1, 1], [1, 0]]);
+    } else {
+      addGroundQuad(box.min.x, box.max.x, box.min.z, center.z, [[0, 0], [0, 0.5], [1, 0.5], [1, 0]]);
+      addGroundQuad(box.min.x, box.max.x, center.z, box.max.z, [[0, 0.5], [0, 1], [1, 1], [1, 0.5]]);
+    }
+    return builder.build();
+  }
   const halfWidth = Math.max(0.08, Math.max(size.x, size.z) * 0.5);
   const y0 = box.min.y;
   const y1 = Math.max(y0 + 0.08, box.max.y);
-  const builder = new TemplateBuilder();
   builder.addQuad([
     new THREE.Vector3(center.x - halfWidth, y0, center.z),
     new THREE.Vector3(center.x + halfWidth, y0, center.z),
@@ -7730,8 +7792,9 @@ export const compileProcPlantLods = (
   const clustered = reducedTriangles > 4 && reducedTriangles < fullTriangles
     ? reduced
     : createPlantClusterTemplate(full);
-  const billboard = createPlantCardTemplate(full, true);
-  const impostor = createPlantCardTemplate(full, false);
+  const cardOrientation = plantCardOrientation(genome, full);
+  const billboard = createPlantCardTemplate(full, true, cardOrientation);
+  const impostor = createPlantCardTemplate(full, false, cardOrientation);
   const treeScale = genome.habit === "tree" || genome.habit === "conifer" || genome.habit === "palm" ? 1.5 : 0.75;
   const rows: Array<[ProcPlantCompiledLod["level"], ProcPlantCompiledLod["label"], number, ProcPlantTemplate]> = [
     [0, "full", 0, full],
