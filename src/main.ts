@@ -48,6 +48,13 @@ import {
   type ProcPlantChainTubeOverridePackage,
 } from "./procplant-chain-tube-overrides";
 import {
+  addProcPlantCrownSpline,
+  addProcPlantCrownSplinePoint,
+  removeProcPlantCrownSpline,
+  removeProcPlantCrownSplinePoint,
+  updateProcPlantCrownSplinePoint,
+} from "./procplant-spline-crown";
+import {
   allProcPlantPresetIds,
   installSavedProcPlantPresets,
   labelForPresetId,
@@ -89,6 +96,9 @@ import type {
 import {
   cloneProcPlantFreeformCrown,
   deserializeProcPlantFreeformCrown,
+  PROCPLANT_FREEFORM_CROWN_CONTRACT,
+  PROCPLANT_FREEFORM_CROWN_SPLINE_VERSION,
+  PROCPLANT_FREEFORM_CROWN_VERSION,
   serializeProcPlantFreeformCrown,
   type ProcPlantFreeformCrown,
 } from "./procplant-space-colonization";
@@ -353,6 +363,26 @@ app.innerHTML = `
             <div class="field"><label for="crownLobeDepth"><span>Lobe depth</span><span id="crownLobeDepthValue"></span></label><input id="crownLobeDepth" type="range" min="0.05" max="10" value="1" step="0.05" /></div>
             <div class="field"><label for="crownLobeRotation"><span>Lobe yaw</span><span id="crownLobeRotationValue"></span></label><input id="crownLobeRotation" type="range" min="-180" max="180" value="0" step="1" /></div>
             <div class="field"><label for="crownLobeWeight"><span>Lobe density</span><span id="crownLobeWeightValue"></span></label><input id="crownLobeWeight" type="range" min="0.1" max="5" value="1" step="0.1" /></div>
+          </div>
+          <div id="crownSplineControls" class="crown-lobe-controls">
+            <div class="button-row">
+              <button id="crownSplineAdd" type="button">Add Spline</button>
+              <button id="crownSplineSubtract" type="button">Add Cutout Spline</button>
+              <button id="crownSplineRemove" type="button" disabled>Remove Spline</button>
+            </div>
+            <div class="advanced-grid">
+              <div class="field"><label for="crownSplineSelect"><span>Spline</span><span id="crownSplineCountValue"></span></label><select id="crownSplineSelect"></select></div>
+              <div class="field"><label for="crownSplinePointSelect"><span>Control point</span><span id="crownSplinePointCountValue"></span></label><select id="crownSplinePointSelect"></select></div>
+              <div class="field"><label for="crownSplinePointX"><span>Point X</span></label><input id="crownSplinePointX" type="number" min="-1000000" max="1000000" value="0" step="0.05" /></div>
+              <div class="field"><label for="crownSplinePointY"><span>Point Y</span></label><input id="crownSplinePointY" type="number" min="-1000000" max="1000000" value="0" step="0.05" /></div>
+              <div class="field"><label for="crownSplinePointZ"><span>Point Z</span></label><input id="crownSplinePointZ" type="number" min="-1000000" max="1000000" value="0" step="0.05" /></div>
+              <div class="field"><label for="crownSplinePointRadius"><span>Point radius</span></label><input id="crownSplinePointRadius" type="number" min="0.01" max="10000" value="0.25" step="0.05" /></div>
+            </div>
+            <div class="button-row">
+              <button id="crownSplinePointAdd" type="button" disabled>Add Point</button>
+              <button id="crownSplinePointRemove" type="button" disabled>Remove Point</button>
+            </div>
+            <small>Catmull–Rom centerlines define bounded attraction volumes. Pink splines subtract from the positive crown union.</small>
           </div>
         </div>
       </details>
@@ -847,6 +877,22 @@ const crownVolumeAddButton = document.querySelector<HTMLButtonElement>("#crownVo
 const crownVolumeSubtractButton = document.querySelector<HTMLButtonElement>("#crownVolumeSubtract")!;
 const crownVolumeRemoveButton = document.querySelector<HTMLButtonElement>("#crownVolumeRemove")!;
 const crownVolumeActions = document.querySelector<HTMLElement>("#crownVolumeActions")!;
+const crownSplineControls = document.querySelector<HTMLElement>("#crownSplineControls")!;
+const crownSplineAddButton = document.querySelector<HTMLButtonElement>("#crownSplineAdd")!;
+const crownSplineSubtractButton = document.querySelector<HTMLButtonElement>("#crownSplineSubtract")!;
+const crownSplineRemoveButton = document.querySelector<HTMLButtonElement>("#crownSplineRemove")!;
+const crownSplineSelect = document.querySelector<HTMLSelectElement>("#crownSplineSelect")!;
+const crownSplinePointSelect = document.querySelector<HTMLSelectElement>("#crownSplinePointSelect")!;
+const crownSplinePointAddButton = document.querySelector<HTMLButtonElement>("#crownSplinePointAdd")!;
+const crownSplinePointRemoveButton = document.querySelector<HTMLButtonElement>("#crownSplinePointRemove")!;
+const crownSplineCountOutput = document.querySelector<HTMLElement>("#crownSplineCountValue")!;
+const crownSplinePointCountOutput = document.querySelector<HTMLElement>("#crownSplinePointCountValue")!;
+const crownSplinePointInputs = {
+  x: document.querySelector<HTMLInputElement>("#crownSplinePointX")!,
+  y: document.querySelector<HTMLInputElement>("#crownSplinePointY")!,
+  z: document.querySelector<HTMLInputElement>("#crownSplinePointZ")!,
+  radius: document.querySelector<HTMLInputElement>("#crownSplinePointRadius")!,
+};
 const chainTubeActions = document.querySelector<HTMLElement>("#chainTubeActions")!;
 const chainTubeSelect = document.querySelector<HTMLSelectElement>("#chainTubeSelect")!;
 const chainTubeRadiusInput = document.querySelector<HTMLInputElement>("#chainTubeRadius")!;
@@ -1326,6 +1372,20 @@ const applyOverrides = (genome: ProcPlantGenome): ProcPlantGenome => {
           control.dimensions[2] * state.crownDepth,
         ] as const,
       })),
+      ...(sourceField.version === PROCPLANT_FREEFORM_CROWN_SPLINE_VERSION ? {
+        splines: sourceField.splines.map((spline) => ({
+          ...spline,
+          points: spline.points.map((point) => ({
+            ...point,
+            position: [
+              centerX + (point.position[0] - centerX) * state.crownWidth,
+              centerY + (point.position[1] - centerY) * state.crownHeight,
+              centerZ + (point.position[2] - centerZ) * state.crownDepth,
+            ] as const,
+            radius: point.radius * (state.crownWidth + state.crownHeight + state.crownDepth) / 3,
+          })),
+        })),
+      } : {}),
     } : undefined;
     next.spaceColonization = {
       ...gene,
@@ -1540,6 +1600,82 @@ const applyCrownField = (field: ProcPlantFreeformCrown | null) => {
   app.dataset.crownFieldContract = state.crownField?.contract ?? "legacy";
 };
 
+let selectedCrownSplineId: string | null = null;
+let selectedCrownSplinePointId: string | null = null;
+
+const authoredCrownField = () => state.crownField ?? selectedSourceGenome().spaceColonization?.freeform ?? null;
+
+const currentCrownSplines = () => {
+  const field = authoredCrownField();
+  return field?.version === PROCPLANT_FREEFORM_CROWN_SPLINE_VERSION ? field.splines : [];
+};
+
+const syncCrownSplineControls = () => {
+  const gene = selectedSourceGenome().spaceColonization;
+  const splines = currentCrownSplines();
+  crownSplineControls.hidden = !gene;
+  crownSplineSelect.innerHTML = "";
+  splines.forEach((spline, index) => {
+    const option = document.createElement("option");
+    option.value = spline.id;
+    option.textContent = `${spline.operation === "subtract" ? "Cutout" : "Spline"} ${index + 1} · ${spline.points.length} points`;
+    crownSplineSelect.appendChild(option);
+  });
+  if (!splines.some((spline) => spline.id === selectedCrownSplineId)) selectedCrownSplineId = splines[0]?.id ?? null;
+  if (selectedCrownSplineId) crownSplineSelect.value = selectedCrownSplineId;
+  const selectedSpline = splines.find((spline) => spline.id === selectedCrownSplineId);
+  crownSplinePointSelect.innerHTML = "";
+  selectedSpline?.points.forEach((point, index) => {
+    const option = document.createElement("option");
+    option.value = point.id;
+    option.textContent = `Point ${index + 1} · ${point.id}`;
+    crownSplinePointSelect.appendChild(option);
+  });
+  if (!selectedSpline?.points.some((point) => point.id === selectedCrownSplinePointId)) {
+    selectedCrownSplinePointId = selectedSpline?.points[0]?.id ?? null;
+  }
+  if (selectedCrownSplinePointId) crownSplinePointSelect.value = selectedCrownSplinePointId;
+  const selectedPoint = selectedSpline?.points.find((point) => point.id === selectedCrownSplinePointId);
+  crownSplineCountOutput.textContent = String(splines.length);
+  crownSplinePointCountOutput.textContent = String(selectedSpline?.points.length ?? 0);
+  if (selectedPoint) {
+    crownSplinePointInputs.x.value = String(selectedPoint.position[0]);
+    crownSplinePointInputs.y.value = String(selectedPoint.position[1]);
+    crownSplinePointInputs.z.value = String(selectedPoint.position[2]);
+    crownSplinePointInputs.radius.value = String(selectedPoint.radius);
+  }
+  const unavailable = regenerationBusy || !gene;
+  crownSplineAddButton.disabled = unavailable;
+  crownSplineSubtractButton.disabled = unavailable;
+  crownSplineRemoveButton.disabled = unavailable || !selectedSpline;
+  crownSplineSelect.disabled = unavailable || splines.length === 0;
+  crownSplinePointSelect.disabled = unavailable || !selectedPoint;
+  crownSplinePointAddButton.disabled = unavailable || !selectedSpline;
+  crownSplinePointRemoveButton.disabled = unavailable || !selectedSpline || selectedSpline.points.length <= 2;
+  for (const input of Object.values(crownSplinePointInputs)) input.disabled = unavailable || !selectedPoint;
+  app.dataset.crownSplineAvailable = String(Boolean(gene));
+  app.dataset.crownSplineCount = String(splines.length);
+  app.dataset.crownSplinePointCount = String(selectedSpline?.points.length ?? 0);
+  app.dataset.crownSplineVersion = authoredCrownField()?.version === PROCPLANT_FREEFORM_CROWN_SPLINE_VERSION ? "2" : "legacy";
+  if (selectedSpline) {
+    app.dataset.crownSplineSelected = selectedSpline.id;
+    app.dataset.crownSplineOperation = selectedSpline.operation ?? "add";
+  } else {
+    delete app.dataset.crownSplineSelected;
+    delete app.dataset.crownSplineOperation;
+  }
+  if (selectedPoint) app.dataset.crownSplinePointSelected = selectedPoint.id;
+  else delete app.dataset.crownSplinePointSelected;
+};
+
+const commitCrownSplineField = (field: ProcPlantFreeformCrown | null, message: string) => {
+  clearChainTubeOverrides("changed-spline-crown");
+  applyCrownField(field);
+  syncCrownSplineControls();
+  setSaveStatus(message);
+  regenerate();
+};
+
 let crownVolumeToolRequest = 0;
 const syncCrownLobeControls = () => {
   const control = crownVolumeTool?.getSelectedControlVolume() ?? null;
@@ -1581,6 +1717,7 @@ const disposeCrownVolumeTool = () => {
   delete app.dataset.crownVolumeDragging;
   delete app.dataset.crownVolumeAxis;
   delete app.dataset.crownVolumeSelected;
+  delete app.dataset.crownSplineVisualCount;
   crownVolumeAddButton.disabled = true;
   crownVolumeSubtractButton.disabled = true;
   crownVolumeRemoveButton.disabled = true;
@@ -1602,6 +1739,7 @@ const syncCrownVolumeButton = () => {
   crownVolumeSubtractButton.disabled = crownVolumeAddButton.disabled;
   crownVolumeRemoveButton.disabled = crownVolumeAddButton.disabled || !crownVolumeTool?.getSelectedVolumeId();
   syncCrownLobeControls();
+  syncCrownSplineControls();
   app.dataset.crownVolumeAvailable = String(available);
   if (!crownVolumeModeVisible) delete app.dataset.crownVolumeActive;
 };
@@ -1690,6 +1828,11 @@ const refreshCrownVolumeTool = async () => {
   crownVolumeTool = tool;
   scene.add(tool.root);
   app.dataset.crownVolumeActive = "true";
+  let splineVisualCount = 0;
+  tool.root.traverse((object) => {
+    if (object.name.startsWith("procplant-crown-spline-")) splineVisualCount++;
+  });
+  app.dataset.crownSplineVisualCount = String(splineVisualCount);
   applyCrownVolumeValues(crownVolumeValues());
   applyCrownField(state.crownField ?? gene.freeform ?? null);
   syncCrownVolumeButton();
@@ -3318,6 +3461,120 @@ debugWindButton.addEventListener("click", () => {
   else void refreshHeroDebugOverlay();
   setSaveStatus(debugWindColors ? "Attachment markers show low-to-high wind weight." : "Attachment markers show organ kind.");
 });
+
+crownSplineAddButton.addEventListener("click", () => {
+  const gene = selectedSourceGenome().spaceColonization;
+  if (!gene || regenerationBusy) return;
+  try {
+    const field = addProcPlantCrownSpline(authoredCrownField(), {
+      center: gene.volume.center,
+      dimensions: gene.volume.dimensions,
+    });
+    selectedCrownSplineId = field.splines[field.splines.length - 1]!.id;
+    selectedCrownSplinePointId = field.splines[field.splines.length - 1]!.points[0]!.id;
+    commitCrownSplineField(field, `Added ${selectedCrownSplineId} with three stable control points.`);
+  } catch (error) {
+    setSaveStatus(error instanceof Error ? error.message : String(error));
+  }
+});
+
+crownSplineSubtractButton.addEventListener("click", () => {
+  const gene = selectedSourceGenome().spaceColonization;
+  if (!gene || regenerationBusy) return;
+  try {
+    const source = authoredCrownField() ?? {
+      contract: PROCPLANT_FREEFORM_CROWN_CONTRACT,
+      version: PROCPLANT_FREEFORM_CROWN_VERSION,
+      volumes: [{
+        id: "volume-1",
+        shape: gene.volume.shape,
+        center: gene.volume.center,
+        dimensions: gene.volume.dimensions,
+      }],
+    } satisfies ProcPlantFreeformCrown;
+    const field = addProcPlantCrownSpline(source, {
+      operation: "subtract",
+      center: gene.volume.center,
+      dimensions: gene.volume.dimensions.map((value) => value * 0.55) as [number, number, number],
+    });
+    selectedCrownSplineId = field.splines[field.splines.length - 1]!.id;
+    selectedCrownSplinePointId = field.splines[field.splines.length - 1]!.points[0]!.id;
+    commitCrownSplineField(field, `Added subtractive ${selectedCrownSplineId}.`);
+  } catch (error) {
+    setSaveStatus(error instanceof Error ? error.message : String(error));
+  }
+});
+
+crownSplineSelect.addEventListener("change", () => {
+  selectedCrownSplineId = crownSplineSelect.value || null;
+  selectedCrownSplinePointId = null;
+  syncCrownSplineControls();
+});
+
+crownSplinePointSelect.addEventListener("change", () => {
+  selectedCrownSplinePointId = crownSplinePointSelect.value || null;
+  syncCrownSplineControls();
+});
+
+crownSplinePointAddButton.addEventListener("click", () => {
+  const field = authoredCrownField();
+  if (!field || !selectedCrownSplineId || regenerationBusy) return;
+  try {
+    const next = addProcPlantCrownSplinePoint(field, selectedCrownSplineId);
+    selectedCrownSplinePointId = next.splines.find((spline) => spline.id === selectedCrownSplineId)!.points.at(-1)!.id;
+    commitCrownSplineField(next, `Added ${selectedCrownSplinePointId}.`);
+  } catch (error) {
+    setSaveStatus(error instanceof Error ? error.message : String(error));
+  }
+});
+
+crownSplinePointRemoveButton.addEventListener("click", () => {
+  const field = authoredCrownField();
+  if (!field || !selectedCrownSplineId || !selectedCrownSplinePointId || regenerationBusy) return;
+  try {
+    const removed = selectedCrownSplinePointId;
+    const next = removeProcPlantCrownSplinePoint(field, selectedCrownSplineId, removed);
+    selectedCrownSplinePointId = next.splines.find((spline) => spline.id === selectedCrownSplineId)!.points[0]!.id;
+    commitCrownSplineField(next, `Removed ${removed}.`);
+  } catch (error) {
+    setSaveStatus(error instanceof Error ? error.message : String(error));
+  }
+});
+
+crownSplineRemoveButton.addEventListener("click", () => {
+  const field = authoredCrownField();
+  if (!field || !selectedCrownSplineId || regenerationBusy) return;
+  try {
+    const removed = selectedCrownSplineId;
+    const next = removeProcPlantCrownSpline(field, removed);
+    selectedCrownSplineId = next?.version === PROCPLANT_FREEFORM_CROWN_SPLINE_VERSION ? next.splines[0]?.id ?? null : null;
+    selectedCrownSplinePointId = next?.version === PROCPLANT_FREEFORM_CROWN_SPLINE_VERSION ? next.splines[0]?.points[0]?.id ?? null : null;
+    commitCrownSplineField(next, `Removed ${removed}.`);
+  } catch (error) {
+    setSaveStatus(error instanceof Error ? error.message : String(error));
+  }
+});
+
+for (const input of Object.values(crownSplinePointInputs)) {
+  input.addEventListener("change", () => {
+    const field = authoredCrownField();
+    if (!field || !selectedCrownSplineId || !selectedCrownSplinePointId || regenerationBusy) return;
+    try {
+      const next = updateProcPlantCrownSplinePoint(field, selectedCrownSplineId, selectedCrownSplinePointId, {
+        position: [
+          Number(crownSplinePointInputs.x.value),
+          Number(crownSplinePointInputs.y.value),
+          Number(crownSplinePointInputs.z.value),
+        ],
+        radius: Number(crownSplinePointInputs.radius.value),
+      });
+      commitCrownSplineField(next, `Updated ${selectedCrownSplinePointId}.`);
+    } catch (error) {
+      setSaveStatus(error instanceof Error ? error.message : String(error));
+      syncCrownSplineControls();
+    }
+  });
+}
 
 crownVolumeModeButton.addEventListener("click", () => {
   if (!selectedSourceGenome().spaceColonization || regenerationBusy) return;

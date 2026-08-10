@@ -15,7 +15,9 @@ import { getLeafShape } from "./vendor/proc-tree/LeafShapes";
 import {
   growProcPlantSpaceColonization,
   PROCPLANT_FREEFORM_CROWN_CONTRACT,
+  PROCPLANT_FREEFORM_CROWN_SPLINE_VERSION,
   PROCPLANT_FREEFORM_CROWN_VERSION,
+  type ProcPlantCrownDomain,
   type ProcPlantFreeformCrown,
   type ProcPlantSpaceColonizationResult,
 } from "./procplant-space-colonization";
@@ -5440,10 +5442,7 @@ const growSpaceColonizedProcPlant = (
   const volume = gene.volume.shape === "ellipsoid"
     ? { shape: "ellipsoid" as const, center, radii: dimensions }
     : { shape: "box" as const, center, size: dimensions };
-  const crownDomain = gene.freeform ? {
-    contract: PROCPLANT_FREEFORM_CROWN_CONTRACT,
-    version: PROCPLANT_FREEFORM_CROWN_VERSION,
-    volumes: gene.freeform.volumes.map((control) => ({
+  const transformedCrownVolumes = gene.freeform?.volumes.map((control) => ({
       ...control,
       center: [control.center[0], control.center[1] * centerHeightScale, control.center[2]] as const,
       dimensions: [
@@ -5451,8 +5450,28 @@ const growSpaceColonizedProcPlant = (
         control.dimensions[1] * crownHeightScale,
         control.dimensions[2] * crownHorizontalScale,
       ] as const,
-    })),
-  } satisfies ProcPlantFreeformCrown : volume;
+    }));
+  const crownDomain: ProcPlantCrownDomain = gene.freeform
+    ? gene.freeform.version === PROCPLANT_FREEFORM_CROWN_SPLINE_VERSION
+      ? {
+          contract: PROCPLANT_FREEFORM_CROWN_CONTRACT,
+          version: PROCPLANT_FREEFORM_CROWN_SPLINE_VERSION,
+          volumes: transformedCrownVolumes!,
+          splines: gene.freeform.splines.map((spline) => ({
+            ...spline,
+            points: spline.points.map((point) => ({
+              ...point,
+              position: [point.position[0], point.position[1] * centerHeightScale, point.position[2]] as const,
+              radius: point.radius * (crownHorizontalScale * 2 + crownHeightScale) / 3,
+            })),
+          })),
+        }
+      : {
+          contract: PROCPLANT_FREEFORM_CROWN_CONTRACT,
+          version: PROCPLANT_FREEFORM_CROWN_VERSION,
+          volumes: transformedCrownVolumes!,
+        }
+    : volume;
   const tropism = gene.tropism ? new THREE.Vector3(...gene.tropism) : UP.clone();
   return growProcPlantSpaceColonization({
     seed,

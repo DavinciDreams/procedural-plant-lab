@@ -2,6 +2,7 @@ import * as THREE from "three";
 import {
   cloneProcPlantFreeformCrown,
   PROCPLANT_FREEFORM_CROWN_CONTRACT,
+  PROCPLANT_FREEFORM_CROWN_SPLINE_VERSION,
   PROCPLANT_FREEFORM_CROWN_MAX_VOLUMES,
   PROCPLANT_FREEFORM_CROWN_VERSION,
   type ProcPlantCrownControlVolume,
@@ -146,6 +147,7 @@ export class ProcPlantCrownVolumeTool {
   private readonly rails = new Map<ProcPlantCrownAxis, THREE.Mesh>();
   private readonly controlVolumes = new Map<string, THREE.Mesh>();
   private readonly controlHandles = new Map<string, THREE.Mesh>();
+  private readonly splineVisualRoot = new THREE.Group();
   private freeform: ProcPlantFreeformCrown | null;
   private selectedVolumeId: string | null = null;
   private drag: DragState | null = null;
@@ -195,6 +197,8 @@ export class ProcPlantCrownVolumeTool {
     this.volume.name = `procplant-crown-${this.shape}`;
     this.volume.renderOrder = 30;
     this.root.add(this.volume);
+    this.splineVisualRoot.name = "procplant-crown-spline-visuals";
+    this.root.add(this.splineVisualRoot);
 
     for (const axis of AXES) {
       const material = new THREE.MeshBasicMaterial({
@@ -241,6 +245,8 @@ export class ProcPlantCrownVolumeTool {
       this.dimensions.y * this.values.height,
       this.dimensions.z * this.values.depth,
     );
+    this.splineVisualRoot.position.copy(this.center);
+    this.splineVisualRoot.scale.set(this.values.width, this.values.height, this.values.depth);
     for (const axis of AXES) {
       const index = AXIS_INDEX[axis];
       const extent = extents[index]!;
@@ -283,11 +289,9 @@ export class ProcPlantCrownVolumeTool {
             : { rotation: [...update.rotation] as [number, number, number, number] }),
       };
     });
-    this.freeform = cloneProcPlantFreeformCrown({
-      contract: PROCPLANT_FREEFORM_CROWN_CONTRACT,
-      version: PROCPLANT_FREEFORM_CROWN_VERSION,
-      volumes,
-    });
+    this.freeform = cloneProcPlantFreeformCrown(this.freeform.version === PROCPLANT_FREEFORM_CROWN_SPLINE_VERSION
+      ? { ...this.freeform, volumes }
+      : { contract: PROCPLANT_FREEFORM_CROWN_CONTRACT, version: PROCPLANT_FREEFORM_CROWN_VERSION, volumes });
     this.syncControlMeshes();
     this.onFreeformCommit?.(cloneProcPlantFreeformCrown(this.freeform), selectedId);
     return cloneProcPlantFreeformCrown(this.freeform);
@@ -309,7 +313,12 @@ export class ProcPlantCrownVolumeTool {
     const side = ordinal % 2 === 0 ? 1 : -1;
     const ring = Math.max(1, Math.ceil((ordinal - 1) / 2));
     const id = `volume-${ordinal}`;
-    const selected = volumes.find((volume) => volume.id === this.selectedVolumeId) ?? volumes[0]!;
+    const selected = volumes.find((volume) => volume.id === this.selectedVolumeId) ?? volumes[0] ?? {
+      id: "base-volume",
+      shape: this.shape,
+      center: this.center.toArray() as [number, number, number],
+      dimensions: this.dimensions.toArray() as [number, number, number],
+    };
     volumes.push({
       id,
       ...(operation === "add" ? {} : { operation }),
@@ -323,11 +332,9 @@ export class ProcPlantCrownVolumeTool {
         ? selected.dimensions.map((value) => value * 0.45) as [number, number, number]
         : [this.dimensions.x * 0.48, this.dimensions.y * 0.48, this.dimensions.z * 0.48],
     });
-    this.freeform = cloneProcPlantFreeformCrown({
-      contract: PROCPLANT_FREEFORM_CROWN_CONTRACT,
-      version: PROCPLANT_FREEFORM_CROWN_VERSION,
-      volumes,
-    });
+    this.freeform = cloneProcPlantFreeformCrown(this.freeform?.version === PROCPLANT_FREEFORM_CROWN_SPLINE_VERSION
+      ? { ...this.freeform, volumes }
+      : { contract: PROCPLANT_FREEFORM_CROWN_CONTRACT, version: PROCPLANT_FREEFORM_CROWN_VERSION, volumes });
     this.setSelectedVolume(id);
     this.rebuildControlMeshes();
     this.onFreeformCommit?.(cloneProcPlantFreeformCrown(this.freeform), id);
@@ -338,12 +345,14 @@ export class ProcPlantCrownVolumeTool {
     if (!this.freeform || !this.selectedVolumeId) return this.getFreeform();
     const removed = this.selectedVolumeId;
     const volumes = this.freeform.volumes.filter((volume) => volume.id !== removed);
-    const hasAdditive = volumes.some((volume) => volume.operation !== "subtract");
-    this.freeform = volumes.length && hasAdditive ? {
-      contract: PROCPLANT_FREEFORM_CROWN_CONTRACT,
-      version: PROCPLANT_FREEFORM_CROWN_VERSION,
-      volumes,
-    } : null;
+    const hasAdditive = volumes.some((volume) => volume.operation !== "subtract") ||
+      (this.freeform.version === PROCPLANT_FREEFORM_CROWN_SPLINE_VERSION &&
+        this.freeform.splines.some((spline) => spline.operation !== "subtract"));
+    this.freeform = hasAdditive
+      ? cloneProcPlantFreeformCrown(this.freeform.version === PROCPLANT_FREEFORM_CROWN_SPLINE_VERSION
+          ? { ...this.freeform, volumes }
+          : { contract: PROCPLANT_FREEFORM_CROWN_CONTRACT, version: PROCPLANT_FREEFORM_CROWN_VERSION, volumes })
+      : null;
     this.setSelectedVolume(volumes[0]?.id ?? null);
     this.rebuildControlMeshes();
     this.onFreeformCommit?.(this.getFreeform(), this.selectedVolumeId);
@@ -410,6 +419,13 @@ export class ProcPlantCrownVolumeTool {
     for (const mesh of this.controlHandles.values()) this.disposeMesh(mesh);
     this.controlVolumes.clear();
     this.controlHandles.clear();
+    this.splineVisualRoot.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      object.geometry.dispose();
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      materials.forEach((material) => material.dispose());
+    });
+    this.splineVisualRoot.clear();
     if (!this.freeform) return;
     for (const control of this.freeform.volumes) {
       const volumeMaterial = new THREE.MeshBasicMaterial({
@@ -439,6 +455,38 @@ export class ProcPlantCrownVolumeTool {
       handle.renderOrder = 34;
       this.controlHandles.set(control.id, handle);
       this.root.add(handle);
+    }
+    if (this.freeform.version === PROCPLANT_FREEFORM_CROWN_SPLINE_VERSION) {
+      for (const spline of this.freeform.splines) {
+        const localPoints = spline.points.map((point) => new THREE.Vector3(...point.position).sub(this.center));
+        const curve = new THREE.CatmullRomCurve3(localPoints, false, "catmullrom", 0.5);
+        const material = new THREE.MeshBasicMaterial({
+          color: spline.operation === "subtract" ? 0xff6688 : 0x79d8ff,
+          wireframe: true,
+          transparent: true,
+          opacity: 0.82,
+          depthTest: false,
+          depthWrite: false,
+          toneMapped: false,
+        });
+        const path = new THREE.Mesh(
+          new THREE.TubeGeometry(curve, Math.max(8, (spline.points.length - 1) * 8), 0.025, 5, false),
+          material,
+        );
+        path.name = `procplant-crown-spline-${spline.id}`;
+        path.renderOrder = 35;
+        this.splineVisualRoot.add(path);
+        for (const point of spline.points) {
+          const handle = new THREE.Mesh(
+            new THREE.SphereGeometry(Math.max(0.06, Math.min(0.16, point.radius * 0.14)), 10, 7),
+            material.clone(),
+          );
+          handle.name = `procplant-crown-spline-${spline.id}-${point.id}`;
+          handle.position.fromArray(point.position).sub(this.center);
+          handle.renderOrder = 36;
+          this.splineVisualRoot.add(handle);
+        }
+      }
     }
     this.syncControlMeshes();
     this.setSelectedVolume(this.selectedVolumeId && this.controlHandles.has(this.selectedVolumeId)
