@@ -81,6 +81,6 @@ Do not use Procplants' standalone WebGPU result as a substitute for step 6. If T
 
 - No representative-device Tellus WebGL FPS/capacity result exists yet.
 - The nine new ground covers remain placement-only until that field validation is reviewed.
-- Imported live KTX2 preview still needs a renderer-configured decoder.
+- Imported live KTX2 preview exists only in Procplants' lazy full-entry WebGL lab. It does not alter `procplants/core`, the Tellus fixture, or Tellus material adoption.
 - Compact GLB/USD/instancing output does not prove Tellus extension support, automatic consumer LOD selection, collision, or culling.
 - Source/build/CI success is not deployment evidence.

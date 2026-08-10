@@ -35,10 +35,11 @@ This report separates deterministic geometry/build evidence from live standalone
 | Branch-relative organ placement overrides | 10.50 kB | 3.77 kB | Lazy after entering Place mode |
 | Static vine-guide package | 4.69 kB | 1.76 kB | Lazy after entering Place Vine Guide or restoring an authored URL; absent from the canonical interactive static closure and `procplants/core` |
 | Static vine support/BVH adapter | 15.93 kB | 5.77 kB | Lazy only after enabling Support: Static Ground; primitive/mesh snapping and clearance verification remain outside startup and `procplants/core` |
-| Hero GLB spine authoring + material baking | 60.77 kB | 19.65 kB | Lazy after explicit import or material bake; loader code remains split |
+| Hero GLB spine authoring + material baking | 62.05 kB | 20.11 kB | Lazy after explicit import or material bake; loader code remains split |
 | Hero manual-spine viewport editor | 10.12 kB | 3.32 kB | Lazy after enabling Spine Handles on an imported hero |
 | Three GLTFLoader | 44.72 kB | 13.50 kB | Lazy with GLB import/validation |
 | Three KTX2Loader | 59.47 kB | 24.24 kB | Lazy with KTX2-bearing imported GLBs; loader support is not texture encoding |
+| Imported-hero KTX2 decoder adapter | 1.56 kB | 0.84 kB | Nested lazy path; resolves 57.53 kB Basis JS and 527.33 kB Basis WASM only after KTX2 import |
 | Per-organ seasonal/material masks | 3.22 kB | 1.53 kB | Lazy on JSON export; also available from the runtime library |
 | Asset QA | 8.79 kB | 2.90 kB | Lazy; every named profile carries explicit texture/LOD/wind/billboard/collision/metadata policy |
 | Procplant GLB facade | 12.43 kB | 4.93 kB | Lazy |
@@ -48,7 +49,7 @@ This report separates deterministic geometry/build evidence from live standalone
 
 The complete reusable ESM entry includes the public grouped-surface, tangent-ready Three geometry, live baked-material, grouped GLB binding, renderer-owned placement decals, evidence-bound decal PNG/GLB adoption, damage/growth/topology, crown-light pruning, mesh/BVH, validated graph authoring, specialized typed DAG adapters, static vine-guide/support authoring, constructive-crown tools, clustered visibility, and WebGPU planning. The `procplants/core` runtime/Tellus entry remains intentionally isolated from the full-entry decal, vine-support, voxel-viewport, GLTFExporter, meshopt, material-authoring, and injected-device WebGPU paths. Final cumulative byte and package measurements are recorded after the reconciled build below.
 
-The explicit bootstrap keeps the parser-discovered JavaScript entry at 0.95 kB raw / 0.53 kB gzip. The decal pixel/GLB adoption path, renderer-owned decal adapter, static vine support/BVH adapter, vine-guide package, crown-mask and voxel-mask viewports, tangent/PBR adapters, manual-spine editor, force editor, and graph editor remain lazy. Browser resource-timing assertions prove these specialized implementation chunks are absent before their first interaction. This improves first paint and initial parse work; it does not claim lower total bytes before the first plant is interactive.
+The explicit bootstrap keeps the parser-discovered JavaScript entry at 0.95 kB raw / 0.53 kB gzip. The decal pixel/GLB adoption path, renderer-owned decal adapter, static vine support/BVH adapter, vine-guide package, crown-mask and voxel-mask viewports, tangent/PBR adapters, manual-spine editor, force editor, and graph editor remain lazy. The KTX2 adapter, loader, and Basis assets form a nested lazy path behind hero GLB import and are absent from the interactive closure until the selected source material requires them. Browser resource-timing assertions prove these specialized implementation chunks are absent before their first interaction. This improves first paint and initial parse work; it does not claim lower total bytes before the first plant is interactive.
 
 ## Geometry reductions
 

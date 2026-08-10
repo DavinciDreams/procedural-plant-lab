@@ -75,6 +75,7 @@
     "test:meshopt": "node scripts/run-meshopt-compression-tests.mjs",
     "test:hero-glb-import": "node scripts/run-hero-glb-import-tests.mjs",
     "test:hero-source-material": "node scripts/run-hero-source-material-tests.mjs",
+    "test:hero-source-material-browser": "node scripts/run-hero-ktx2-browser-smoke.mjs",
     "test:hero-spine-authoring": "node scripts/run-hero-spine-authoring-tests.mjs",
     "test:hero-spine-editor": "node scripts/run-hero-spine-editor-tests.mjs",
     "test:hero-bark-extraction": "node scripts/run-hero-bark-extraction-tests.mjs",

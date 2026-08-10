@@ -3113,6 +3113,23 @@ const installHeroImportPreview = (authored: ProcPlantLabHeroPreview, fileName: s
     attachmentMaterialization: authored.attachmentMaterialization.audit,
     sourceMaterial: authored.sourceMaterialAudit,
   };
+  if (authored.sourceMaterialAudit.ktx2DecodedImages > 0) {
+    const material = Array.isArray(authored.trunk.material) ? authored.trunk.material[0] : authored.trunk.material;
+    const textures = material instanceof THREE.MeshStandardMaterial
+      ? [material.map, material.metalnessMap, material.roughnessMap, material.normalMap, material.aoMap, material.emissiveMap]
+        .filter((texture): texture is THREE.Texture => texture instanceof THREE.CompressedTexture)
+      : [];
+    let uploads = 0;
+    for (const texture of new Set(textures)) {
+      const previousUpdate = texture.onUpdate;
+      texture.onUpdate = (updatedTexture) => {
+        previousUpdate?.(updatedTexture);
+        uploads++;
+        app.dataset.heroImportSourceMaterialKtx2Uploads = String(uploads);
+      };
+    }
+    app.dataset.heroImportSourceMaterialKtx2Uploads = "0";
+  }
   scene.add(authored.group);
   if (heroMesh) heroMesh.visible = false;
   if (heroLodState?.placementDecals) heroLodState.placementDecals.root.visible = false;
@@ -3130,6 +3147,8 @@ const installHeroImportPreview = (authored: ProcPlantLabHeroPreview, fileName: s
   app.dataset.heroImportSourceMaterial = String(authored.sourceMaterialAudit.sourceMaterialApplied);
   app.dataset.heroImportSourceMaterialTextures = String(authored.sourceMaterialAudit.textureBindings);
   app.dataset.heroImportSourceMaterialImages = String(authored.sourceMaterialAudit.decodedImages);
+  app.dataset.heroImportSourceMaterialKtx2Images = String(authored.sourceMaterialAudit.ktx2DecodedImages);
+  app.dataset.heroImportSourceMaterialKtx2Decoder = authored.sourceMaterialAudit.ktx2Decoder ?? "";
   if (heroSpineEditor) {
     heroSpineEditor.setTarget(authored.trunk);
     heroSpineEditor.copyDisplayTransform(authored.group);
@@ -3166,6 +3185,9 @@ const disposeHeroImportPreview = () => {
   delete app.dataset.heroImportSourceMaterial;
   delete app.dataset.heroImportSourceMaterialTextures;
   delete app.dataset.heroImportSourceMaterialImages;
+  delete app.dataset.heroImportSourceMaterialKtx2Images;
+  delete app.dataset.heroImportSourceMaterialKtx2Decoder;
+  delete app.dataset.heroImportSourceMaterialKtx2Uploads;
   delete app.dataset.heroImportLastExportBytes;
   delete app.dataset.heroImportLastExportMaterials;
   delete app.dataset.heroImportLastExportTextures;
@@ -5052,6 +5074,7 @@ const rebuildHeroImportFromEditor = async (nextState: ProcPlantHeroSpineEditorSt
       state.seed,
       activeOrganMaterial(),
       procPlantHeroSpineEditorStateToSpine(nextState),
+      renderer,
     );
     configureWindMesh(authored.trunk);
     if (authored.leaves) configureWindMesh(authored.leaves, authored.leafMatrices, authored.leafSways, PROCPLANT_WIND_BAND_LEAF);
@@ -5134,6 +5157,8 @@ heroGlbFileInput.addEventListener("change", async () => {
       selectedGenome(),
       state.seed,
       activeOrganMaterial(),
+      undefined,
+      renderer,
     );
     configureWindMesh(authored.trunk);
     if (authored.leaves) configureWindMesh(authored.leaves, authored.leafMatrices, authored.leafSways, PROCPLANT_WIND_BAND_LEAF);

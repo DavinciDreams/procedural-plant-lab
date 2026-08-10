@@ -18,6 +18,7 @@ import {
 import { importProcPlantHeroGlb } from "./procplant-hero-glb-import";
 import {
   prepareProcPlantHeroSourceMaterial,
+  type ProcPlantPreparedHeroSourceMaterial,
   type ProcPlantHeroSourceMaterialAudit,
 } from "./procplant-hero-source-material";
 import {
@@ -85,6 +86,7 @@ export const createProcPlantLabHeroPreview = async (
   seed: number,
   organMaterial: THREE.Material,
   manualSpine?: ProcPlantMeshSpine,
+  renderer?: THREE.WebGLRenderer,
 ): Promise<ProcPlantLabHeroPreview> => {
   if (source.byteLength > 64 * 1024 * 1024) throw new Error("Hero GLB exceeds the 64 MiB browser authoring limit.");
   const accessoryGroups = (genome.accessoryOrgans ?? []).map((gene, index) => ({
@@ -127,7 +129,33 @@ export const createProcPlantLabHeroPreview = async (
     attachmentOptions: { seed, maxCandidatesPerAttachment: 48 },
     collars: { enabled: true, includeBranchAttachments: true, strength: 0.32 },
   });
-  const sourceMaterial = await prepareProcPlantHeroSourceMaterial(imported, selected.materialIndex);
+  const sourceRecord = selected.materialIndex === null ? null : imported.materials[selected.materialIndex] ?? null;
+  const sourceBindings = sourceRecord ? [
+    sourceRecord.baseColorTexture,
+    sourceRecord.metallicRoughnessTexture,
+    sourceRecord.normalTexture,
+    sourceRecord.occlusionTexture,
+    sourceRecord.emissiveTexture,
+  ].filter((binding) => binding !== null) : [];
+  const usesKtx2 = sourceBindings.some((binding) => imported.textures[binding!.imageIndex]?.mimeType === "image/ktx2");
+  if (usesKtx2 && !renderer) {
+    throw new Error("Imported hero material uses KTX2; lazy live preview requires the active Three WebGL renderer.");
+  }
+  const ktx2Handle = usesKtx2
+    ? (await import("./procplant-hero-ktx2-decoder")).createProcPlantHeroKtx2Decoder(renderer!)
+    : null;
+  let sourceMaterial: ProcPlantPreparedHeroSourceMaterial;
+  try {
+    sourceMaterial = await prepareProcPlantHeroSourceMaterial(
+      imported,
+      selected.materialIndex,
+      undefined,
+      ktx2Handle?.decode,
+      ktx2Handle?.id,
+    );
+  } finally {
+    ktx2Handle?.dispose();
+  }
   try {
   const group = new THREE.Group();
   group.name = `procplant-imported-hero-${authored.contentHash}`;

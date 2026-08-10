@@ -11,6 +11,9 @@ export interface ProcPlantHeroSourceMaterialAudit {
   materialName: string;
   sourceMaterialApplied: boolean;
   decodedImages: number;
+  bitmapDecodedImages: number;
+  ktx2DecodedImages: number;
+  ktx2Decoder: string | null;
   textureBindings: number;
   mimeTypes: string[];
   colorTextureBindings: number;
@@ -27,6 +30,7 @@ export interface ProcPlantPreparedHeroSourceMaterial {
 }
 
 export type ProcPlantHeroImageDecoder = (bytes: Uint8Array, mimeType: string) => Promise<ImageBitmap>;
+export type ProcPlantHeroKtx2Decoder = (bytes: Uint8Array) => Promise<THREE.CompressedTexture>;
 
 const defaultDecode: ProcPlantHeroImageDecoder = async (bytes, mimeType) => {
   if (typeof createImageBitmap !== "function") {
@@ -63,13 +67,15 @@ const countBindings = (material: ProcPlantHeroGlbMaterial) => [
 
 /**
  * Decode and own a selected imported material for the lazy browser preview.
- * KTX2 remains a valid ingestion payload, but decoding it requires a renderer-
- * configured KTX2Loader and is intentionally not guessed here.
+ * KTX2 decoding is accepted only through an explicitly renderer-configured
+ * decoder. The renderer-independent contract never guesses browser support.
  */
 export const prepareProcPlantHeroSourceMaterial = async (
   imported: ProcPlantHeroGlbImportPackage,
   materialIndex: number | null,
   decoder: ProcPlantHeroImageDecoder = defaultDecode,
+  ktx2Decoder?: ProcPlantHeroKtx2Decoder,
+  ktx2DecoderId = "three-ktx2-loader",
 ): Promise<ProcPlantPreparedHeroSourceMaterial> => {
   const source = materialIndex === null ? null : imported.materials[materialIndex] ?? null;
   if (!source) {
@@ -84,6 +90,9 @@ export const prepareProcPlantHeroSourceMaterial = async (
         materialName: material.name,
         sourceMaterialApplied: false,
         decodedImages: 0,
+        bitmapDecodedImages: 0,
+        ktx2DecodedImages: 0,
+        ktx2Decoder: null,
         textureBindings: 0,
         mimeTypes: [],
         colorTextureBindings: 0,
@@ -106,27 +115,44 @@ export const prepareProcPlantHeroSourceMaterial = async (
     if (!binding) continue;
     const image = imported.textures[binding.imageIndex];
     if (!image) throw new Error(`Imported hero material ${materialIndex} references missing image ${binding.imageIndex}.`);
-    if (image.mimeType === "image/ktx2") {
+    if (image.mimeType === "image/ktx2" && !ktx2Decoder) {
       throw new Error(`Imported hero material ${materialIndex} uses KTX2 image ${binding.imageIndex}; live preview requires a renderer-configured KTX2 decoder.`);
     }
   }
 
   const decoded = new Map<number, ImageBitmap>();
   const decoding = new Map<number, Promise<ImageBitmap>>();
+  const decodedKtx2 = new Map<number, THREE.CompressedTexture>();
+  const decodingKtx2 = new Map<number, Promise<THREE.CompressedTexture>>();
+  const claimedKtx2 = new Set<number>();
   const ownedTextures: THREE.Texture[] = [];
   const textureFor = async (binding: ProcPlantHeroGlbTextureBinding | null, colorSpace: "color" | "linear") => {
     if (!binding) return null;
     const image = imported.textures[binding.imageIndex]!;
-    let decodePromise = decoding.get(binding.imageIndex);
-    if (!decodePromise) {
-      decodePromise = decoder(image.bytes, image.mimeType).then((bitmap) => {
-        decoded.set(binding.imageIndex, bitmap);
-        return bitmap;
-      });
-      decoding.set(binding.imageIndex, decodePromise);
+    let texture: THREE.Texture;
+    if (image.mimeType === "image/ktx2") {
+      let decodePromise = decodingKtx2.get(binding.imageIndex);
+      if (!decodePromise) {
+        decodePromise = ktx2Decoder!(image.bytes).then((decodedTexture) => {
+          decodedKtx2.set(binding.imageIndex, decodedTexture);
+          return decodedTexture;
+        });
+        decodingKtx2.set(binding.imageIndex, decodePromise);
+      }
+      const decodedTexture = await decodePromise;
+      texture = claimedKtx2.has(binding.imageIndex) ? decodedTexture.clone() : decodedTexture;
+      claimedKtx2.add(binding.imageIndex);
+    } else {
+      let decodePromise = decoding.get(binding.imageIndex);
+      if (!decodePromise) {
+        decodePromise = decoder(image.bytes, image.mimeType).then((bitmap) => {
+          decoded.set(binding.imageIndex, bitmap);
+          return bitmap;
+        });
+        decoding.set(binding.imageIndex, decodePromise);
+      }
+      texture = new THREE.Texture(await decodePromise);
     }
-    const bitmap = await decodePromise;
-    const texture = new THREE.Texture(bitmap);
     texture.name = `${image.name}:${binding.textureIndex}`;
     texture.flipY = false;
     texture.channel = 0;
@@ -202,7 +228,10 @@ export const prepareProcPlantHeroSourceMaterial = async (
         materialIndex,
         materialName: source.name,
         sourceMaterialApplied: true,
-        decodedImages: decoded.size,
+        decodedImages: decoded.size + decodedKtx2.size,
+        bitmapDecodedImages: decoded.size,
+        ktx2DecodedImages: decodedKtx2.size,
+        ktx2Decoder: decodedKtx2.size > 0 ? ktx2DecoderId : null,
         textureBindings: countBindings(source),
         mimeTypes,
         colorTextureBindings: bindingEntries.filter(([binding, role]) => binding && role === "color").length,
