@@ -56,6 +56,10 @@ export interface ProcPlantGpuCommandEncoderLike {
   finish(): unknown;
 }
 
+export interface ProcPlantGpuRenderPassLike {
+  drawIndexedIndirect(indirectBuffer: ProcPlantGpuBufferLike, indirectOffset: number): void;
+}
+
 export interface ProcPlantGpuQueueLike {
   writeBuffer(buffer: ProcPlantGpuBufferLike, bufferOffset: number, data: ArrayBufferView): void;
   submit(commandBuffers: readonly unknown[]): void;
@@ -124,6 +128,8 @@ export interface ProcPlantWebGpuVisibilityRuntime {
   readonly buffers: ProcPlantWebGpuVisibilityRuntimeBuffers;
   readonly diagnostics: ProcPlantWebGpuVisibilityRuntimeDiagnostics;
   setPlan(plan: ProcPlantWebGpuVisibilityPlan): void;
+  /** Encode compute work into a caller-owned command encoder without submitting it. */
+  encode(encoder: ProcPlantGpuCommandEncoderLike, view: ProcPlantVisibilityView, visibilityMask?: ArrayLike<number>): void;
   dispatch(view: ProcPlantVisibilityView, visibilityMask?: ArrayLike<number>): void;
   readback(target?: ProcPlantWebGpuVisibilityReadback): Promise<ProcPlantWebGpuVisibilityReadback>;
   dispose(): void;
@@ -162,7 +168,7 @@ const bufferRoleFor = (name: BufferName) => {
 
 const validatePlan = (plan: ProcPlantWebGpuVisibilityPlan) => {
   if (plan.contract !== PROCPLANT_WEBGPU_VISIBILITY_CONTRACT || plan.version !== PROCPLANT_WEBGPU_VISIBILITY_VERSION) {
-    throw new Error("WebGPU visibility runtime requires procplants.webgpu-visibility v1");
+    throw new Error("WebGPU visibility runtime requires procplants.webgpu-visibility v2");
   }
   if (plan.resetWgsl !== PROCPLANT_WEBGPU_VISIBILITY_RESET_WGSL ||
     plan.classifyWgsl !== PROCPLANT_WEBGPU_VISIBILITY_CLASSIFY_WGSL ||
@@ -172,6 +178,9 @@ const validatePlan = (plan: ProcPlantWebGpuVisibilityPlan) => {
   integer(plan.instanceCount, "WebGPU runtime instanceCount", 0, 10_000_000);
   integer(plan.clusterCount, "WebGPU runtime clusterCount", 0, 1_000_000);
   integer(plan.lodCount, "WebGPU runtime lodCount", 1, 32);
+  if (typeof plan.indirectFirstInstance !== "boolean") {
+    throw new Error("WebGPU visibility runtime plan has a malformed indirectFirstInstance mode");
+  }
   for (const name of BUFFER_NAMES) {
     const buffer = plan.buffers[name];
     if (buffer.role !== bufferRoleFor(name) || buffer.byteLength !== buffer.initialData.byteLength || buffer.byteLength < 4 || buffer.byteLength % 4 !== 0) {
@@ -198,6 +207,9 @@ const validateDevice = (
     }
     featureSet.add(feature);
     if (!device.features?.has(feature)) throw new Error(`WebGPU device is missing required feature ${feature}`);
+  }
+  if (plan.indirectFirstInstance && !device.features?.has("indirect-first-instance")) {
+    throw new Error("WebGPU visibility plan requires the indirect-first-instance feature");
   }
   const limits = device.limits ?? {};
   const maxBufferSize = integer(limits.maxBufferSize ?? 0, "WebGPU device maxBufferSize", 4, 0xffffffff);
@@ -233,6 +245,17 @@ const createPipeline = async (
   entryPoint: string,
 ) => {
   const module = device.createShaderModule({ label: `${label} ${entryPoint} module`, code });
+  if (typeof module?.getCompilationInfo === "function") {
+    const info = await module.getCompilationInfo();
+    const errors = Array.from(info?.messages ?? []).filter((message: any) => message.type === "error");
+    if (errors.length > 0) {
+      const details = errors.slice(0, 8).map((message: any) => {
+        const location = message.lineNum ? `:${message.lineNum}:${message.linePos ?? 0}` : "";
+        return `${location} ${String(message.message ?? "WGSL compilation error")}`.trim();
+      }).join("; ");
+      throw new Error(`WebGPU ${entryPoint} shader compilation failed: ${details}`);
+    }
+  }
   const descriptor = {
     label: `${label} ${entryPoint} pipeline`,
     layout: "auto",
@@ -483,7 +506,7 @@ class VisibilityRuntime implements ProcPlantWebGpuVisibilityRuntime {
     this.installPlan(plan, false);
   }
 
-  dispatch(view: ProcPlantVisibilityView, visibilityMask?: ArrayLike<number>) {
+  encode(encoder: ProcPlantGpuCommandEncoderLike, view: ProcPlantVisibilityView, visibilityMask?: ArrayLike<number>) {
     this.assertReady();
     updateProcPlantWebGpuVisibilityView(this.viewScratch, view);
     if (visibilityMask) {
@@ -501,15 +524,19 @@ class VisibilityRuntime implements ProcPlantWebGpuVisibilityRuntime {
       this.device.queue.writeBuffer(this.slots.visibilityMask.buffer, 0, this.maskScratch);
       this.uploadBytes += this.maskScratch.byteLength;
     }
-    const encoder = this.device.createCommandEncoder({ label: `${this.label} dispatch ${this.dispatchCount + 1}` });
     const pass = encoder.beginComputePass({ label: `${this.label} visibility compute` });
     encodeProcPlantWebGpuVisibility(pass, this.currentPlan, {
       ...this.pipelines,
       ...this.bindGroups,
     });
     pass.end();
-    this.device.queue.submit([encoder.finish()]);
     this.dispatchCount++;
+  }
+
+  dispatch(view: ProcPlantVisibilityView, visibilityMask?: ArrayLike<number>) {
+    const encoder = this.device.createCommandEncoder({ label: `${this.label} dispatch ${this.dispatchCount + 1}` });
+    this.encode(encoder, view, visibilityMask);
+    this.device.queue.submit([encoder.finish()]);
     this.submissionCount++;
   }
 
