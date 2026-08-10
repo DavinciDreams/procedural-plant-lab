@@ -37,12 +37,46 @@ export type Soup = {
   indices: Uint32Array;
 };
 
+export type BakedGeometryRange = {
+  vertexStart: number;
+  vertexCount: number;
+  indexStart: number;
+  indexCount: number;
+};
+
+export type BakedStemRange = BakedGeometryRange & {
+  stemIndex: number;
+  depth: number;
+  parentStemIndex: number | null;
+  childStemIndices: number[];
+  baked: boolean;
+};
+
+export type BakedLeafRange = BakedGeometryRange & {
+  /** Stable source index in TreeData.leaves. */
+  leafIndex: number;
+  /** Attachment identity used by the public Weber-Penn graph for this sampled card. */
+  attachmentId: string;
+  parentStemIndex: number;
+  parentAxialT: number;
+  isBlossom: boolean;
+};
+
+export type BakedTreeTopology = {
+  /** Content-bound signature over topology, exact ranges, and baked buffers. */
+  signature: string;
+  stems: BakedStemRange[];
+  leaves: BakedLeafRange[];
+};
+
 export type BakedTree = {
   branches: Soup;
   leaves: Soup;
   /** Axis-aligned bounds of the combined geometry (Y-up). */
   min: THREE.Vector3;
   max: THREE.Vector3;
+  /** Stable source ownership and exact output ranges for deterministic editing. */
+  topology: BakedTreeTopology;
 };
 
 const DEFAULTS: Required<BakeOptions> = {
@@ -292,6 +326,144 @@ function toSoup(acc: Accum): Soup {
   };
 }
 
+const bakeSignature = (
+  stems: readonly BakedStemRange[],
+  leaves: readonly BakedLeafRange[],
+  branches: Soup,
+  leafSoup: Soup,
+): string => {
+  let hash = 0x811c9dc5;
+  const byte = (value: number) => {
+    hash ^= value;
+    hash = Math.imul(hash, 0x01000193);
+  };
+  const text = JSON.stringify({ stems, leaves });
+  for (let index = 0; index < text.length; index++) {
+    const code = text.charCodeAt(index);
+    byte(code & 0xff);
+    byte(code >>> 8);
+  }
+  for (const array of [
+    branches.positions,
+    branches.normals,
+    branches.indices,
+    leafSoup.positions,
+    leafSoup.normals,
+    leafSoup.indices,
+  ]) {
+    const bytes = new Uint8Array(array.buffer, array.byteOffset, array.byteLength);
+    for (const value of bytes) byte(value);
+  }
+  return `fnv1a32:${(hash >>> 0).toString(16).padStart(8, "0")}`;
+};
+
+export const computeBakedTreeTopologySignature = (tree: Pick<BakedTree, "branches" | "leaves" | "topology">): string =>
+  bakeSignature(tree.topology.stems, tree.topology.leaves, tree.branches, tree.leaves);
+
+const boundsForSoups = (branches: Soup, leaves: Soup) => {
+  const min = new THREE.Vector3(Infinity, Infinity, Infinity);
+  const max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+  for (const positions of [branches.positions, leaves.positions]) {
+    for (let index = 0; index < positions.length; index += 3) {
+      min.x = Math.min(min.x, positions[index]!);
+      min.y = Math.min(min.y, positions[index + 1]!);
+      min.z = Math.min(min.z, positions[index + 2]!);
+      max.x = Math.max(max.x, positions[index]!);
+      max.y = Math.max(max.y, positions[index + 1]!);
+      max.z = Math.max(max.z, positions[index + 2]!);
+    }
+  }
+  if (!Number.isFinite(min.x)) {
+    min.set(0, 0, 0);
+    max.set(0, 0, 0);
+  }
+  return { min, max };
+};
+
+const copySoupRanges = <T extends BakedGeometryRange>(
+  soup: Soup,
+  ranges: readonly T[],
+): { soup: Soup; ranges: Array<T & BakedGeometryRange> } => {
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const indices: number[] = [];
+  const copied: Array<T & BakedGeometryRange> = [];
+  const rangeOrder = (left: BakedGeometryRange, right: BakedGeometryRange) =>
+    left.indexStart - right.indexStart ||
+    left.vertexStart - right.vertexStart ||
+    Number(right.indexCount === 0) - Number(left.indexCount === 0);
+  for (const range of [...ranges].sort(rangeOrder)) {
+    const vertexStart = positions.length / 3;
+    const indexStart = indices.length;
+    const vertexEnd = range.vertexStart + range.vertexCount;
+    const indexEnd = range.indexStart + range.indexCount;
+    if (range.vertexStart < 0 || vertexEnd > soup.positions.length / 3 || range.indexStart < 0 || indexEnd > soup.indices.length) {
+      throw new Error("baked geometry range exceeds its source soup");
+    }
+    for (let vertex = range.vertexStart; vertex < vertexEnd; vertex++) {
+      const offset = vertex * 3;
+      positions.push(soup.positions[offset]!, soup.positions[offset + 1]!, soup.positions[offset + 2]!);
+      normals.push(soup.normals[offset]!, soup.normals[offset + 1]!, soup.normals[offset + 2]!);
+    }
+    for (let index = range.indexStart; index < indexEnd; index++) {
+      const sourceIndex = soup.indices[index]!;
+      if (sourceIndex < range.vertexStart || sourceIndex >= vertexEnd) {
+        throw new Error("baked geometry range contains an out-of-range vertex reference");
+      }
+      indices.push(vertexStart + sourceIndex - range.vertexStart);
+    }
+    copied.push({ ...range, vertexStart, indexStart });
+  }
+  return {
+    soup: {
+      positions: new Float32Array(positions),
+      normals: new Float32Array(normals),
+      indices: new Uint32Array(indices),
+    },
+    ranges: copied,
+  };
+};
+
+/** Rebuild exact baked buffers from retained stable source identities. */
+export const filterBakedTreeGeometry = (
+  source: BakedTree,
+  retainedStemIndices: ReadonlySet<number>,
+  retainedLeafIndices: ReadonlySet<number>,
+): BakedTree => {
+  const retainedStems = source.topology.stems.filter((stem) => retainedStemIndices.has(stem.stemIndex));
+  const branchCopy = copySoupRanges(source.branches, retainedStems.filter((stem) => stem.baked));
+  const copiedStemByIndex = new Map(branchCopy.ranges.map((stem) => [stem.stemIndex, stem]));
+  const stems: BakedStemRange[] = retainedStems.map((stem) => {
+    const copied = copiedStemByIndex.get(stem.stemIndex);
+    const copiedRange = copied
+      ? {
+          vertexStart: copied.vertexStart,
+          vertexCount: copied.vertexCount,
+          indexStart: copied.indexStart,
+          indexCount: copied.indexCount,
+        }
+      : { vertexStart: 0, vertexCount: 0, indexStart: 0, indexCount: 0 };
+    return {
+      ...stem,
+      parentStemIndex: stem.parentStemIndex !== null && retainedStemIndices.has(stem.parentStemIndex)
+        ? stem.parentStemIndex
+        : null,
+      childStemIndices: stem.childStemIndices.filter((child) => retainedStemIndices.has(child)),
+      ...copiedRange,
+    };
+  });
+  const leafCopy = copySoupRanges(
+    source.leaves,
+    source.topology.leaves.filter((leaf) => retainedLeafIndices.has(leaf.leafIndex)),
+  );
+  const leaves = leafCopy.ranges as BakedLeafRange[];
+  const bounds = boundsForSoups(branchCopy.soup, leafCopy.soup);
+  const topology: BakedTreeTopology = { signature: "", stems, leaves };
+  const result: BakedTree = { branches: branchCopy.soup, leaves: leafCopy.soup, ...bounds, topology };
+  topology.signature = computeBakedTreeTopologySignature(result);
+  return result;
+};
+
 // ── Public bake ─────────────────────────────────────────────────────────────
 
 /**
@@ -314,17 +486,36 @@ export function bakeTree(tree: TreeData, options: BakeOptions = {}): BakedTree {
   }
   const branchAcc: Accum = { positions: [], normals: [], indices: [] };
   const samples = Math.max(1, Math.floor(opts.branchSamples));
+  const bakedStemIndices = new Set(stems.map((stem) => stem.index));
+  const stemRanges = new Map<number, BakedGeometryRange>();
   for (const stem of stems) {
+    const vertexStart = branchAcc.positions.length / 3;
+    const indexStart = branchAcc.indices.length;
     const radial = calcRadialSegments(stem, opts.radialSegments);
     bakeStem(stem, radial, samples, opts.branchCaps, branchAcc);
+    stemRanges.set(stem.index, {
+      vertexStart,
+      vertexCount: branchAcc.positions.length / 3 - vertexStart,
+      indexStart,
+      indexCount: branchAcc.indices.length - indexStart,
+    });
   }
+  const bakedStems: BakedStemRange[] = tree.stems.map((stem) => ({
+    stemIndex: stem.index,
+    depth: stem.depth,
+    parentStemIndex: stem.parentIndex,
+    childStemIndices: stem.childIndices.slice(),
+    baked: bakedStemIndices.has(stem.index),
+    ...(stemRanges.get(stem.index) ?? { vertexStart: 0, vertexCount: 0, indexStart: 0, indexCount: 0 }),
+  }));
 
   // ── leaves ──
   const leafAcc: Accum = { positions: [], normals: [], indices: [] };
-  let leaves: LeafData[] = tree.leaves;
+  const leafRanges: BakedLeafRange[] = [];
+  let leaves: Array<{ leaf: LeafData; sourceIndex: number }> = tree.leaves.map((leaf, sourceIndex) => ({ leaf, sourceIndex }));
   if (leaves.length > opts.maxLeaves) {
     const step = leaves.length / opts.maxLeaves;
-    const sampled: LeafData[] = [];
+    const sampled: typeof leaves = [];
     for (let i = 0; i < opts.maxLeaves; i++) {
       sampled.push(leaves[Math.floor(i * step)]!);
     }
@@ -348,12 +539,26 @@ export function bakeTree(tree: TreeData, options: BakeOptions = {}): BakedTree {
       (params.blossomScale || params.leafScale) * blossomScaleMultiplier,
       1,
     );
-    for (const leaf of leaves) {
+    for (let outputIndex = 0; outputIndex < leaves.length; outputIndex++) {
+      const { leaf, sourceIndex } = leaves[outputIndex]!;
+      const vertexStart = leafAcc.positions.length / 3;
+      const indexStart = leafAcc.indices.length;
       if (leaf.isBlossom) {
         bakeLeaf(leaf, blossomVerts, blossomShape.faces, leafAcc);
       } else {
         bakeLeaf(leaf, leafVerts, leafShape.faces, leafAcc);
       }
+      leafRanges.push({
+        leafIndex: sourceIndex,
+        attachmentId: `weber-penn:leaf-site:${outputIndex}`,
+        parentStemIndex: leaf.parentStemIndex,
+        parentAxialT: leaf.parentAxialT,
+        isBlossom: leaf.isBlossom,
+        vertexStart,
+        vertexCount: leafAcc.positions.length / 3 - vertexStart,
+        indexStart,
+        indexCount: leafAcc.indices.length - indexStart,
+      });
     }
   }
 
@@ -361,27 +566,12 @@ export function bakeTree(tree: TreeData, options: BakeOptions = {}): BakedTree {
   const leafSoup = leafAcc.positions.length ? toSoup(leafAcc) : emptySoup();
 
   // ── bounds ──
-  const min = new THREE.Vector3(Infinity, Infinity, Infinity);
-  const max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
-  const acc = (p: Float32Array) => {
-    for (let i = 0; i < p.length; i += 3) {
-      const x = p[i]!;
-      const y = p[i + 1]!;
-      const z = p[i + 2]!;
-      if (x < min.x) min.x = x;
-      if (y < min.y) min.y = y;
-      if (z < min.z) min.z = z;
-      if (x > max.x) max.x = x;
-      if (y > max.y) max.y = y;
-      if (z > max.z) max.z = z;
-    }
-  };
-  acc(branches.positions);
-  acc(leafSoup.positions);
-  if (!Number.isFinite(min.x)) {
-    min.set(0, 0, 0);
-    max.set(0, 0, 0);
-  }
+  const { min, max } = boundsForSoups(branches, leafSoup);
 
-  return { branches, leaves: leafSoup, min, max };
+  const topology: BakedTreeTopology = {
+    signature: bakeSignature(bakedStems, leafRanges, branches, leafSoup),
+    stems: bakedStems,
+    leaves: leafRanges,
+  };
+  return { branches, leaves: leafSoup, min, max, topology };
 }

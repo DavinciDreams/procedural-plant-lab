@@ -67,6 +67,7 @@ export class Stem {
     }));
 
     return {
+      index: this.index,
       depth: this.depth,
       points,
       parentIndex: this.parent?.index ?? null,

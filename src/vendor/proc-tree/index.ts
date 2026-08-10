@@ -11,9 +11,16 @@ import { bakeTree, type BakedTree } from "./bake";
 import { PRESETS } from "./presets";
 import type { TreeParams, BakeOptions, TreeData } from "./types";
 
-export type { BakedTree, Soup } from "./bake";
-export { bakeTree } from "./bake";
-export type { TreeParams, BakeOptions, TreeData } from "./types";
+export type {
+  BakedGeometryRange,
+  BakedLeafRange,
+  BakedStemRange,
+  BakedTree,
+  BakedTreeTopology,
+  Soup,
+} from "./bake";
+export { bakeTree, computeBakedTreeTopologySignature, filterBakedTreeGeometry } from "./bake";
+export type { TreeParams, BakeOptions, LeafData, StemData, TreeData } from "./types";
 export { PRESETS } from "./presets";
 
 /** Canonical species id -> preset params (the 19 Weber & Penn species). */

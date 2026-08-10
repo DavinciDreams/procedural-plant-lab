@@ -135,6 +135,8 @@ export type StemPoint = {
 };
 
 export type StemData = {
+  /** Stable index in TreeData.stems for this generated tree. */
+  index: number;
   depth: number;
   points: StemPoint[];
   parentIndex: number | null;
@@ -147,6 +149,14 @@ export type StemData = {
 };
 
 export type LeafData = {
+  /** Stable index in TreeData.leaves for this generated tree. */
+  index: number;
+  /** Stem that owns this native leaf card. */
+  parentStemIndex: number;
+  /** Distance from the owning stem base in generator units. */
+  parentOffset: number;
+  /** Normalized position along the owning stem. */
+  parentAxialT: number;
   position: THREE.Vector3;
   direction: THREE.Vector3;
   right: THREE.Vector3;
