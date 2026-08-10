@@ -51,6 +51,7 @@ export * from "./procplant-resource-growth";
 export * from "./procplant-scatter";
 export * from "./procplant-cli";
 export * from "./procplant-space-colonization";
+export * from "./procplant-spline-crown";
 export * from "./procplant-spatial-force";
 export * from "./procplant-tube";
 export * from "./procplant-usd-export";

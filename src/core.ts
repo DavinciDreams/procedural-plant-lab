@@ -29,6 +29,7 @@ export {
   buildProcPlantRuntimePackage,
 } from "./procplants";
 export * from "./procplant-chain-tube-overrides";
+export * from "./procplant-spline-crown";
 export * from "./plant-readiness";
 export * from "./plant-variants";
 export * from "./procplant-organ-variants";
