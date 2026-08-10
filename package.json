@@ -120,6 +120,7 @@
     "test:colonized-preset": "node scripts/run-colonized-preset-tests.mjs",
     "test:groundcover-varieties": "node scripts/run-groundcover-variety-tests.mjs",
     "test:tree-varieties": "node scripts/run-tree-variety-tests.mjs",
+    "test:conifer-visual-browser": "node scripts/run-conifer-visual-browser-smoke.mjs",
     "test:tellus-contract": "node scripts/run-tellus-contract-fixture.mjs",
     "test:browser-smoke": "node scripts/run-browser-ui-smoke.mjs",
     "test:chain-tube-browser-smoke": "node scripts/run-chain-tube-browser-smoke.mjs",
