@@ -1,5 +1,8 @@
 import * as THREE from "three";
 import {
+  addGuidedVineProcPlantFoliage,
+  addGuidedVineProcPlantReproductiveOrgans,
+  buildGuidedVineProcPlantArchitectureGraph,
   buildProcPlantGraphIr,
   buildProcPlantTemplate,
   buildProcPlantTemplateFromGraph,
@@ -229,11 +232,10 @@ const assertSupportedBackend = (genome: ProcPlantGenome) => {
     genome.weberPenn && "weber-penn",
     genome.branchModules && "branch-module-graph",
     genome.spaceColonization && "space-colonization",
-    genome.vine && "guided-vine",
     genome.grass && "grass-specialization",
     genome.fern && "fern-specialization",
     genome.groundcover && "groundcover-specialization",
-    genome.moss && "moss-specialization",
+    genome.moss && !genome.vine && "moss-specialization",
     genome.clump && "clump-specialization",
   ].filter(Boolean);
   if (unsupported.length > 0) {
@@ -286,7 +288,8 @@ const validateProductionNodeParameters = (node: ProcPlantGeneratorNode, genome: 
     if (parameters.genomeId !== genome.id || parameters.habit !== genome.habit) {
       throw new ProcPlantProductionDagError(`${node.id}.parameters must preserve source genome identity`);
     }
-    if (parameters.backend !== "procplant-graph") {
+    const expectedBackend = genome.vine ? "guided-vine" : "procplant-graph";
+    if (parameters.backend !== expectedBackend) {
       throw new ProcPlantProductionDagError(`${node.id}.parameters.backend is unsupported by the typed graph backend`);
     }
   } else if (node.stage === "architecture") {
@@ -297,7 +300,8 @@ const validateProductionNodeParameters = (node: ProcPlantGeneratorNode, genome: 
     }
     if ((node.count ?? 0) < 1) throw new ProcPlantProductionDagError(`${node.id}.count must be at least one`);
   } else if (node.stage === "branching") {
-    if (parameters.backend !== "procplant-graph") {
+    const expectedBackend = genome.vine ? "guided-vine" : "procplant-graph";
+    if (parameters.backend !== expectedBackend) {
       throw new ProcPlantProductionDagError(`${node.id}.parameters.backend is unsupported by the typed graph backend`);
     }
     const angle = parameters.angle;
@@ -339,6 +343,65 @@ const validateProductionNodeParameters = (node: ProcPlantGeneratorNode, genome: 
   } else if (node.stage === "output") {
     if (!Number.isInteger(parameters.generatorContractRevision) || Number(parameters.generatorContractRevision) < 1) {
       throw new ProcPlantProductionDagError(`${node.id}.parameters.generatorContractRevision must be a positive integer`);
+    }
+  }
+};
+
+const validateGuidedVineGraphSemantics = (
+  graph: ProcPlantGeneratorGraph,
+  canonical: ProcPlantGeneratorGraph,
+) => {
+  const canonicalById = new Map(canonical.nodes.map((node) => [node.id, node]));
+  if (graph.nodes.length !== canonical.nodes.length || graph.nodes.some((node) => !canonicalById.has(node.id))) {
+    throw new ProcPlantProductionDagError("guided-vine adapter requires the canonical nine-stage node set");
+  }
+  const exact = (left: unknown, right: unknown) => stableJson(left) === stableJson(right);
+  for (const node of graph.nodes) {
+    const expected = canonicalById.get(node.id)!;
+    if (node.stage !== expected.stage || node.enabled !== expected.enabled) {
+      throw new ProcPlantProductionDagError(`${node.id} guided-vine stage/enabled state cannot be projected`);
+    }
+    if (!exact([...node.dependsOn].sort(), [...expected.dependsOn].sort())) {
+      throw new ProcPlantProductionDagError(`${node.id} guided-vine dependency rewire cannot be projected`);
+    }
+    if (!exact(node.placement, expected.placement)) {
+      throw new ProcPlantProductionDagError(`${node.id} guided-vine placement cannot be projected`);
+    }
+    if (!exact(node.parentScope, expected.parentScope)) {
+      throw new ProcPlantProductionDagError(`${node.id} guided-vine parent scope cannot be projected`);
+    }
+    if (node.seedOverride !== undefined && (!node.enabled || (node.stage !== "foliage" && node.stage !== "reproductive"))) {
+      throw new ProcPlantProductionDagError(`${node.id} has no independently seeded guided-vine operation`);
+    }
+    if (node.stage === "architecture") {
+      if (!Number.isInteger(node.count) || Number(node.count) < 2 || Number(node.count) > 96) {
+        throw new ProcPlantProductionDagError(`${node.id}.count must be an integer in 2..96`);
+      }
+      if (!exact(node.curve, expected.curve) || !exact(node.parameters, expected.parameters)) {
+        throw new ProcPlantProductionDagError(
+          `${node.id} static guide/support and collision inputs are immutable in the guided-vine adapter`,
+        );
+      }
+    } else if (node.stage === "foliage") {
+      if (!Number.isInteger(node.count) || Number(node.count) < 0 || Number(node.count) > PROCPLANT_PRODUCTION_DAG_MAX_GRAPH_ORGANS) {
+        throw new ProcPlantProductionDagError(`${node.id}.count must be an integer in 0..${PROCPLANT_PRODUCTION_DAG_MAX_GRAPH_ORGANS}`);
+      }
+      if (node.parameters?.foliageKind !== expected.parameters?.foliageKind) {
+        throw new ProcPlantProductionDagError(`${node.id}.parameters.foliageKind is immutable for the guided-vine backend`);
+      }
+    } else if (node.stage === "reproductive") {
+      if (!Number.isInteger(node.count) || Number(node.count) < 0 || Number(node.count) > PROCPLANT_PRODUCTION_DAG_MAX_GRAPH_ORGANS) {
+        throw new ProcPlantProductionDagError(`${node.id}.count must be an integer in 0..${PROCPLANT_PRODUCTION_DAG_MAX_GRAPH_ORGANS}`);
+      }
+      if (!exact(node.curve, expected.curve) || !exact(node.parameters, expected.parameters)) {
+        throw new ProcPlantProductionDagError(`${node.id} guided-vine reproductive gene kinds are immutable`);
+      }
+    } else if (node.stage === "deformation" || node.stage === "material" || node.stage === "lod") {
+      if (!exact(node.count, expected.count) || !exact(node.curve, expected.curve)) {
+        throw new ProcPlantProductionDagError(`${node.id} guided-vine stage count/curve cannot be projected`);
+      }
+    } else if (!exact(node.count, expected.count) || !exact(node.curve, expected.curve) || !exact(node.parameters, expected.parameters)) {
+      throw new ProcPlantProductionDagError(`${node.id} guided-vine stage controls cannot be projected`);
     }
   }
 };
@@ -422,6 +485,19 @@ const graphArtifacts = (node: ProcPlantGeneratorNode, dependencies: readonly Pro
   );
   if (artifacts.length < 1) throw new ProcPlantProductionDagError(`${node.id} requires at least one graph artifact input`);
   return artifacts;
+};
+
+const guidedVineTerminalGraphArtifact = (
+  node: ProcPlantGeneratorNode,
+  dependencies: readonly ProcPlantProductionStageArtifact[],
+) => {
+  const inputs = graphArtifacts(node, dependencies);
+  const foliage = inputs.filter((entry) => entry.stage === "foliage");
+  const reproductive = inputs.filter((entry) => entry.stage === "reproductive");
+  if (foliage.length !== 1 || reproductive.length > 1) {
+    throw new ProcPlantProductionDagError(`${node.id} requires one guided-vine foliage artifact and at most one reproductive artifact`);
+  }
+  return reproductive[0] ?? foliage[0]!;
 };
 
 const mergeGraphArtifacts = (artifacts: readonly ProcPlantGraphStageArtifact[]) => {
@@ -653,6 +729,7 @@ export const compileProcPlantProductionDag = (
     };
   }
 
+  if (genome.vine) validateGuidedVineGraphSemantics(graph, canonical);
   assertSupportedBackend(genome);
   const maximumWork = options.maxWork ?? PROCPLANT_PRODUCTION_DAG_MAX_WORK;
   if (!Number.isInteger(maximumWork) || maximumWork < 1 || maximumWork > PROCPLANT_PRODUCTION_DAG_MAX_WORK) {
@@ -701,7 +778,9 @@ export const compileProcPlantProductionDag = (
         apicalDominance: Number(node.parameters?.apicalDominance ?? source.genome.apicalDominance),
         phyllotaxisAngle: Number(node.parameters?.phyllotaxisAngle ?? source.genome.phyllotaxisAngle),
       };
-      const builtGraph = createArchitectureGraph(architectureGenome, source.environment, node, seed);
+      const builtGraph = architectureGenome.vine
+        ? buildGuidedVineProcPlantArchitectureGraph(architectureGenome, node.count)
+        : createArchitectureGraph(architectureGenome, source.environment, node, seed);
       artifact = withArtifactHash({
         kind: "graph", stage: "architecture", nodeId, seed, lineage: lineageFor(node, sources),
         genome: architectureGenome, environment: source.environment, graph: builtGraph,
@@ -720,44 +799,59 @@ export const compileProcPlantProductionDag = (
       const base = mergeGraphArtifacts(inputs);
       const foliageGenome: ProcPlantGenome = {
         ...inputs[0]!.genome,
-        leaf: { ...inputs[0]!.genome.leaf, shape: node.parameters?.shape as ProcPlantGenome["leaf"]["shape"] },
+        leaf: {
+          ...inputs[0]!.genome.leaf,
+          shape: node.parameters?.shape as ProcPlantGenome["leaf"]["shape"],
+          ...(inputs[0]!.genome.vine && node.curve ? { length: { ...node.curve } } : {}),
+        },
         phyllotaxy: {
           ...(inputs[0]!.genome.phyllotaxy ?? { mode: "spiral" as const }),
           mode: node.parameters?.phyllotaxy as NonNullable<ProcPlantGenome["phyllotaxy"]>["mode"],
         },
       };
+      const foliageGraph = foliageGenome.vine
+        ? addGuidedVineProcPlantFoliage(foliageGenome, base, seed, node.count)
+        : addFoliage(base, foliageGenome, node, seed);
       artifact = withArtifactHash({
         kind: "graph", stage: "foliage", nodeId, seed, lineage: lineageFor(node, inputs),
         genome: foliageGenome, environment: inputs[0]!.environment,
-        graph: addFoliage(base, foliageGenome, node, seed), runtime: inputs[0]!.runtime,
+        graph: foliageGraph, runtime: inputs[0]!.runtime,
       });
     } else if (node.stage === "reproductive") {
       const inputs = graphArtifacts(node, dependencies);
       const base = mergeGraphArtifacts(inputs);
+      const reproductiveGraph = inputs[0]!.genome.vine
+        ? addGuidedVineProcPlantReproductiveOrgans(inputs[0]!.genome, base, seed, node.count)
+        : addReproductiveOrgans(base, inputs[0]!.genome, node, seed);
       artifact = withArtifactHash({
         kind: "graph", stage: "reproductive", nodeId, seed, lineage: lineageFor(node, inputs),
         genome: inputs[0]!.genome, environment: inputs[0]!.environment,
-        graph: addReproductiveOrgans(base, inputs[0]!.genome, node, seed), runtime: inputs[0]!.runtime,
+        graph: reproductiveGraph, runtime: inputs[0]!.runtime,
       });
     } else if (node.stage === "deformation") {
       const inputs = graphArtifacts(node, dependencies);
-      const base = mergeGraphArtifacts(inputs);
+      const terminal = genome.vine ? guidedVineTerminalGraphArtifact(node, dependencies) : null;
+      const base = terminal ? cloneGraph(terminal.graph) : mergeGraphArtifacts(inputs);
       artifact = withArtifactHash({
         kind: "graph", stage: "deformation", nodeId, seed, lineage: lineageFor(node, inputs),
-        genome: inputs[0]!.genome, environment: inputs[0]!.environment, graph: base,
+        genome: terminal?.genome ?? inputs[0]!.genome,
+        environment: terminal?.environment ?? inputs[0]!.environment,
+        graph: base,
         runtime: {
-          windFlex: Number(node.parameters?.windFlex ?? inputs[0]!.runtime.windFlex),
-          phototropism: Number(node.parameters?.phototropism ?? inputs[0]!.runtime.phototropism),
+          windFlex: Number(node.parameters?.windFlex ?? terminal?.runtime.windFlex ?? inputs[0]!.runtime.windFlex),
+          phototropism: Number(node.parameters?.phototropism ?? terminal?.runtime.phototropism ?? inputs[0]!.runtime.phototropism),
         },
       });
     } else if (node.stage === "material") {
       const inputs = graphArtifacts(node, dependencies);
-      const base = mergeGraphArtifacts(inputs);
-      const materialGenome = cloneGenomeForMaterial(inputs[0]!.genome, node);
-      const build = buildProcPlantTemplateFromGraph(materialGenome, base, inputs[0]!.environment);
+      const terminal = genome.vine ? guidedVineTerminalGraphArtifact(node, dependencies) : null;
+      const base = terminal ? cloneGraph(terminal.graph) : mergeGraphArtifacts(inputs);
+      const materialGenome = cloneGenomeForMaterial(terminal?.genome ?? inputs[0]!.genome, node);
+      const materialEnvironment = terminal?.environment ?? inputs[0]!.environment;
+      const build = buildProcPlantTemplateFromGraph(materialGenome, base, materialEnvironment);
       artifact = withArtifactHash({
         kind: "material", stage: "material", nodeId, seed, lineage: lineageFor(node, inputs),
-        genome: materialGenome, environment: inputs[0]!.environment, graph: build.graph,
+        genome: materialGenome, environment: materialEnvironment, graph: build.graph,
         template: build.template, stats: build.stats,
       });
     } else if (node.stage === "lod") {

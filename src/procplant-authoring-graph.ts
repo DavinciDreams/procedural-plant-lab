@@ -18,6 +18,34 @@ import {
 
 const curveMean = (curve: { base: number; tip: number }) => (curve.base + curve.tip) * 0.5;
 
+const guidedVineFoliageCapacity = (genome: ProcPlantGenome) => {
+  if (!genome.vine) return null;
+  const every = Math.max(1, Math.round(genome.vine.leafEvery ?? 1));
+  const sites = Math.floor(Math.max(2, Math.min(96, Math.round(genome.nodeCount))) / every);
+  const perSite = genome.moss
+    ? Math.max(1, Math.min(4, Math.round(genome.moss.tuftsPerClump)))
+    : genome.phyllotaxy?.mode === "opposite" || genome.phyllotaxy?.mode === "decussate"
+      ? 2
+      : genome.phyllotaxy?.mode === "whorled"
+        ? Math.max(2, Math.min(12, Math.round(genome.phyllotaxy.whorlCount ?? 3)))
+        : 1;
+  return sites * perSite;
+};
+
+const guidedVineReproductiveCapacity = (genome: ProcPlantGenome) => {
+  if (!genome.vine) return null;
+  const flowerEvery = Math.max(0, Math.round(genome.vine.flowerEvery ?? 0));
+  const flowerStartT = Math.max(0, Math.min(1, genome.vine.flowerStartT ?? 0.45));
+  let flowers = 0;
+  if (genome.flower && flowerEvery > 0) {
+    const count = Math.max(2, Math.min(96, Math.round(genome.nodeCount)));
+    for (let index = 1; index <= count; index++) {
+      if (index / count >= flowerStartT && index % flowerEvery === 0) flowers++;
+    }
+  }
+  return flowers + (genome.accessoryOrgans ?? []).reduce((sum, organ) => sum + Math.max(0, Math.min(32, Math.round(organ.count))), 0);
+};
+
 export const createProcPlantAuthoringGraph = (
   genome: ProcPlantGenome,
   seed = 1,
@@ -34,13 +62,16 @@ export const createProcPlantAuthoringGraph = (
     lod: createProcPlantGeneratorNodeId("lod", "Runtime LODs", namespace),
     output: createProcPlantGeneratorNodeId("output", "Runtime package", namespace),
   };
-  const branchCount = genome.weberPenn?.maxStems
+  const branchCount = genome.vine
+    ? 0
+    : genome.weberPenn?.maxStems
     ?? genome.branchModules?.moduleBudget
     ?? Math.max(1, Math.round(genome.nodeCount * curveMean(genome.branchChance)));
-  const foliageCount = genome.weberPenn?.maxLeaves
+  const foliageCount = guidedVineFoliageCapacity(genome)
+    ?? genome.weberPenn?.maxLeaves
     ?? Math.max(1, Math.round(genome.nodeCount * curveMean(genome.leaf.density)));
-  const reproductiveCount = (genome.flower?.petals ?? 0)
-    + (genome.accessoryOrgans ?? []).reduce((sum, organ) => sum + organ.count, 0);
+  const reproductiveCount = guidedVineReproductiveCapacity(genome)
+    ?? (genome.flower?.petals ?? 0) + (genome.accessoryOrgans ?? []).reduce((sum, organ) => sum + organ.count, 0);
   const backend = genome.weberPenn
     ? "weber-penn"
     : genome.branchModules
@@ -95,13 +126,15 @@ export const createProcPlantAuthoringGraph = (
       label: "Foliage organs",
       stage: "foliage",
       enabled: foliageCount > 0,
-      dependsOn: [ids.architecture, ids.branching],
+      dependsOn: genome.vine ? [ids.architecture] : [ids.architecture, ids.branching],
       count: foliageCount,
       placement: {
         mode: genome.weberPenn || genome.branchModules ? "tips" : "nodes",
         density: curveMean(genome.leaf.density),
       },
-      parentScope: { mode: "stages", stages: ["architecture", "branching"] },
+      parentScope: genome.vine
+        ? { mode: "stages", stages: ["architecture"] }
+        : { mode: "stages", stages: ["architecture", "branching"] },
       curve: { ...genome.leaf.length },
       parameters: {
         shape: genome.leaf.shape,
@@ -120,10 +153,12 @@ export const createProcPlantAuthoringGraph = (
       label: "Flowers and accessories",
       stage: "reproductive",
       enabled: reproductiveCount > 0,
-      dependsOn: [ids.architecture, ids.branching],
+      dependsOn: genome.vine ? [ids.foliage] : [ids.architecture, ids.branching],
       count: reproductiveCount,
       placement: { mode: "tips", density: genome.groundcover?.flowerRate ?? 1 },
-      parentScope: { mode: "stages", stages: ["architecture", "branching"] },
+      parentScope: genome.vine
+        ? { mode: "stages", stages: ["foliage"] }
+        : { mode: "stages", stages: ["architecture", "branching"] },
       parameters: {
         flower: Boolean(genome.flower),
         accessories: (genome.accessoryOrgans ?? []).map((organ) => organ.kind),
@@ -134,7 +169,9 @@ export const createProcPlantAuthoringGraph = (
       label: "Environment and wind",
       stage: "deformation",
       enabled: true,
-      dependsOn: [ids.architecture, ids.branching, ids.foliage],
+      dependsOn: genome.vine
+        ? [ids.foliage, ids.reproductive]
+        : [ids.architecture, ids.branching, ids.foliage],
       count: 1,
       parentScope: { mode: "all" },
       parameters: {
@@ -507,8 +544,8 @@ const AUTHORING_DEPENDENCY_STAGES: Record<ProcPlantGeneratorNode["stage"], Reado
   architecture: new Set(["source"]),
   branching: new Set(["source", "architecture"]),
   foliage: new Set(["source", "architecture", "branching"]),
-  reproductive: new Set(["source", "architecture", "branching"]),
-  deformation: new Set(["source", "architecture", "branching", "foliage"]),
+  reproductive: new Set(["source", "architecture", "branching", "foliage"]),
+  deformation: new Set(["source", "architecture", "branching", "foliage", "reproductive"]),
   material: new Set(["source", "foliage", "reproductive"]),
   lod: new Set(["deformation", "material"]),
   output: new Set(["lod"]),
@@ -876,7 +913,9 @@ export const applyProcPlantAuthoringGraphToGenome = (
       if (node.enabled) {
         executionChanged = true;
         recordFor(applied, node, "seed-override", expected.seedOverride, node.seedOverride,
-          "Projected deterministically into the generator's single global seed; true per-stage RNG streams are not exposed by the monolithic compiler.");
+          source.vine && (node.stage === "foliage" || node.stage === "reproductive")
+            ? "Consumed as an independent guided-vine organ-placement stream by the production DAG."
+            : "Projected deterministically into the generator's single global seed; true per-stage RNG streams are not exposed by the monolithic compiler.");
       } else {
         recordFor(unsupported, node, "seed-override", expected.seedOverride, node.seedOverride, "Disabled stages do not execute or consume a seed override.");
       }
