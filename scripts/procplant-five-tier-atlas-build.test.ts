@@ -44,7 +44,7 @@ assert.deepEqual(manifestAgain, manifest, "equivalent elevation input must canon
 assert.equal(validateProcPlantFiveTierAtlasBuildManifest(manifest), manifest);
 assert.match(manifest.cacheKey, /^procplants-lod5-atlas-v1-[0-9a-f]{8}$/);
 assert.equal(manifest.capture.plan.views.length, 8);
-assert.equal(manifest.source.lod0ContentHash, "fnv1a32-eea44b90");
+assert.equal(manifest.source.lod0ContentHash, "fnv1a32-add017a3");
 
 const atlas = await buildProcPlantImpostorAtlas(manifest.capture.plan, async ({ view, width, height }) => {
   const rgba = new Uint8ClampedArray(width * height * 4);

@@ -6045,107 +6045,24 @@ exportGlbButton.addEventListener("click", async () => {
   setSaveStatus("Preparing GLB with vertex color, sway, tintability, and contract metadata…");
   const activeLod = heroLodState.controller.active;
   try {
-    const exportOptions = {
+    const authoring = await loadProcPlantAuthoringTools();
+    const exported = await (await import("./procplant-lab-glb-export")).exportProcPlantLabGeneratedGlb({
+      authoring,
+      activeLod,
       name: `${state.primary}-${state.seed}-lod${activeLod.level}`,
       genomeId: selectedGenome().id,
+      habit: selectedGenome().habit,
       seed: selectedGeneratorSeed(),
-      ...(materialBakeBundle ? { material: { tangents: true } } : {}),
-      collision: {
-        type: ["tree", "conifer", "palm"].includes(selectedGenome().habit)
-          ? "trunk-capsule"
-          : "bounds-box",
-      },
-      metadata: {
-        lodLevel: activeLod.level,
-        lodLabel: activeLod.label,
-        lodDistance: activeLod.distance,
-        previewScale: heroLodState.scale,
-        authoredTriangles: activeLod.triangles,
-        authoredVertices: activeLod.vertices,
-        ...(heroLodState.weberPennTrim?.trimAudit
-          ? {
-              weberPennTrimContract: "procplants.weber-penn-trim-overrides",
-              weberPennTrimStatus: heroLodState.weberPennTrim.trimAudit.status,
-              weberPennTrimSourceSignature: heroLodState.weberPennTrim.trimAudit.sourceTopologySignature,
-              weberPennTrimResultSignature: heroLodState.weberPennTrim.trimAudit.resultTopologySignature,
-              weberPennTrimOperations: heroLodState.weberPennTrim.trimAudit.operations.length,
-              weberPennTrimRemovedStems: heroLodState.weberPennTrim.trimAudit.removedStemIds.length,
-              weberPennTrimRemovedLeaves: heroLodState.weberPennTrim.trimAudit.removedLeafIds.length,
-            }
-          : {}),
-        ...(heroLodState.weberPennTrim?.placementAudit
-          ? {
-              weberPennOrganPlacementContract: "procplants.weber-penn-organ-placement-overrides",
-              weberPennOrganPlacementStatus: heroLodState.weberPennTrim.placementAudit.status,
-              weberPennOrganPlacementSignature: heroLodState.weberPennTrim.placementAudit.sourceTopologySignature,
-              weberPennOrganPlacementApplied: heroLodState.weberPennTrim.placementAudit.appliedOperationIds.length,
-            }
-          : {}),
-      },
-    } as const;
-    const authoring = await loadProcPlantAuthoringTools();
-    let glb: ArrayBuffer;
-    if (materialBakeBundle || exportableDecals) {
-      const prepared = authoring.prepareProcPlantGlbExport(activeLod.template, exportOptions);
-      const decalPrepared = exportableDecals
-        ? authoring.prepareProcPlantPlacementDecalGlbDraws(heroLodState.placementDecalRecords, livePlacementDecalPixelSource!)
-        : null;
-      if (decalPrepared) prepared.scene.add(decalPrepared.root);
-      try {
-        if (materialBakeBundle) {
-          const { exportProcPlantGlbWithBakedMaterials } = await import("./procplant-glb-material-binding");
-          const slotByMeshName: Record<string, string> = {};
-          const groupSlotsByMeshName: Record<string, readonly string[]> = {};
-          for (const mesh of prepared.meshes) {
-            const slots = mesh.userData.procplantSurfaces?.slots as string[] | undefined;
-            if (Array.isArray(mesh.material)) groupSlotsByMeshName[mesh.name] = ["bark", "leaf"];
-            else slotByMeshName[mesh.name] = slots?.[0] === "organ" ? "leaf" : "bark";
-          }
-          app.dataset.lastGlbSurfaceGroups = String(prepared.meshes.reduce(
-            (sum, mesh) => sum + (Array.isArray(mesh.material) ? mesh.geometry.groups.length : 1),
-            0,
-          ));
-          const bound = await exportProcPlantGlbWithBakedMaterials(
-            { scene: prepared.scene, meshes: prepared.meshes },
-            materialBakeBundle,
-            { slotByMeshName, groupSlotsByMeshName },
-          );
-          glb = bound.bytes;
-          app.dataset.lastGlbMaterialHash = bound.contentHash;
-          app.dataset.lastGlbMaterialAssignments = String(bound.assignments.length);
-        } else {
-          glb = await authoring.exportProcPlantScenesGlb(prepared.scene);
-        }
-        if (decalPrepared && livePlacementDecalPixelSource) {
-          const adopted = await authoring.bindProcPlantPlacementDecalsIntoGlb(
-            glb,
-            decalPrepared,
-            livePlacementDecalPixelSource,
-          );
-          glb = adopted.bytes;
-          app.dataset.lastGlbPlacementDecals = String(adopted.draws);
-          app.dataset.lastGlbPlacementDecalTriangles = String(adopted.triangles);
-          app.dataset.lastGlbPlacementDecalHash = adopted.contentHash;
-          app.dataset.lastGlbPlacementDecalEmbeddedBytes = String(adopted.embeddedBytes);
-        }
-      } finally {
-        decalPrepared?.dispose();
-        authoring.disposePreparedProcPlantGlbExport(prepared);
-      }
-    } else {
-      glb = await authoring.exportProcPlantGlb(activeLod.template, exportOptions);
-    }
-    const url = URL.createObjectURL(new Blob([glb], { type: "model/gltf-binary" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `procplant-${state.primary}-${state.seed}-lod${activeLod.level}.glb`;
-    link.click();
-    URL.revokeObjectURL(url);
-    setSaveStatus(exportableDecals
-      ? `GLB exported from ${activeLod.label} geometry with ${authoredDecals} exact UV0 decal draw${authoredDecals === 1 ? "" : "s"} and a deterministic embedded PNG.`
-      : materialBakeBundle
-        ? `GLB exported from ${activeLod.label} geometry with separate embedded bark/leaf PBR primitives and tangents.`
-        : `GLB exported from ${activeLod.label} geometry with separate bark/organ surfaces.`);
+      previewScale: heroLodState.scale,
+      materialBakeBundle,
+      placementDecals: heroLodState.placementDecalRecords,
+      placementDecalPixelSource: exportableDecals ? livePlacementDecalPixelSource : null,
+      weberPenn: heroLodState.weberPennTrim,
+      authoredDecals,
+      downloadName: `procplant-${state.primary}-${state.seed}-lod${activeLod.level}.glb`,
+      dataset: app.dataset,
+    });
+    setSaveStatus(exported.message);
   } catch (error) {
     console.error("[procplants] GLB export failed.", error);
     setSaveStatus(`GLB export failed: ${error instanceof Error ? error.message : String(error)}`);

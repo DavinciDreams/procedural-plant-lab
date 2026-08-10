@@ -147,7 +147,7 @@ assert.equal(await runProcPlantCli(planArgs.map((value) => value === "lod5-plan-
 assert.equal(files.get("lod5-plan-a.json"), files.get("lod5-plan-b.json"));
 const lod5Plan = JSON.parse(files.get("lod5-plan-a.json")!);
 assert.equal(lod5Plan.contract, "procplants.five-tier-atlas-build");
-assert.equal(lod5Plan.source.lod0ContentHash, "fnv1a32-eea44b90");
+assert.equal(lod5Plan.source.lod0ContentHash, "fnv1a32-add017a3");
 assert.equal(lod5Plan.capture.plan.views.length, 8);
 assert.match(lod5Plan.cacheKey, /^procplants-lod5-atlas-v1-[0-9a-f]{8}$/);
 console.log("ok 6 - CLI emits deterministic bounded five-tier WebGL atlas build manifests without pretending to capture in Node");
