@@ -81,6 +81,19 @@ export const exportProcPlantLabImportedHeroDecalGlb = async (
   input: ProcPlantLabImportedHeroDecalGlbInput,
 ): Promise<{ allowed: boolean; message: string }> => {
   const authoredCount = input.authored?.operations.length ?? 0;
+  if (authoredCount === 0) {
+    delete input.dataset.lastGlbImportedHeroDecalsRejected;
+    const authoring = await import("./procplant-lab-authoring-imports");
+    const exported = await authoring.downloadProcPlantLabHeroPreview(input.preview.group, input.audit, input.contentHash);
+    input.dataset.heroImportLastExportBytes = String(exported.byteLength);
+    input.dataset.heroImportLastExportMaterials = String(exported.materials);
+    input.dataset.heroImportLastExportTextures = String(exported.textures);
+    input.dataset.heroImportLastExportImages = String(exported.images);
+    return {
+      allowed: true,
+      message: "Imported hero GLB exported with fitted spine, bark UV, wind, collars, and instanced branch, leaf, and accessory anchors.",
+    };
+  }
   let decals: ProcPlantMaterializedPlacementDecal[] = [];
   if (authoredCount > 0) {
     if (!input.preview.importedDecalTarget || !input.binding || input.binding.disposed || !input.pixels) {
@@ -108,9 +121,7 @@ export const exportProcPlantLabImportedHeroDecalGlb = async (
   }
   delete input.dataset.lastGlbImportedHeroDecalsRejected;
   const authoring = await import("./procplant-lab-authoring-imports");
-  const exported = decals.length > 0
-    ? await authoring.exportProcPlantLabHeroPreviewWithPlacementDecals(input.preview.group, input.audit, decals, input.pixels!)
-    : { bytes: await authoring.exportProcPlantLabHeroPreview(input.preview.group, input.audit), draws: 0, triangles: 0, embeddedBytes: 0 };
+  const exported = await authoring.exportProcPlantLabHeroPreviewWithPlacementDecals(input.preview.group, input.audit, decals, input.pixels!);
   const url = URL.createObjectURL(new Blob([exported.bytes], { type: "model/gltf-binary" }));
   const link = document.createElement("a");
   link.href = url;
@@ -123,9 +134,7 @@ export const exportProcPlantLabImportedHeroDecalGlb = async (
   input.dataset.lastGlbImportedHeroDecalEmbeddedBytes = String(exported.embeddedBytes);
   return {
     allowed: true,
-    message: decals.length > 0
-      ? `Imported hero GLB exported with ${decals.length} signature-bound UV0 decal draw${decals.length === 1 ? "" : "s"} and deterministic embedded PNG.`
-      : "Imported hero GLB exported with fitted spine, source material, and authored attachments.",
+    message: `Imported hero GLB exported with ${decals.length} signature-bound UV0 decal draw${decals.length === 1 ? "" : "s"} and deterministic embedded PNG.`,
   };
 };
 

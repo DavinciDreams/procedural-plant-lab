@@ -5795,8 +5795,17 @@ exportGlbButton.addEventListener("click", async () => {
     return;
   }
   if (heroImportModel) {
-    if (!heroImportDecalUi) await refreshHeroImportDecalDraws();
-    await heroImportDecalUi?.exportGlb();
+    if (heroImportModel.importedDecalTarget) {
+      if (!heroImportDecalUi) await refreshHeroImportDecalDraws();
+      await heroImportDecalUi?.exportGlb();
+      return;
+    }
+    setSaveStatus(await glbModule.exportProcPlantLabImportedGlb({
+      preview: heroImportModel.group,
+      audit: heroImportAudit,
+      contentHash: app.dataset.heroImportHash ?? String(state.seed),
+      dataset: app.dataset,
+    }));
     return;
   }
   const authoredDecals = currentPlacementPackage()?.operations.filter((operation) => operation.kind === "decal").length ?? 0;
