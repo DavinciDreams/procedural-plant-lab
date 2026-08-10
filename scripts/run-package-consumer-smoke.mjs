@@ -93,6 +93,7 @@ import {
 import {
   buildProcPlantGraph as buildProcPlantGraphFromFullEntry,
   fitProcPlantCrownMask,
+  fitProcPlantCrownVoxelMask,
   type ProcPlantGraph,
 } from "procplants";
 
@@ -105,12 +106,18 @@ const maskFit = fitProcPlantCrownMask({ width: 2, height: 2, alpha: Uint8Array.o
   bands: 2,
   bounds: { center: [0, 1, 0], dimensions: [2, 2, 1] },
 });
+const voxelFit = fitProcPlantCrownVoxelMask({ dimensions: [1, 2, 1], occupancy: Uint8Array.of(255, 255) }, {
+  center: [0, 1, 0],
+  voxelSize: [1, 1, 1],
+  lobes: 2,
+});
 
 if (PROCPLANT_GENERATOR_CONTRACT_REVISION !== 3) throw new Error("unexpected contract revision");
 if (PROCPLANT_SUPPORTED_INSTANCE_KINDS.length !== 20) throw new Error("unexpected kind registry");
 if (graph.organs.length !== fullGraph.organs.length) throw new Error("entrypoint graph drift");
 if (prototype.uv0.length !== prototype.pos.length / 3 * 2) throw new Error("UV0 contract drift");
 if (maskFit.crown.volumes.length !== 2) throw new Error("crown-mask fit export drift");
+if (voxelFit.crown.volumes.length !== 2) throw new Error("crown voxel-mask fit export drift");
 console.log(JSON.stringify({ revision: PROCPLANT_GENERATOR_CONTRACT_REVISION, kind, triangles: prototype.idx.length / 3 }));
 `);
   await writeFile(join(consumerRoot, "src", "runtime.mjs"), `
