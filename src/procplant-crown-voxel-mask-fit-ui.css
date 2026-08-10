@@ -1,0 +1,69 @@
+.crown-voxel-mask-fit-editor {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.crown-voxel-mask-fit-editor[hidden] {
+  display: none;
+}
+
+.crown-voxel-mask-fit-editor h3,
+.crown-voxel-mask-fit-editor p {
+  margin: 0;
+}
+
+.crown-voxel-mask-file,
+.crown-voxel-mask-fit-grid label {
+  display: grid;
+  gap: 4px;
+}
+
+.crown-voxel-mask-viewport {
+  width: min(100%, 640px);
+  border: 1px solid rgb(238 247 236 / 16%);
+  background: #101915;
+}
+
+.crown-voxel-mask-viewport canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 8 / 5;
+  touch-action: none;
+}
+
+.crown-voxel-mask-fit-editor fieldset {
+  margin: 0;
+  padding: 8px;
+  border: 1px solid rgb(238 247 236 / 12%);
+}
+
+.crown-voxel-mask-fit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.crown-voxel-mask-fit-grid input,
+.crown-voxel-mask-fit-grid select,
+.crown-voxel-mask-file input {
+  min-height: 30px;
+}
+
+.crown-voxel-mask-audit {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  margin: 0;
+}
+
+.crown-voxel-mask-audit dt,
+.crown-voxel-mask-audit dd {
+  margin: 0;
+}
+
+.crown-voxel-mask-fit-status {
+  min-height: 2.8em;
+  line-height: 1.4;
+}

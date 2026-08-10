@@ -380,6 +380,7 @@ app.innerHTML = `
           <button id="crownVolumeSubtract" type="button" disabled>Add Cutout Lobe</button>
           <button id="crownVolumeRemove" type="button" disabled>Remove Selected Lobe</button>
           <button id="fitCrownMask" type="button" aria-expanded="false" aria-controls="crownMaskFitEditor" disabled>Fit Crown Mask</button>
+          <button id="fitCrownVoxelMask" type="button" aria-expanded="false" aria-controls="crownVoxelMaskFitEditor" disabled>Fit Voxel Mask</button>
           <small>Axis handles scale the field. Gold points move individual bounded crown lobes.</small>
           <div id="crownLobeControls" class="advanced-grid crown-lobe-controls" hidden>
             <div class="field"><label for="crownLobeWidth"><span>Lobe width</span><span id="crownLobeWidthValue"></span></label><input id="crownLobeWidth" type="range" min="0.05" max="10" value="1" step="0.05" /></div>
@@ -410,6 +411,7 @@ app.innerHTML = `
           </div>
         </div>
         <section id="crownMaskFitEditor" class="graph-preview" aria-live="polite" hidden></section>
+        <section id="crownVoxelMaskFitEditor" class="graph-preview" aria-live="polite" hidden></section>
       </details>
       <div class="button-row">
         <button id="randomSeed" type="button">Random Seed</button>
@@ -953,6 +955,8 @@ const crownVolumeSubtractButton = document.querySelector<HTMLButtonElement>("#cr
 const crownVolumeRemoveButton = document.querySelector<HTMLButtonElement>("#crownVolumeRemove")!;
 const fitCrownMaskButton = document.querySelector<HTMLButtonElement>("#fitCrownMask")!;
 const crownMaskFitEditor = document.querySelector<HTMLElement>("#crownMaskFitEditor")!;
+const fitCrownVoxelMaskButton = document.querySelector<HTMLButtonElement>("#fitCrownVoxelMask")!;
+const crownVoxelMaskFitEditor = document.querySelector<HTMLElement>("#crownVoxelMaskFitEditor")!;
 const crownVolumeActions = document.querySelector<HTMLElement>("#crownVolumeActions")!;
 const crownSplineControls = document.querySelector<HTMLElement>("#crownSplineControls")!;
 const crownSplineAddButton = document.querySelector<HTMLButtonElement>("#crownSplineAdd")!;
@@ -1256,6 +1260,7 @@ type ProcPlantMaterialGraphEditorUiModule = typeof import("./procplant-material-
 type ProcPlantAuthoringToolsModule = typeof import("./procplant-authoring-tools");
 type ProcPlantCrownVolumeToolModule = typeof import("./procplant-crown-volume-tool");
 type ProcPlantCrownMaskFitUiModule = typeof import("./procplant-crown-mask-fit-ui");
+type ProcPlantCrownVoxelMaskFitUiModule = typeof import("./procplant-crown-voxel-mask-fit-ui");
 type ProcPlantOrganPlacementModule = typeof import("./procplant-organ-placement-overrides");
 type ProcPlantPlacementDecalThreeModule = typeof import("./procplant-placement-decal-three");
 type ProcPlantVineGuideAuthoringModule = typeof import("./procplant-vine-guide-authoring");
@@ -1276,6 +1281,9 @@ let procPlantCrownVolumeToolPromise: Promise<ProcPlantCrownVolumeToolModule> | n
 let procPlantCrownMaskFitUiModule: ProcPlantCrownMaskFitUiModule | null = null;
 let procPlantCrownMaskFitUiPromise: Promise<ProcPlantCrownMaskFitUiModule> | null = null;
 let crownMaskFitUi: import("./procplant-crown-mask-fit-ui").ProcPlantCrownMaskFitUi | null = null;
+let procPlantCrownVoxelMaskFitUiModule: ProcPlantCrownVoxelMaskFitUiModule | null = null;
+let procPlantCrownVoxelMaskFitUiPromise: Promise<ProcPlantCrownVoxelMaskFitUiModule> | null = null;
+let crownVoxelMaskFitUi: import("./procplant-crown-voxel-mask-fit-ui").ProcPlantCrownVoxelMaskFitUi | null = null;
 let procPlantOrganPlacementModule: ProcPlantOrganPlacementModule | null = null;
 let procPlantOrganPlacementPromise: Promise<ProcPlantOrganPlacementModule> | null = null;
 let procPlantPlacementDecalThreeModule: ProcPlantPlacementDecalThreeModule | null = null;
@@ -1355,6 +1363,18 @@ const loadProcPlantCrownMaskFitUi = () => {
     procPlantCrownMaskFitUiPromise = null;
   });
   return procPlantCrownMaskFitUiPromise;
+};
+const loadProcPlantCrownVoxelMaskFitUi = () => {
+  if (procPlantCrownVoxelMaskFitUiModule) return Promise.resolve(procPlantCrownVoxelMaskFitUiModule);
+  if (procPlantCrownVoxelMaskFitUiPromise) return procPlantCrownVoxelMaskFitUiPromise;
+  procPlantCrownVoxelMaskFitUiPromise = import("./procplant-crown-voxel-mask-fit-ui").then((module) => {
+    procPlantCrownVoxelMaskFitUiModule = module;
+    app.dataset.crownVoxelMaskFitUiLoaded = "true";
+    return module;
+  }).finally(() => {
+    procPlantCrownVoxelMaskFitUiPromise = null;
+  });
+  return procPlantCrownVoxelMaskFitUiPromise;
 };
 const loadProcPlantOrganPlacement = () => {
   if (procPlantOrganPlacementModule) return Promise.resolve(procPlantOrganPlacementModule);
@@ -1855,6 +1875,7 @@ const commitCrownSplineField = (field: ProcPlantFreeformCrown | null, message: s
 
 let crownVolumeToolRequest = 0;
 let crownMaskFitUiRequest = 0;
+let crownVoxelMaskFitUiRequest = 0;
 const syncCrownLobeControls = () => {
   const control = crownVolumeTool?.getSelectedControlVolume() ?? null;
   crownLobeControls.hidden = !control;
@@ -1912,12 +1933,20 @@ const syncCrownVolumeButton = () => {
   crownVolumeActions.hidden = !available;
   crownVolumeModeButton.disabled = regenerationBusy || !available;
   fitCrownMaskButton.disabled = regenerationBusy || !available;
+  fitCrownVoxelMaskButton.disabled = regenerationBusy || !available;
   if (!available && !crownMaskFitEditor.hidden) {
     crownMaskFitUi?.dispose();
     crownMaskFitUi = null;
     crownMaskFitEditor.hidden = true;
     fitCrownMaskButton.setAttribute("aria-expanded", "false");
     fitCrownMaskButton.textContent = "Fit Crown Mask";
+  }
+  if (!available && !crownVoxelMaskFitEditor.hidden) {
+    crownVoxelMaskFitUi?.dispose();
+    crownVoxelMaskFitUi = null;
+    crownVoxelMaskFitEditor.hidden = true;
+    fitCrownVoxelMaskButton.setAttribute("aria-expanded", "false");
+    fitCrownVoxelMaskButton.textContent = "Fit Voxel Mask";
   }
   crownVolumeModeButton.setAttribute("aria-pressed", String(crownVolumeModeVisible));
   crownVolumeModeButton.textContent = crownVolumeModeVisible ? "Hide Crown Handles" : "Crown Handles";
@@ -4232,6 +4261,15 @@ const closeCrownMaskFitUi = () => {
   fitCrownMaskButton.textContent = "Fit Crown Mask";
 };
 
+const closeCrownVoxelMaskFitUi = () => {
+  crownVoxelMaskFitUiRequest++;
+  crownVoxelMaskFitUi?.dispose();
+  crownVoxelMaskFitUi = null;
+  crownVoxelMaskFitEditor.hidden = true;
+  fitCrownVoxelMaskButton.setAttribute("aria-expanded", "false");
+  fitCrownVoxelMaskButton.textContent = "Fit Voxel Mask";
+};
+
 fitCrownMaskButton.addEventListener("click", async () => {
   if (!crownMaskFitEditor.hidden) {
     closeCrownMaskFitUi();
@@ -4240,6 +4278,7 @@ fitCrownMaskButton.addEventListener("click", async () => {
   }
   const gene = selectedSourceGenome().spaceColonization;
   if (!gene || regenerationBusy) return;
+  if (!crownVoxelMaskFitEditor.hidden) closeCrownVoxelMaskFitUi();
   const request = ++crownMaskFitUiRequest;
   crownMaskFitEditor.hidden = false;
   crownMaskFitEditor.textContent = "Loading bounded crown-mask fitter…";
@@ -4279,6 +4318,64 @@ fitCrownMaskButton.addEventListener("click", async () => {
     },
   });
   crownMaskFitEditor.querySelector<HTMLInputElement>('input[type="file"]')?.focus();
+});
+
+fitCrownVoxelMaskButton.addEventListener("click", async () => {
+  if (!crownVoxelMaskFitEditor.hidden) {
+    closeCrownVoxelMaskFitUi();
+    setSaveStatus("Crown voxel-mask fitter closed.");
+    return;
+  }
+  const gene = selectedSourceGenome().spaceColonization;
+  if (!gene || regenerationBusy) return;
+  if (!crownMaskFitEditor.hidden) closeCrownMaskFitUi();
+  const request = ++crownVoxelMaskFitUiRequest;
+  crownVoxelMaskFitEditor.hidden = false;
+  crownVoxelMaskFitEditor.textContent = "Loading bounded crown voxel-mask viewport…";
+  fitCrownVoxelMaskButton.setAttribute("aria-expanded", "true");
+  fitCrownVoxelMaskButton.textContent = "Hide Voxel Mask Fit";
+  let module: ProcPlantCrownVoxelMaskFitUiModule;
+  try {
+    module = await loadProcPlantCrownVoxelMaskFitUi();
+  } catch (error) {
+    if (request !== crownVoxelMaskFitUiRequest) return;
+    crownVoxelMaskFitEditor.textContent = error instanceof Error ? error.message : String(error);
+    app.dataset.crownVoxelMaskFitStatus = "load-error";
+    return;
+  }
+  if (request !== crownVoxelMaskFitUiRequest || crownVoxelMaskFitEditor.hidden) return;
+  const worldDimensions = gene.volume.shape === "ellipsoid"
+    ? gene.volume.dimensions.map((value) => value * 2) as [number, number, number]
+    : [...gene.volume.dimensions] as [number, number, number];
+  try {
+    crownVoxelMaskFitUi = module.createProcPlantCrownVoxelMaskFitUi({
+      container: crownVoxelMaskFitEditor,
+      initialCenter: [...gene.volume.center],
+      initialWorldDimensions: worldDimensions,
+      onApply: (fit) => {
+        if (regenerationBusy) {
+          setSaveStatus("Wait for the current plant rebuild before applying a crown voxel mask.");
+          return;
+        }
+        applyCrownField(fit.crown);
+        syncCrownLobeControls();
+        syncCrownSplineControls();
+        app.dataset.crownVoxelMaskFitStatus = "applied";
+        setSaveStatus(`Applied ${fit.audit.lobeCount} bounded ${fit.audit.constraint === "lobes" ? "crown volumes" : "spline bands"} from explicit voxel occupancy.`);
+        regenerate();
+      },
+      onClose: () => {
+        closeCrownVoxelMaskFitUi();
+        setSaveStatus("Crown voxel-mask fitter closed.");
+      },
+    });
+  } catch (error) {
+    if (request !== crownVoxelMaskFitUiRequest) return;
+    crownVoxelMaskFitEditor.textContent = `Voxel-mask viewport unavailable: ${error instanceof Error ? error.message : String(error)}`;
+    app.dataset.crownVoxelMaskFitStatus = "viewport-error";
+    return;
+  }
+  crownVoxelMaskFitEditor.querySelector<HTMLInputElement>('input[type="file"]')?.focus();
 });
 
 crownVolumeAddButton.addEventListener("click", () => {
