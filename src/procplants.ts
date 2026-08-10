@@ -7,6 +7,7 @@ import {
   bakeTree,
   generateTreeData,
   SPECIES,
+  type BakedTree,
   type BakeOptions,
   type SpeciesId,
   type TreeData,
@@ -6795,10 +6796,38 @@ const buildBranchModuleGraphTemplate = (
   };
 };
 
-export const buildWeberPennProcPlantTemplate = (
+export interface ProcPlantWeberPennStageSeeds {
+  /** Drives the vendor Weber-Penn topology and every branch-only deformation. */
+  structure: number;
+  /** Drives leaf-only post-bake variation without perturbing vendor topology. */
+  foliage: number;
+}
+
+export interface ProcPlantWeberPennStageParts {
+  structure: ProcPlantTemplate;
+  nativeFoliage: ProcPlantTemplate;
+  build: { template: ProcPlantTemplate; graph: ProcPlantGraph; stats: ProcPlantStats };
+  sourceStemCount: number;
+  sourceLeafCount: number;
+  structureSeed: number;
+  foliageSeed: number;
+}
+
+interface ProcPlantWeberPennVendorStageSource {
+  treeData: TreeData;
+  baked: BakedTree;
+  bakeKey: string;
+  normalizationBake: BakedTree;
+}
+
+const weberPennStageSources = new WeakMap<ProcPlantWeberPennStageParts, ProcPlantWeberPennVendorStageSource>();
+
+const buildWeberPennProcPlantTemplateInternal = (
   genome: ProcPlantGenome,
   seed = 1,
   env: ProcPlantEnvironment = defaultPlantEnvironment(),
+  stageSeeds: ProcPlantWeberPennStageSeeds = { structure: seed >>> 0, foliage: seed >>> 0 },
+  vendorSource?: ProcPlantWeberPennVendorStageSource,
 ): { template: ProcPlantTemplate; graph: ProcPlantGraph; stats: ProcPlantStats } => {
   if (!genome.weberPenn) {
     return buildProcPlantTemplate({ ...genome, weberPenn: undefined }, seed, env);
@@ -6807,20 +6836,21 @@ export const buildWeberPennProcPlantTemplate = (
   const foliageMass = isWeberPennCrownFillEnabled(genome) ? genome.foliage?.mass ?? 0 : 0;
   const bakeOptions = weberPennBakeOptions(genome);
   const generateLeaves = (genome.weberPenn.maxLeaves ?? 1) !== 0 && (nativeLeaves || foliageMass > 0);
-  const treeData = generateTreeData(
+  const treeData = vendorSource?.treeData ?? generateTreeData(
     genome.weberPenn.species,
-    seed >>> 0,
+    stageSeeds.structure >>> 0,
     generateLeaves,
     bakeOptions.maxBranchDepth,
   );
-  const baked = bakeTree(treeData, bakeOptions);
+  const baked = vendorSource?.baked ?? bakeTree(treeData, bakeOptions);
   const barkColor = new THREE.Color(genome.weberPenn.barkColor ?? 0x5d4327);
   const leafColor = new THREE.Color(genome.weberPenn.leafColor ?? genome.leaf.colorA);
-  const height = Math.max(1e-4, baked.max.y - baked.min.y);
+  const normalizationBake = vendorSource?.normalizationBake ?? baked;
+  const height = Math.max(1e-4, normalizationBake.max.y - normalizationBake.min.y);
   const scale = 1 / height;
-  const cx = (baked.min.x + baked.max.x) * 0.5;
-  const cz = (baked.min.z + baked.max.z) * 0.5;
-  const baseY = baked.min.y;
+  const cx = (normalizationBake.min.x + normalizationBake.max.x) * 0.5;
+  const cz = (normalizationBake.min.z + normalizationBake.max.z) * 0.5;
+  const baseY = normalizationBake.min.y;
   const branchVerts = baked.branches.positions.length / 3;
   const leafVerts = baked.leaves.positions.length / 3;
   const totalVerts = branchVerts + leafVerts;
@@ -6836,9 +6866,9 @@ export const buildWeberPennProcPlantTemplate = (
   const realism = treeRealismTraits(genome);
   const conifer = isWeberPennConifer(genome);
   const bendDir = new THREE.Vector3(
-    Math.cos((seed >>> 0) * 0.017),
+    Math.cos((stageSeeds.structure >>> 0) * 0.017),
     0,
-    Math.sin((seed >>> 0) * 0.017),
+    Math.sin((stageSeeds.structure >>> 0) * 0.017),
   ).normalize();
   const bendAmount = realism.trunkBend * (0.035 + (1 - THREE.MathUtils.clamp(env.moisture, 0, 1)) * 0.025);
   const warpPosition = (x: number, y: number, z: number, vertexSeed: number, isLeaf: boolean) => {
@@ -6879,7 +6909,7 @@ export const buildWeberPennProcPlantTemplate = (
         (leafYUp.x - cx) * scale,
         ny,
         (leafYUp.z - cz) * scale,
-        seed + index * 31,
+        stageSeeds.foliage + index * 31,
         true,
       );
       const direction = new THREE.Vector3(leaf.direction.x, leaf.direction.z, -leaf.direction.y);
@@ -6920,7 +6950,7 @@ export const buildWeberPennProcPlantTemplate = (
           (endYUp.x - cx) * scale,
           ny,
           (endYUp.z - cz) * scale,
-          seed + index * 43,
+          stageSeeds.structure + index * 43,
           false,
         );
         const prevNy = (prevYUp.y - baseY) * scale;
@@ -6928,7 +6958,7 @@ export const buildWeberPennProcPlantTemplate = (
           (prevYUp.x - cx) * scale,
           prevNy,
           (prevYUp.z - cz) * scale,
-          seed + index * 43 - 7,
+          stageSeeds.structure + index * 43 - 7,
           false,
         );
         const direction = position.clone().sub(previous);
@@ -6967,7 +6997,7 @@ export const buildWeberPennProcPlantTemplate = (
       (baked.branches.positions[o]! - cx) * scale,
       ny,
       (baked.branches.positions[o + 2]! - cz) * scale,
-      seed + i * 17,
+      stageSeeds.structure + i * 17,
       false,
     );
     pos[o] = warped.x;
@@ -6978,7 +7008,7 @@ export const buildWeberPennProcPlantTemplate = (
     nrm[o + 2] = baked.branches.normals[o + 2]!;
     uv0[i * 2] = Math.atan2(baked.branches.normals[o + 2]!, baked.branches.normals[o]!) / (Math.PI * 2) + 0.5;
     uv0[i * 2 + 1] = THREE.MathUtils.clamp(ny, 0, 1);
-    const bark = varyColor(barkColor, seed + i * 23, realism.colorVariance * 0.55);
+    const bark = varyColor(barkColor, stageSeeds.structure + i * 23, realism.colorVariance * 0.55);
     col[o] = bark.r;
     col[o + 1] = bark.g;
     col[o + 2] = bark.b;
@@ -6995,7 +7025,7 @@ export const buildWeberPennProcPlantTemplate = (
       (baked.leaves.positions[src]! - cx) * scale,
       ny,
       (baked.leaves.positions[src + 2]! - cz) * scale,
-      seed + i * 31,
+      stageSeeds.foliage + i * 31,
       true,
     );
     pos[dst] = warped.x;
@@ -7012,7 +7042,7 @@ export const buildWeberPennProcPlantTemplate = (
     uv0[di * 2 + 1] = THREE.MathUtils.clamp(ny, 0, 1);
     const color = varyColor(
       leafColor.clone().lerp(new THREE.Color(genome.leaf.colorB), THREE.MathUtils.clamp(ny, 0, 1) * 0.55),
-      seed + i * 37,
+      stageSeeds.foliage + i * 37,
     );
     col[dst] = color.r;
     col[dst + 1] = color.g;
@@ -7038,7 +7068,7 @@ export const buildWeberPennProcPlantTemplate = (
   const massLeaves = addWeberPennFoliageMass(
     massBuilder,
     genome,
-    seed,
+    stageSeeds.foliage,
     env,
     baseTemplate,
     branchVerts,
@@ -7086,6 +7116,92 @@ export const buildWeberPennProcPlantTemplate = (
       triangles: template.idx.length / 3,
     },
   };
+};
+
+export const buildWeberPennProcPlantTemplate = (
+  genome: ProcPlantGenome,
+  seed = 1,
+  env: ProcPlantEnvironment = defaultPlantEnvironment(),
+): { template: ProcPlantTemplate; graph: ProcPlantGraph; stats: ProcPlantStats } =>
+  buildWeberPennProcPlantTemplateInternal(genome, seed, env);
+
+const copyProcPlantTemplateVertexRange = (
+  source: ProcPlantTemplate,
+  vertexStart: number,
+  vertexCount: number,
+  indices: Uint32Array,
+): ProcPlantTemplate => ({
+  pos: source.pos.slice(vertexStart * 3, (vertexStart + vertexCount) * 3),
+  nrm: source.nrm.slice(vertexStart * 3, (vertexStart + vertexCount) * 3),
+  uv0: source.uv0.slice(vertexStart * 2, (vertexStart + vertexCount) * 2),
+  col: source.col.slice(vertexStart * 3, (vertexStart + vertexCount) * 3),
+  tintable: source.tintable.slice(vertexStart, vertexStart + vertexCount),
+  sway: source.sway.slice(vertexStart, vertexStart + vertexCount),
+  idx: indices,
+});
+
+/**
+ * Expose the two separable soups that the vendored Weber-Penn baker actually
+ * owns. This is deliberately not a topology editor: structure remains one
+ * vendor generation pass, while foliage entropy is limited to leaf-only
+ * post-bake placement/color/crown-fill variation. The exact legacy build is
+ * retained whenever both stage seeds equal `seed`.
+ */
+export const buildWeberPennProcPlantStageParts = (
+  genome: ProcPlantGenome,
+  seed = 1,
+  env: ProcPlantEnvironment = defaultPlantEnvironment(),
+  stageSeeds: ProcPlantWeberPennStageSeeds = { structure: seed >>> 0, foliage: seed >>> 0 },
+  reusableStructure?: ProcPlantWeberPennStageParts,
+): ProcPlantWeberPennStageParts => {
+  if (!genome.weberPenn) throw new Error("Weber-Penn stage parts require genome.weberPenn");
+  const bakeOptions = weberPennBakeOptions(genome);
+  const nativeLeaves = genome.weberPenn.nativeLeaves !== false;
+  const foliageMass = isWeberPennCrownFillEnabled(genome) ? genome.foliage?.mass ?? 0 : 0;
+  const generateLeaves = (genome.weberPenn.maxLeaves ?? 1) !== 0 && (nativeLeaves || foliageMass > 0);
+  const cached = reusableStructure?.structureSeed === (stageSeeds.structure >>> 0)
+    ? weberPennStageSources.get(reusableStructure)
+    : undefined;
+  const bakeKey = JSON.stringify(bakeOptions);
+  const treeData = cached?.treeData ?? generateTreeData(
+    genome.weberPenn.species,
+    stageSeeds.structure >>> 0,
+    generateLeaves,
+    bakeOptions.maxBranchDepth,
+  );
+  const baked = cached?.bakeKey === bakeKey ? cached.baked : bakeTree(treeData, bakeOptions);
+  const vendorSource = {
+    treeData,
+    baked,
+    bakeKey,
+    normalizationBake: cached?.normalizationBake ?? cached?.baked ?? baked,
+  };
+  const build = buildWeberPennProcPlantTemplateInternal(genome, seed, env, stageSeeds, vendorSource);
+  const branchVertexCount = baked.branches.positions.length / 3;
+  const nativeFoliageVertexCount = baked.leaves.positions.length / 3;
+  const structureIndices = build.template.idx.slice(0, baked.branches.indices.length);
+  const nativeFoliageIndices = nativeLeaves
+    ? build.template.idx.slice(
+        baked.branches.indices.length,
+        baked.branches.indices.length + baked.leaves.indices.length,
+      ).map((index) => index - branchVertexCount)
+    : new Uint32Array(0);
+  const result: ProcPlantWeberPennStageParts = {
+    structure: copyProcPlantTemplateVertexRange(build.template, 0, branchVertexCount, structureIndices),
+    nativeFoliage: copyProcPlantTemplateVertexRange(
+      build.template,
+      branchVertexCount,
+      nativeFoliageVertexCount,
+      nativeFoliageIndices,
+    ),
+    build,
+    sourceStemCount: treeData.stems.length,
+    sourceLeafCount: treeData.leaves.length,
+    structureSeed: stageSeeds.structure >>> 0,
+    foliageSeed: stageSeeds.foliage >>> 0,
+  };
+  weberPennStageSources.set(result, vendorSource);
+  return result;
 };
 
 export const createProcPlantPetalGeometry = (): THREE.BufferGeometry => {

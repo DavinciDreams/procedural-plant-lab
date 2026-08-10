@@ -3,6 +3,7 @@ import {
   buildProcPlantGraphIr,
   buildProcPlantTemplate,
   buildProcPlantTemplateFromGraph,
+  buildWeberPennProcPlantStageParts,
   compileProcPlantLods,
   compileProcPlantLodsFromTemplate,
   defaultPlantEnvironment,
@@ -14,6 +15,7 @@ import {
   type ProcPlantStats,
   type ProcPlantStemNode,
   type ProcPlantTemplate,
+  type ProcPlantWeberPennStageParts,
 } from "./procplants";
 import { createProcPlantAuthoringGraph } from "./procplant-authoring-graph";
 import {
@@ -56,6 +58,24 @@ export interface ProcPlantGraphStageArtifact extends ArtifactBase<
   runtime: { windFlex: number; phototropism: number };
 }
 
+export interface ProcPlantWeberPennPlanStageArtifact extends ArtifactBase<"weber-penn-plan", "architecture"> {
+  genome: ProcPlantGenome;
+  environment: ProcPlantEnvironment;
+  runtime: { windFlex: number; phototropism: number };
+}
+
+export interface ProcPlantWeberPennPartsStageArtifact extends ArtifactBase<
+  "weber-penn-parts",
+  "branching" | "foliage" | "deformation"
+> {
+  genome: ProcPlantGenome;
+  environment: ProcPlantEnvironment;
+  parts: ProcPlantWeberPennStageParts;
+  structureSeed: number;
+  foliageSeed: number | null;
+  runtime: { windFlex: number; phototropism: number };
+}
+
 export interface ProcPlantMaterialStageArtifact extends ArtifactBase<"material", "material"> {
   genome: ProcPlantGenome;
   environment: ProcPlantEnvironment;
@@ -81,6 +101,8 @@ export interface ProcPlantOutputStageArtifact extends ArtifactBase<"output", "ou
 export type ProcPlantProductionStageArtifact =
   | ProcPlantSourceStageArtifact
   | ProcPlantGraphStageArtifact
+  | ProcPlantWeberPennPlanStageArtifact
+  | ProcPlantWeberPennPartsStageArtifact
   | ProcPlantMaterialStageArtifact
   | ProcPlantLodStageArtifact
   | ProcPlantOutputStageArtifact;
@@ -224,9 +246,18 @@ const graphSemantics = (graph: ProcPlantGeneratorGraph) => ({
 const sameGraphSemantics = (left: ProcPlantGeneratorGraph, right: ProcPlantGeneratorGraph) =>
   stableJson(graphSemantics(left)) === stableJson(graphSemantics(right));
 
+const productionBackend = (genome: ProcPlantGenome) => genome.weberPenn
+  ? "weber-penn"
+  : genome.branchModules
+    ? "branch-module-graph"
+    : genome.spaceColonization
+      ? "space-colonization"
+      : genome.vine
+        ? "guided-vine"
+        : "procplant-graph";
+
 const assertSupportedBackend = (genome: ProcPlantGenome) => {
   const unsupported = [
-    genome.weberPenn && "weber-penn",
     genome.branchModules && "branch-module-graph",
     genome.spaceColonization && "space-colonization",
     genome.vine && "guided-vine",
@@ -238,6 +269,9 @@ const assertSupportedBackend = (genome: ProcPlantGenome) => {
   ].filter(Boolean);
   if (unsupported.length > 0) {
     throw new ProcPlantProductionDagError(`typed production DAG does not support backend features: ${unsupported.join(", ")}`);
+  }
+  if (genome.weberPenn && (genome.flower || (genome.accessoryOrgans?.length ?? 0) > 0)) {
+    throw new ProcPlantProductionDagError("typed Weber-Penn DAG does not support reproductive or accessory organs");
   }
 };
 
@@ -286,8 +320,9 @@ const validateProductionNodeParameters = (node: ProcPlantGeneratorNode, genome: 
     if (parameters.genomeId !== genome.id || parameters.habit !== genome.habit) {
       throw new ProcPlantProductionDagError(`${node.id}.parameters must preserve source genome identity`);
     }
-    if (parameters.backend !== "procplant-graph") {
-      throw new ProcPlantProductionDagError(`${node.id}.parameters.backend is unsupported by the typed graph backend`);
+    const backend = productionBackend(genome);
+    if (parameters.backend !== backend || (backend !== "procplant-graph" && backend !== "weber-penn")) {
+      throw new ProcPlantProductionDagError(`${node.id}.parameters.backend is unsupported by the typed production backend`);
     }
   } else if (node.stage === "architecture") {
     finite(parameters.apicalDominance, `${node.id}.parameters.apicalDominance`, 0, 1);
@@ -297,8 +332,9 @@ const validateProductionNodeParameters = (node: ProcPlantGeneratorNode, genome: 
     }
     if ((node.count ?? 0) < 1) throw new ProcPlantProductionDagError(`${node.id}.count must be at least one`);
   } else if (node.stage === "branching") {
-    if (parameters.backend !== "procplant-graph") {
-      throw new ProcPlantProductionDagError(`${node.id}.parameters.backend is unsupported by the typed graph backend`);
+    const backend = productionBackend(genome);
+    if (parameters.backend !== backend || (backend !== "procplant-graph" && backend !== "weber-penn")) {
+      throw new ProcPlantProductionDagError(`${node.id}.parameters.backend is unsupported by the typed production backend`);
     }
     const angle = parameters.angle;
     if (!angle || typeof angle !== "object" || Array.isArray(angle)) throw new ProcPlantProductionDagError(`${node.id}.parameters.angle must be an object`);
@@ -340,6 +376,58 @@ const validateProductionNodeParameters = (node: ProcPlantGeneratorNode, genome: 
     if (!Number.isInteger(parameters.generatorContractRevision) || Number(parameters.generatorContractRevision) < 1) {
       throw new ProcPlantProductionDagError(`${node.id}.parameters.generatorContractRevision must be a positive integer`);
     }
+  }
+};
+
+const validateWeberPennNodeSemantics = (
+  node: ProcPlantGeneratorNode,
+  canonicalNode: ProcPlantGeneratorNode | undefined,
+) => {
+  if (!canonicalNode || canonicalNode.id !== node.id || canonicalNode.stage !== node.stage) {
+    throw new ProcPlantProductionDagError(`${node.id} is not a canonical Weber-Penn stage; additional specialized nodes are unsupported`);
+  }
+  if (stableJson([...node.dependsOn].sort()) !== stableJson([...canonicalNode.dependsOn].sort())) {
+    throw new ProcPlantProductionDagError(`${node.id}.dependsOn cannot be rewired in the Weber-Penn backend`);
+  }
+  if (node.enabled !== canonicalNode.enabled) {
+    throw new ProcPlantProductionDagError(`${node.id}.enabled cannot be projected into the Weber-Penn backend`);
+  }
+  if (stableJson(node.placement) !== stableJson(canonicalNode.placement)) {
+    throw new ProcPlantProductionDagError(`${node.id}.placement cannot be projected into the Weber-Penn backend`);
+  }
+  if (node.stage === "branching") {
+    const actualScope = node.parentScope;
+    const expectedScope = canonicalNode.parentScope;
+    if (actualScope?.mode !== "stages" || expectedScope?.mode !== "stages" ||
+        stableJson(actualScope.stages) !== stableJson(expectedScope.stages)) {
+      throw new ProcPlantProductionDagError(`${node.id}.parentScope cannot be projected into the Weber-Penn backend`);
+    }
+    if (actualScope.maxDepth !== undefined && (!Number.isInteger(actualScope.maxDepth) || actualScope.maxDepth < 0 || actualScope.maxDepth > 3)) {
+      throw new ProcPlantProductionDagError(`${node.id}.parentScope.maxDepth must be an integer in 0..3 for Weber-Penn`);
+    }
+  } else if (stableJson(node.parentScope) !== stableJson(canonicalNode.parentScope)) {
+    throw new ProcPlantProductionDagError(`${node.id}.parentScope cannot be projected into the Weber-Penn backend`);
+  }
+  if (stableJson(node.curve) !== stableJson(canonicalNode.curve)) {
+    throw new ProcPlantProductionDagError(`${node.id}.curve cannot be projected into the Weber-Penn backend`);
+  }
+  if (node.seedOverride !== canonicalNode.seedOverride && node.stage !== "branching" && node.stage !== "foliage") {
+    throw new ProcPlantProductionDagError(`${node.id} has no independent Weber-Penn stochastic stage; seed overrides are unsupported`);
+  }
+  if (node.stage === "branching") {
+    if (!Number.isInteger(node.count) || node.count! < 1 || node.count! > 2_000) {
+      throw new ProcPlantProductionDagError(`${node.id}.count must be an integer in 1..2000 for Weber-Penn maxStems`);
+    }
+  } else if (node.stage === "foliage") {
+    if (!Number.isInteger(node.count) || node.count! < 1 || node.count! > 50_000) {
+      throw new ProcPlantProductionDagError(`${node.id}.count must be an integer in 1..50000 for Weber-Penn maxLeaves`);
+    }
+  } else if (node.count !== canonicalNode.count) {
+    throw new ProcPlantProductionDagError(`${node.id}.count cannot be projected into the Weber-Penn backend`);
+  }
+  if (!["deformation", "material", "lod"].includes(node.stage) &&
+      stableJson(node.parameters) !== stableJson(canonicalNode.parameters)) {
+    throw new ProcPlantProductionDagError(`${node.id}.parameters cannot be projected into the Weber-Penn backend`);
   }
 };
 
@@ -422,6 +510,30 @@ const graphArtifacts = (node: ProcPlantGeneratorNode, dependencies: readonly Pro
   );
   if (artifacts.length < 1) throw new ProcPlantProductionDagError(`${node.id} requires at least one graph artifact input`);
   return artifacts;
+};
+
+const weberPennPlanArtifact = (
+  node: ProcPlantGeneratorNode,
+  dependencies: readonly ProcPlantProductionStageArtifact[],
+) => {
+  const plans = scopeDependencies(node, dependencies).filter(
+    (artifact): artifact is ProcPlantWeberPennPlanStageArtifact => artifact.kind === "weber-penn-plan",
+  );
+  if (plans.length !== 1) throw new ProcPlantProductionDagError(`${node.id} requires exactly one Weber-Penn architecture plan`);
+  return plans[0]!;
+};
+
+const weberPennPartsArtifact = (
+  node: ProcPlantGeneratorNode,
+  dependencies: readonly ProcPlantProductionStageArtifact[],
+) => {
+  const candidates = scopeDependencies(node, dependencies).filter(
+    (artifact): artifact is ProcPlantWeberPennPartsStageArtifact => artifact.kind === "weber-penn-parts",
+  );
+  const retained = candidates.filter((candidate) => !candidates.some((other) =>
+    other !== candidate && candidate.lineage.every((id) => other.lineage.includes(id)) && other.lineage.length > candidate.lineage.length));
+  if (retained.length !== 1) throw new ProcPlantProductionDagError(`${node.id} requires exactly one terminal Weber-Penn parts artifact`);
+  return retained[0]!;
 };
 
 const mergeGraphArtifacts = (artifacts: readonly ProcPlantGraphStageArtifact[]) => {
@@ -586,6 +698,16 @@ const lineageFor = (node: ProcPlantGeneratorNode, dependencies: readonly ProcPla
 const artifactHashPayload = (artifact: ProcPlantUnhashedStageArtifact) => {
   if (artifact.kind === "source") return { kind: artifact.kind, stage: artifact.stage, nodeId: artifact.nodeId, seed: artifact.seed, lineage: artifact.lineage, genomeId: artifact.genome.id };
   if (artifact.kind === "graph") return { kind: artifact.kind, stage: artifact.stage, nodeId: artifact.nodeId, seed: artifact.seed, lineage: artifact.lineage, graph: graphHash(artifact.graph), runtime: artifact.runtime };
+  if (artifact.kind === "weber-penn-plan") return {
+    kind: artifact.kind, stage: artifact.stage, nodeId: artifact.nodeId, seed: artifact.seed,
+    lineage: artifact.lineage, species: artifact.genome.weberPenn?.species, runtime: artifact.runtime,
+  };
+  if (artifact.kind === "weber-penn-parts") return {
+    kind: artifact.kind, stage: artifact.stage, nodeId: artifact.nodeId, seed: artifact.seed,
+    lineage: artifact.lineage, structure: templateHash(artifact.parts.structure),
+    nativeFoliage: artifact.foliageSeed === null ? null : templateHash(artifact.parts.nativeFoliage),
+    structureSeed: artifact.structureSeed, foliageSeed: artifact.foliageSeed, runtime: artifact.runtime,
+  };
   if (artifact.kind === "material") return { kind: artifact.kind, nodeId: artifact.nodeId, seed: artifact.seed, lineage: artifact.lineage, graph: graphHash(artifact.graph), template: templateHash(artifact.template) };
   if (artifact.kind === "lod") return { kind: artifact.kind, nodeId: artifact.nodeId, seed: artifact.seed, lineage: artifact.lineage, levels: artifact.lods.map((lod) => [lod.level, templateHash(lod.template)]), runtime: artifact.runtime };
   return { kind: artifact.kind, nodeId: artifact.nodeId, seed: artifact.seed, lineage: artifact.lineage, template: templateHash(artifact.build.template), runtime: artifact.runtime };
@@ -610,6 +732,14 @@ const nodeWork = (node: ProcPlantGeneratorNode) => node.enabled ? node.count ?? 
 const artifactWork = (artifact: ProcPlantProductionStageArtifact) => {
   if (artifact.kind === "source") return 1;
   if (artifact.kind === "graph") return artifact.graph.stems.length + artifact.graph.segments.length + artifact.graph.organs.length;
+  if (artifact.kind === "weber-penn-plan") return 1;
+  if (artifact.kind === "weber-penn-parts") {
+    const structure = artifact.parts.structure.pos.length / 3 + artifact.parts.structure.idx.length;
+    const foliage = artifact.foliageSeed === null
+      ? 0
+      : artifact.parts.nativeFoliage.pos.length / 3 + artifact.parts.nativeFoliage.idx.length;
+    return structure + foliage;
+  }
   if (artifact.kind === "material") return artifact.template.pos.length / 3 + artifact.template.idx.length;
   if (artifact.kind === "lod") return artifact.lods.reduce((sum, lod) => sum + lod.vertices + lod.triangles, 0);
   return artifact.build.template.pos.length / 3 + artifact.build.template.idx.length;
@@ -659,8 +789,13 @@ export const compileProcPlantProductionDag = (
     throw new ProcPlantProductionDagError(`maxWork must be an integer in 1..${PROCPLANT_PRODUCTION_DAG_MAX_WORK}`);
   }
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+  const canonicalNodeById = new Map(canonical.nodes.map((node) => [node.id, node]));
+  if (genome.weberPenn && graph.nodes.length !== canonical.nodes.length) {
+    throw new ProcPlantProductionDagError("Weber-Penn production graphs require the canonical nine-stage node set");
+  }
   for (const node of graph.nodes) {
     validateProductionNodeParameters(node, genome);
+    if (genome.weberPenn) validateWeberPennNodeSemantics(node, canonicalNodeById.get(node.id));
     const unsupported = node.dependsOn
       .map((id) => nodeById.get(id)!)
       .filter((dependency) => !ALLOWED_ARTIFACT_STAGES[node.stage].includes(dependency.stage));
@@ -673,7 +808,9 @@ export const compileProcPlantProductionDag = (
   let work = 0;
   for (const nodeId of order) {
     const node = nodeById.get(nodeId)!;
-    const seed = node.seedOverride ?? deriveProcPlantGeneratorNodeSeed(graph.seed, node.id);
+    const seed = genome.weberPenn && (node.stage === "branching" || node.stage === "foliage")
+      ? node.seedOverride ?? graph.seed
+      : node.seedOverride ?? deriveProcPlantGeneratorNodeSeed(graph.seed, node.id);
     const dependencyIds = [...node.dependsOn].sort();
     if (!node.enabled) {
       records.push({ nodeId, stage: node.stage, seed, status: "disabled", dependencyIds, artifactKind: null, artifactHash: null, work: 0 });
@@ -701,36 +838,82 @@ export const compileProcPlantProductionDag = (
         apicalDominance: Number(node.parameters?.apicalDominance ?? source.genome.apicalDominance),
         phyllotaxisAngle: Number(node.parameters?.phyllotaxisAngle ?? source.genome.phyllotaxisAngle),
       };
-      const builtGraph = createArchitectureGraph(architectureGenome, source.environment, node, seed);
-      artifact = withArtifactHash({
-        kind: "graph", stage: "architecture", nodeId, seed, lineage: lineageFor(node, sources),
-        genome: architectureGenome, environment: source.environment, graph: builtGraph,
-        runtime: { windFlex: architectureGenome.treeRealism?.windFlex ?? 0.35, phototropism: architectureGenome.lightResponse.phototropism },
-      });
+      const runtime = { windFlex: architectureGenome.treeRealism?.windFlex ?? 0.35, phototropism: architectureGenome.lightResponse.phototropism };
+      if (architectureGenome.weberPenn) {
+        artifact = withArtifactHash({
+          kind: "weber-penn-plan", stage: "architecture", nodeId, seed, lineage: lineageFor(node, sources),
+          genome: architectureGenome, environment: source.environment, runtime,
+        });
+      } else {
+        const builtGraph = createArchitectureGraph(architectureGenome, source.environment, node, seed);
+        artifact = withArtifactHash({
+          kind: "graph", stage: "architecture", nodeId, seed, lineage: lineageFor(node, sources),
+          genome: architectureGenome, environment: source.environment, graph: builtGraph, runtime,
+        });
+      }
     } else if (node.stage === "branching") {
-      const inputs = graphArtifacts(node, dependencies);
-      const base = mergeGraphArtifacts(inputs);
-      artifact = withArtifactHash({
-        kind: "graph", stage: "branching", nodeId, seed, lineage: lineageFor(node, inputs),
-        genome: inputs[0]!.genome, environment: inputs[0]!.environment,
-        graph: addBranches(base, inputs[0]!.genome, node, seed), runtime: inputs[0]!.runtime,
-      });
+      if (genome.weberPenn) {
+        const input = weberPennPlanArtifact(node, dependencies);
+        const branchedGenome: ProcPlantGenome = {
+          ...input.genome,
+          weberPenn: {
+            ...input.genome.weberPenn!,
+            maxStems: node.count!,
+            maxBranchDepth: node.parentScope?.maxDepth,
+          },
+        };
+        const parts = buildWeberPennProcPlantStageParts(
+          branchedGenome, seed, input.environment, { structure: seed, foliage: seed },
+        );
+        artifact = withArtifactHash({
+          kind: "weber-penn-parts", stage: "branching", nodeId, seed,
+          lineage: lineageFor(node, [input]), genome: branchedGenome, environment: input.environment,
+          parts, structureSeed: seed, foliageSeed: null, runtime: input.runtime,
+        });
+      } else {
+        const inputs = graphArtifacts(node, dependencies);
+        const base = mergeGraphArtifacts(inputs);
+        artifact = withArtifactHash({
+          kind: "graph", stage: "branching", nodeId, seed, lineage: lineageFor(node, inputs),
+          genome: inputs[0]!.genome, environment: inputs[0]!.environment,
+          graph: addBranches(base, inputs[0]!.genome, node, seed), runtime: inputs[0]!.runtime,
+        });
+      }
     } else if (node.stage === "foliage") {
-      const inputs = graphArtifacts(node, dependencies);
-      const base = mergeGraphArtifacts(inputs);
-      const foliageGenome: ProcPlantGenome = {
-        ...inputs[0]!.genome,
-        leaf: { ...inputs[0]!.genome.leaf, shape: node.parameters?.shape as ProcPlantGenome["leaf"]["shape"] },
-        phyllotaxy: {
-          ...(inputs[0]!.genome.phyllotaxy ?? { mode: "spiral" as const }),
-          mode: node.parameters?.phyllotaxy as NonNullable<ProcPlantGenome["phyllotaxy"]>["mode"],
-        },
-      };
-      artifact = withArtifactHash({
-        kind: "graph", stage: "foliage", nodeId, seed, lineage: lineageFor(node, inputs),
-        genome: foliageGenome, environment: inputs[0]!.environment,
-        graph: addFoliage(base, foliageGenome, node, seed), runtime: inputs[0]!.runtime,
-      });
+      if (genome.weberPenn) {
+        const input = weberPennPartsArtifact(node, dependencies);
+        if (input.stage !== "branching") throw new ProcPlantProductionDagError(`${node.id} requires a Weber-Penn branching artifact`);
+        const foliageGenome: ProcPlantGenome = {
+          ...input.genome,
+          weberPenn: { ...input.genome.weberPenn!, maxLeaves: node.count! },
+        };
+        const parts = buildWeberPennProcPlantStageParts(
+          foliageGenome, input.structureSeed, input.environment,
+          { structure: input.structureSeed, foliage: seed },
+          input.parts,
+        );
+        artifact = withArtifactHash({
+          kind: "weber-penn-parts", stage: "foliage", nodeId, seed,
+          lineage: lineageFor(node, [input]), genome: foliageGenome, environment: input.environment,
+          parts, structureSeed: input.structureSeed, foliageSeed: seed, runtime: input.runtime,
+        });
+      } else {
+        const inputs = graphArtifacts(node, dependencies);
+        const base = mergeGraphArtifacts(inputs);
+        const foliageGenome: ProcPlantGenome = {
+          ...inputs[0]!.genome,
+          leaf: { ...inputs[0]!.genome.leaf, shape: node.parameters?.shape as ProcPlantGenome["leaf"]["shape"] },
+          phyllotaxy: {
+            ...(inputs[0]!.genome.phyllotaxy ?? { mode: "spiral" as const }),
+            mode: node.parameters?.phyllotaxy as NonNullable<ProcPlantGenome["phyllotaxy"]>["mode"],
+          },
+        };
+        artifact = withArtifactHash({
+          kind: "graph", stage: "foliage", nodeId, seed, lineage: lineageFor(node, inputs),
+          genome: foliageGenome, environment: inputs[0]!.environment,
+          graph: addFoliage(base, foliageGenome, node, seed), runtime: inputs[0]!.runtime,
+        });
+      }
     } else if (node.stage === "reproductive") {
       const inputs = graphArtifacts(node, dependencies);
       const base = mergeGraphArtifacts(inputs);
@@ -740,29 +923,67 @@ export const compileProcPlantProductionDag = (
         graph: addReproductiveOrgans(base, inputs[0]!.genome, node, seed), runtime: inputs[0]!.runtime,
       });
     } else if (node.stage === "deformation") {
-      const inputs = graphArtifacts(node, dependencies);
-      const base = mergeGraphArtifacts(inputs);
-      artifact = withArtifactHash({
-        kind: "graph", stage: "deformation", nodeId, seed, lineage: lineageFor(node, inputs),
-        genome: inputs[0]!.genome, environment: inputs[0]!.environment, graph: base,
-        runtime: {
-          windFlex: Number(node.parameters?.windFlex ?? inputs[0]!.runtime.windFlex),
-          phototropism: Number(node.parameters?.phototropism ?? inputs[0]!.runtime.phototropism),
-        },
-      });
+      if (genome.weberPenn) {
+        const input = weberPennPartsArtifact(node, dependencies);
+        artifact = withArtifactHash({
+          ...input, stage: "deformation", nodeId, seed, lineage: lineageFor(node, [input]),
+          runtime: {
+            windFlex: Number(node.parameters?.windFlex ?? input.runtime.windFlex),
+            phototropism: Number(node.parameters?.phototropism ?? input.runtime.phototropism),
+          },
+        });
+      } else {
+        const inputs = graphArtifacts(node, dependencies);
+        const base = mergeGraphArtifacts(inputs);
+        artifact = withArtifactHash({
+          kind: "graph", stage: "deformation", nodeId, seed, lineage: lineageFor(node, inputs),
+          genome: inputs[0]!.genome, environment: inputs[0]!.environment, graph: base,
+          runtime: {
+            windFlex: Number(node.parameters?.windFlex ?? inputs[0]!.runtime.windFlex),
+            phototropism: Number(node.parameters?.phototropism ?? inputs[0]!.runtime.phototropism),
+          },
+        });
+      }
     } else if (node.stage === "material") {
-      const inputs = graphArtifacts(node, dependencies);
-      const base = mergeGraphArtifacts(inputs);
-      const materialGenome = cloneGenomeForMaterial(inputs[0]!.genome, node);
-      const build = buildProcPlantTemplateFromGraph(materialGenome, base, inputs[0]!.environment);
-      artifact = withArtifactHash({
-        kind: "material", stage: "material", nodeId, seed, lineage: lineageFor(node, inputs),
-        genome: materialGenome, environment: inputs[0]!.environment, graph: build.graph,
-        template: build.template, stats: build.stats,
-      });
+      if (genome.weberPenn) {
+        const input = weberPennPartsArtifact(node, dependencies);
+        if (input.foliageSeed === null) throw new ProcPlantProductionDagError(`${node.id} requires a populated Weber-Penn foliage artifact`);
+        const materialGenomeBase = cloneGenomeForMaterial(input.genome, node);
+        const requestedLeafColor = materialGenomeBase.leaf.colorA;
+        const materialGenome: ProcPlantGenome = {
+          ...materialGenomeBase,
+          weberPenn: {
+            ...materialGenomeBase.weberPenn!,
+            leafColor: requestedLeafColor === genome.leaf.colorA
+              ? materialGenomeBase.weberPenn!.leafColor
+              : requestedLeafColor,
+          },
+        };
+        const parts = buildWeberPennProcPlantStageParts(
+          materialGenome, input.structureSeed, input.environment,
+          { structure: input.structureSeed, foliage: input.foliageSeed },
+          input.parts,
+        );
+        artifact = withArtifactHash({
+          kind: "material", stage: "material", nodeId, seed, lineage: lineageFor(node, [input]),
+          genome: materialGenome, environment: input.environment, graph: parts.build.graph,
+          template: parts.build.template, stats: parts.build.stats,
+        });
+      } else {
+        const inputs = graphArtifacts(node, dependencies);
+        const base = mergeGraphArtifacts(inputs);
+        const materialGenome = cloneGenomeForMaterial(inputs[0]!.genome, node);
+        const build = buildProcPlantTemplateFromGraph(materialGenome, base, inputs[0]!.environment);
+        artifact = withArtifactHash({
+          kind: "material", stage: "material", nodeId, seed, lineage: lineageFor(node, inputs),
+          genome: materialGenome, environment: inputs[0]!.environment, graph: build.graph,
+          template: build.template, stats: build.stats,
+        });
+      }
     } else if (node.stage === "lod") {
       const materials = scopedDependencies.filter((entry): entry is ProcPlantMaterialStageArtifact => entry.kind === "material");
-      const deformations = scopedDependencies.filter((entry): entry is ProcPlantGraphStageArtifact => entry.kind === "graph" && entry.stage === "deformation");
+      const deformations = scopedDependencies.filter((entry): entry is ProcPlantGraphStageArtifact | ProcPlantWeberPennPartsStageArtifact =>
+        (entry.kind === "graph" || entry.kind === "weber-penn-parts") && entry.stage === "deformation");
       if (materials.length !== 1) throw new ProcPlantProductionDagError(`${node.id} requires exactly one material artifact`);
       if (deformations.length > 1) throw new ProcPlantProductionDagError(`${node.id} accepts at most one deformation artifact`);
       const material = materials[0]!;

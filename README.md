@@ -68,7 +68,7 @@ Good starting experiments:
 - Canonical graph-backed woody cohorts also migrate asynchronously while companion plants and local-light variants stay intact.
 - Eleven canonical fern/ground-cover cohorts migrate through the same allocation-free placement pool; density-1 Phi Fern and Clover measurements reduced live biome triangles by 73.5% and 59.4% respectively after the atomic worker swap.
 - Four additional broad low-poly patches add maidenhair fern, woodland violet, trillium, and horsetail silhouettes at 628-1,908 close triangles with real 4/2-triangle far tiers.
-- Typed generator-DAG, macro-rule, space-colonization, and parallel-transport swept-tube foundations for higher-level authoring tools.
+- Typed generator-DAG, macro-rule, space-colonization, and parallel-transport swept-tube foundations for higher-level authoring tools. Edited Weber-Penn graphs now execute a bounded specialized path with real branch-soup, native-foliage, material, LOD, and output artifacts; only vendor-representable max-stem/depth, max-leaf, structure/foliage seed, material, deformation-runtime, and LOD controls are accepted.
 - A production `colonizedHazelShrub` backend using deterministic space colonization, swept tubes, real reduced LOD, and branch-relative foliage.
 - Versioned freeform crowns use deterministic weighted constructive fields of up to 24 oriented ellipsoid/box lobes with positive union and subtractive cutouts, viewport add/select/center-drag/remove, per-lobe dimension/yaw/density controls, URL/JSON/genome/graph persistence, strict sampling/work caps, and exact default-geometry compatibility; global axis handles still scale the whole field.
 - A deterministic target-bound nine-stage authoring-graph adapter included in JSON exports, with built-in handlers for supported compiler projections, real architecture/branching-to-foliage dataflow, execution records, and a lazy editor for mapped seeds/enabled/count/curve/parameter controls, cycle-safe wiring, explicit unsupported audits, and live macro controls.
@@ -195,6 +195,7 @@ npm run test:tellus-contract
 - `src/procplant-impostor-three.ts` captures live Three.js views, installs textured billboards, and exports embedded-atlas GLB.
 - `src/procplant-dense-impostor-pool.ts` batches dense static billboard placements into deterministic atlas-view buckets.
 - `src/procplant-generator-graph.ts` defines deterministic typed generator DAGs and serializable manual operations.
+- `src/procplant-production-dag.ts` executes typed artifacts for the standard graph backend and a fail-closed Weber-Penn specialization without claiming arbitrary topology recompilation.
 - `src/procplant-authoring-graph.ts` derives a live nine-stage graph and preview from any authored genome.
 - `src/procplant-rules.ts` applies safe environmental and authoring macro rules to allow-listed genome fields.
 - `src/procplant-guide-query.ts` samples primitive scene guides, obstacle clearance, and deterministic growth-tip steering.
