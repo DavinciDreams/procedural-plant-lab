@@ -50,7 +50,12 @@ try {
   if (result.status !== "pass") throw new Error(result.error ?? "material shader WebGL smoke failed");
   assert.match(result.renderer, /WebGL/);
   assert.match(result.planHash, /^fnv1a32:[0-9a-f]{8}$/);
-  assert.match(result.cacheKey, /procplant-wind-v1.*procplant-material-shader-v1/);
+  assert.match(result.cacheKey, /procplant-wind-v2-hierarchical.*procplant-material-shader-v1/);
+  assert.equal(result.windMode, "hierarchical");
+  assert.equal(result.windBands.trunk, 0);
+  assert.equal(result.windBands.branch, 0);
+  assert.ok(result.windBands.leaf > 0);
+  assert.equal(result.windBands.attributeBytes, result.windBands.leaf * 13);
   assert.ok(result.changed.shader >= 500 && result.changed.shadow >= 50 && result.changed.wind >= 50);
   assert.equal(new Set(Object.values(result.hashes)).size, 4);
   assert.deepEqual(errors, [], `browser console errors: ${errors.join("\n")}`);

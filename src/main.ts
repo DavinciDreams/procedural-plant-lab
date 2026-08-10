@@ -69,12 +69,16 @@ import {
   savedPresetLabelMap,
 } from "./saved-presets";
 import {
+  addProcPlantHierarchicalWindAttributes,
   addProcPlantInstanceWindAttributes,
   addProcPlantSwayAttribute,
   createProcPlantWindShadowMaterials,
   createProcPlantWindUniforms,
   installProcPlantWindShader,
+  PROCPLANT_WIND_BAND_LEAF,
+  PROCPLANT_WIND_BAND_TRUNK,
   PROCPLANT_WIND_PHASE_ATTRIBUTE,
+  type ProcPlantWindBand,
 } from "./procplant-wind";
 import {
   ProcPlantLodCompiler,
@@ -555,17 +559,18 @@ grid.material.opacity = 0.12;
 grid.position.y = 0.01;
 scene.add(grid);
 
+const hierarchicalWindShaderOptions = { hierarchical: true } as const;
 const windUniforms = createProcPlantWindUniforms();
 const plantMaterial = installProcPlantWindShader(new THREE.MeshLambertMaterial({
   vertexColors: true,
   side: THREE.DoubleSide,
-}), windUniforms);
+}), windUniforms, hierarchicalWindShaderOptions);
 
 const organMaterial = installProcPlantWindShader(new THREE.MeshLambertMaterial({
   color: 0xffffff,
   vertexColors: true,
   side: THREE.DoubleSide,
-}), windUniforms);
+}), windUniforms, hierarchicalWindShaderOptions);
 let liveBakedMaterials: ProcPlantThreeBakedMaterialSet | null = null;
 let liveBakedMaterialSourceKey: string | null = null;
 const retiredBakedMaterials: ProcPlantThreeBakedMaterialSet[] = [];
@@ -584,7 +589,7 @@ const bakedMaterialSourceKey = (genome: ProcPlantGenome, seed: number) => [
   genome.leaf.colorA,
   genome.leaf.colorB,
 ].join(":");
-const windShadowMaterials = createProcPlantWindShadowMaterials(windUniforms);
+const windShadowMaterials = createProcPlantWindShadowMaterials(windUniforms, hierarchicalWindShaderOptions);
 let cutoutLeafId: string | null = null;
 let cutoutLeafGeometry: THREE.BufferGeometry | null = null;
 let cutoutLeafMaterial: THREE.MeshLambertMaterial | null = null;
@@ -595,8 +600,10 @@ const configureWindMesh = (
   mesh: THREE.Mesh | THREE.InstancedMesh,
   matrices?: ArrayLike<THREE.Matrix4>,
   swayValues?: ArrayLike<number>,
+  fallbackBand: ProcPlantWindBand = PROCPLANT_WIND_BAND_TRUNK,
 ) => {
   addProcPlantSwayAttribute(mesh.geometry);
+  addProcPlantHierarchicalWindAttributes(mesh.geometry, { fallbackBand });
   if (mesh instanceof THREE.InstancedMesh) {
     addProcPlantInstanceWindAttributes(mesh, matrices, swayValues);
   }
@@ -2135,7 +2142,7 @@ const addGrassCarpet = (
   }
   if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   mesh.instanceMatrix.needsUpdate = true;
-  configureWindMesh(mesh);
+  configureWindMesh(mesh, undefined, undefined, PROCPLANT_WIND_BAND_LEAF);
   group.add(mesh);
   currentStats.draws += 1;
   const triangles = ((geometry.index?.count ?? geometry.getAttribute("position").count) / 3) * tuftCount;
@@ -2377,6 +2384,7 @@ const scatterBiome = async (genome: ProcPlantGenome, env: ProcPlantEnvironment, 
       mesh,
       bucket.instances.map((instance) => instance.matrix),
       bucket.instances.map((instance) => instance.sway),
+      PROCPLANT_WIND_BAND_LEAF,
     );
     if (usesCutout && mesh.castShadow && cutoutLeafDepthMaterial && cutoutLeafDistanceMaterial) {
       mesh.customDepthMaterial = cutoutLeafDepthMaterial;
@@ -4196,7 +4204,7 @@ const rebuildHeroImportFromEditor = async (nextState: ProcPlantHeroSpineEditorSt
       procPlantHeroSpineEditorStateToSpine(nextState),
     );
     configureWindMesh(authored.trunk);
-    if (authored.leaves) configureWindMesh(authored.leaves, authored.leafMatrices, authored.leafSways);
+    if (authored.leaves) configureWindMesh(authored.leaves, authored.leafMatrices, authored.leafSways, PROCPLANT_WIND_BAND_LEAF);
     if (request !== heroSpineRebuildRequest || source !== heroImportSource) {
       disposeHeroImportGroup(authored.group);
       return;
@@ -4278,7 +4286,7 @@ heroGlbFileInput.addEventListener("change", async () => {
       activeOrganMaterial(),
     );
     configureWindMesh(authored.trunk);
-    if (authored.leaves) configureWindMesh(authored.leaves, authored.leafMatrices, authored.leafSways);
+    if (authored.leaves) configureWindMesh(authored.leaves, authored.leafMatrices, authored.leafSways, PROCPLANT_WIND_BAND_LEAF);
     disposeHeroImportPreview();
     heroImportSource = source;
     heroImportFileName = file.name;
@@ -4320,8 +4328,8 @@ bakeMaterialButton.addEventListener("click", async () => {
     try {
       nextLiveMaterials.bark.vertexColors = true;
       nextLiveMaterials.organ.vertexColors = true;
-      installProcPlantWindShader(nextLiveMaterials.bark, windUniforms);
-      installProcPlantWindShader(nextLiveMaterials.organ, windUniforms);
+      installProcPlantWindShader(nextLiveMaterials.bark, windUniforms, hierarchicalWindShaderOptions);
+      installProcPlantWindShader(nextLiveMaterials.organ, windUniforms, hierarchicalWindShaderOptions);
       if (materialShaderPreviewEnabled) {
         if (!materialGraphEditorState || materialGraphEditorSourceKey !== bakedMaterialSourceKey(genome, generatorSeed)) {
           throw new Error("generated shader preview requires the current material editor graph");
@@ -4420,16 +4428,16 @@ const installActiveCutout = async (contourOverride?: ProcPlantCutout) => {
     alphaTest: 0.38,
     side: THREE.DoubleSide,
     transparent: false,
-  }), windUniforms);
+  }), windUniforms, hierarchicalWindShaderOptions);
   const nextDepthMaterial = installProcPlantWindShader(new THREE.MeshDepthMaterial({
     depthPacking: THREE.RGBADepthPacking,
     map: texture,
     alphaTest: 0.38,
-  }), windUniforms);
+  }), windUniforms, hierarchicalWindShaderOptions);
   const nextDistanceMaterial = installProcPlantWindShader(new THREE.MeshDistanceMaterial({
     map: texture,
     alphaTest: 0.38,
-  }), windUniforms);
+  }), windUniforms, hierarchicalWindShaderOptions);
   const previewTexture = texture.clone();
   previewTexture.needsUpdate = true;
   const material = new THREE.MeshLambertMaterial({

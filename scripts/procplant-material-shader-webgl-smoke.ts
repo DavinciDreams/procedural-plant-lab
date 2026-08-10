@@ -11,10 +11,12 @@ import {
   installProcPlantThreeMaterialShader,
 } from "../src/procplant-three-material-shader";
 import {
+  addProcPlantHierarchicalWindAttributes,
   addProcPlantSwayAttribute,
   createProcPlantWindShadowMaterials,
   createProcPlantWindUniforms,
   installProcPlantWindShader,
+  PROCPLANT_WIND_BAND_LEAF,
 } from "../src/procplant-wind";
 
 declare global {
@@ -73,13 +75,18 @@ try {
   const geometry = new THREE.PlaneGeometry(1.4, 2.2, 6, 10);
   geometry.translate(0, 1.15, 0);
   addProcPlantSwayAttribute(geometry);
+  const hierarchicalWind = addProcPlantHierarchicalWindAttributes(geometry, { fallbackBand: PROCPLANT_WIND_BAND_LEAF });
   const wind = createProcPlantWindUniforms(0.42);
-  const material = installProcPlantWindShader(new THREE.MeshStandardMaterial({ color: 0x2f8b36, roughness: 0.9, side: THREE.DoubleSide }), wind);
+  const material = installProcPlantWindShader(
+    new THREE.MeshStandardMaterial({ color: 0x2f8b36, roughness: 0.9, side: THREE.DoubleSide }),
+    wind,
+    { hierarchical: true },
+  );
   const leaf = new THREE.Mesh(geometry, material);
   leaf.position.set(0, 0.02, 0);
   leaf.castShadow = true;
   leaf.receiveShadow = true;
-  const shadowMaterials = createProcPlantWindShadowMaterials(wind);
+  const shadowMaterials = createProcPlantWindShadowMaterials(wind, { hierarchical: true });
   leaf.customDepthMaterial = shadowMaterials.depth;
   leaf.customDistanceMaterial = shadowMaterials.distance;
   scene.add(leaf);
@@ -109,6 +116,13 @@ try {
     renderer: renderer.capabilities.isWebGL2 ? "WebGL2" : "WebGL1",
     planHash: plan.contentHash,
     cacheKey: installation.cacheKey,
+    windMode: "hierarchical",
+    windBands: {
+      trunk: hierarchicalWind.trunkVertices,
+      branch: hierarchicalWind.branchVertices,
+      leaf: hierarchicalWind.leafVertices,
+      attributeBytes: hierarchicalWind.attributeBytes,
+    },
     hashes: { baked: hash(bakedPixels), shader: hash(shaderPixels), noShadow: hash(noShadowPixels), wind: hash(windPixels) },
     changed: {
       shader: changedBytes(bakedPixels, shaderPixels),
