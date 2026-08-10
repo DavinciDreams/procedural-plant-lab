@@ -287,13 +287,44 @@ const productionBackend = (genome: ProcPlantGenome) => genome.weberPenn
         ? "guided-vine"
         : "procplant-graph";
 
+type ProcPlantHerbaceousBackend = "grass" | "fern" | "groundcover" | "moss";
+
+const BESPOKE_GROUNDCOVER_IDS = new Set([
+  "maidenhairFernPatch",
+  "woodlandVioletCarpet",
+  "trilliumPatch",
+  "horsetailColony",
+]);
+
+const authoredGenomeId = (genome: Pick<ProcPlantGenome, "id">) => genome.id.split("@", 1)[0]!;
+
+/**
+ * The typed herbaceous path is intentionally narrower than the legacy graph.
+ * Clumps transform independently generated whole shoots after graph generation,
+ * guided moss consumes a support path, and four broad patches have bespoke
+ * structure/organ coupling. Those forms need their own staged contracts.
+ */
+const herbaceousBackendFor = (genome: ProcPlantGenome): ProcPlantHerbaceousBackend | null => {
+  if (genome.clump || genome.vine || genome.weberPenn || genome.branchModules || genome.spaceColonization) return null;
+  if ((genome.accessoryOrgans?.length ?? 0) > 0) return null;
+  if ((genome.fern || genome.moss) && genome.flower) return null;
+  if (genome.groundcover) {
+    return BESPOKE_GROUNDCOVER_IDS.has(authoredGenomeId(genome)) ? null : "groundcover";
+  }
+  if (genome.moss) return "moss";
+  if (genome.grass && genome.habit === "grass") return "grass";
+  if (genome.fern && genome.habit === "fern") return "fern";
+  return null;
+};
+
 const assertSupportedBackend = (genome: ProcPlantGenome) => {
+  const herbaceousBackend = herbaceousBackendFor(genome);
   const unsupported = [
     genome.weberPenn && "weber-penn",
-    genome.grass && "grass-specialization",
-    genome.fern && "fern-specialization",
-    genome.groundcover && "groundcover-specialization",
-    genome.moss && !genome.vine && "moss-specialization",
+    genome.grass && herbaceousBackend !== "grass" && "grass-specialization",
+    genome.fern && herbaceousBackend !== "fern" && herbaceousBackend !== "groundcover" && "fern-specialization",
+    genome.groundcover && herbaceousBackend !== "groundcover" && "groundcover-specialization",
+    genome.moss && !genome.vine && herbaceousBackend !== "moss" && "moss-specialization",
     genome.clump && "clump-specialization",
   ].filter(Boolean);
   if (unsupported.length > 0) {
@@ -393,7 +424,7 @@ const validateProductionNodeParameters = (node: ProcPlantGeneratorNode, genome: 
       throw new ProcPlantProductionDagError(`${node.id}.count is outside the supported branch-module range`);
     }
   } else if (node.stage === "foliage") {
-    if (!["leaf", "coniferSpray", "palmFrond", "mossTuft"].includes(String(parameters.foliageKind))) {
+    if (!["leaf", "grassBlade", "coniferSpray", "palmFrond", "mossTuft"].includes(String(parameters.foliageKind))) {
       throw new ProcPlantProductionDagError(`${node.id}.parameters.foliageKind is unsupported by the typed graph backend`);
     }
     if (!["lanceolate", "ovate", "cordate", "palmate", "spatulate", "fan", "linear", "round", "frond", "blade"].includes(String(parameters.shape))) {
@@ -586,6 +617,47 @@ const validateGuidedVineGraphSemantics = (
   }
 };
 
+const validateHerbaceousNodeSemantics = (
+  node: ProcPlantGeneratorNode,
+  canonicalNode: ProcPlantGeneratorNode,
+  genome: ProcPlantGenome,
+  backend: ProcPlantHerbaceousBackend,
+) => {
+  const unchanged = (key: keyof ProcPlantGeneratorNode) => stableJson(node[key]) === stableJson(canonicalNode[key]);
+  if (node.stage === "architecture") {
+    if (!unchanged("curve") || !unchanged("placement")) {
+      throw new ProcPlantProductionDagError(`${node.id} edited architecture curve/placement is unsupported by the ${backend} adapter`);
+    }
+    if ((backend === "grass" || backend === "fern") && (!unchanged("count") || !unchanged("seedOverride"))) {
+      throw new ProcPlantProductionDagError(`${node.id} architecture count/seed is deterministic for the ${backend} adapter`);
+    }
+    const parameters = node.parameters ?? {};
+    if (parameters.apicalDominance !== genome.apicalDominance || parameters.freeformCrown !== undefined) {
+      throw new ProcPlantProductionDagError(`${node.id} apical/freeform architecture semantics are unsupported by the ${backend} adapter`);
+    }
+  } else if (node.stage === "branching") {
+    if (!["count", "curve", "placement", "parameters", "seedOverride"].every((key) => unchanged(key as keyof ProcPlantGeneratorNode))) {
+      throw new ProcPlantProductionDagError(`${node.id} edited branch generation is unsupported by the ${backend} adapter`);
+    }
+  } else if (node.stage === "foliage") {
+    const expectedKind = backend === "grass" ? "grassBlade" : backend === "fern" ? "palmFrond" : backend === "moss" ? "mossTuft" : "leaf";
+    if (node.parameters?.foliageKind !== expectedKind) {
+      throw new ProcPlantProductionDagError(`${node.id}.parameters.foliageKind must remain ${expectedKind} for the ${backend} adapter`);
+    }
+    if (node.parameters?.phyllotaxy !== (genome.phyllotaxy?.mode ?? "spiral")) {
+      throw new ProcPlantProductionDagError(`${node.id} edited phyllotaxy mode is unsupported by the ${backend} adapter`);
+    }
+    if (backend !== "groundcover" && node.parameters?.shape !== genome.leaf.shape) {
+      throw new ProcPlantProductionDagError(`${node.id} edited foliage shape is unsupported by the ${backend} instance geometry`);
+    }
+    if (!unchanged("placement")) {
+      throw new ProcPlantProductionDagError(`${node.id} edited foliage placement is unsupported by the ${backend} adapter`);
+    }
+  } else if (node.stage === "reproductive" && !unchanged("placement")) {
+    throw new ProcPlantProductionDagError(`${node.id} edited reproductive placement is unsupported by the ${backend} adapter`);
+  }
+};
+
 const tangentBasis = (direction: THREE.Vector3) => {
   const forward = direction.clone().normalize();
   const right = Math.abs(forward.y) > 0.92
@@ -604,6 +676,197 @@ const rotateFromAxis = (axis: THREE.Vector3, azimuth: number, elevation: number)
 const curveValue = (node: ProcPlantGeneratorNode, genome: ProcPlantGenome, t: number) =>
   node.curve ? evaluateProcPlantGeneratorCurve(node.curve, t) :
     genome.internode.base + (genome.internode.tip - genome.internode.base) * Math.pow(t, genome.internode.curve);
+
+const scaledHerbaceousCount = (
+  baseline: number,
+  node: ProcPlantGeneratorNode,
+  canonicalNode: ProcPlantGeneratorNode,
+) => {
+  const canonicalCount = Math.max(1, canonicalNode.count ?? 1);
+  return Math.max(1, Math.min(100_000, Math.round(baseline * Math.max(1, node.count ?? 1) / canonicalCount)));
+};
+
+const herbaceousRoot = (genome: ProcPlantGenome): ProcPlantStemNode => ({
+  position: new THREE.Vector3(),
+  direction: new THREE.Vector3(0, 1, 0),
+  radius: genome.moss ? 0.0025 : genome.groundcover ? 0.004 : 0.018,
+  depth: 0,
+  t: 0,
+  index: 0,
+});
+
+const createHerbaceousArchitectureGraph = (
+  genome: ProcPlantGenome,
+  environment: ProcPlantEnvironment,
+  backend: ProcPlantHerbaceousBackend,
+  node: ProcPlantGeneratorNode,
+  canonicalNode: ProcPlantGeneratorNode,
+  seed: number,
+) => {
+  const root = herbaceousRoot(genome);
+  if (backend === "grass" || backend === "fern") return buildProcPlantGraphIr([root], [], []);
+  const random = randomFromSeed(seed);
+  const geneCount = backend === "moss" ? genome.moss!.clumps : genome.groundcover!.clusters;
+  const count = scaledHerbaceousCount(geneCount, node, canonicalNode);
+  const radius = backend === "moss" ? genome.moss!.radius : genome.groundcover!.radius;
+  const height = backend === "moss" ? genome.moss!.height : genome.groundcover!.height;
+  const jitter = backend === "moss" ? THREE.MathUtils.clamp(genome.moss!.surfaceJitter ?? 0.2, 0, 1) : 1;
+  const shade = 1 - THREE.MathUtils.clamp(environment.light, 0, 1);
+  const stems: ProcPlantStemNode[] = [root];
+  const segments: Array<[number, number]> = [];
+  let previous = root;
+  for (let ordinal = 0; ordinal < count; ordinal++) {
+    const t = count > 1 ? ordinal / (count - 1) : 0;
+    const yaw = ordinal * 2.399963229728653 + (genome.phyllotaxy?.phase ?? 0) + (random() - 0.5) * 0.34 * jitter;
+    const spread = ordinal === 0 ? 0 : radius * Math.sqrt(t) * (0.84 + random() * 0.24);
+    const position = new THREE.Vector3(
+      Math.cos(yaw) * spread,
+      backend === "moss" ? 0.004 + random() * height * jitter * 0.12 : 0.012 + random() * height * (0.06 + shade * 0.02),
+      Math.sin(yaw) * spread,
+    );
+    const direction = position.clone().sub(previous.position);
+    if (direction.lengthSq() < 1e-8) direction.set(Math.cos(yaw), backend === "moss" ? 0.04 : 0.12, Math.sin(yaw));
+    direction.normalize();
+    const stem: ProcPlantStemNode = {
+      position,
+      direction,
+      radius: root.radius * THREE.MathUtils.lerp(0.9, 0.42, t),
+      depth: 0,
+      t,
+      index: stems.length,
+    };
+    stems.push(stem);
+    if (backend === "moss" || genome.groundcover!.runners) segments.push([previous.index, stem.index]);
+    previous = stem;
+  }
+  return buildProcPlantGraphIr(stems, segments, []);
+};
+
+const addHerbaceousFoliage = (
+  source: ProcPlantGraph,
+  genome: ProcPlantGenome,
+  environment: ProcPlantEnvironment,
+  backend: ProcPlantHerbaceousBackend,
+  node: ProcPlantGeneratorNode,
+  canonicalNode: ProcPlantGeneratorNode,
+  seed: number,
+) => {
+  const graph = cloneGraph(source);
+  const random = randomFromSeed(seed);
+  const shade = 1 - THREE.MathUtils.clamp(environment.light, 0, 1);
+  const heightStretch = 1 + shade * genome.lightResponse.shadeAvoidance;
+  if (backend === "grass") {
+    const count = scaledHerbaceousCount(genome.grass!.blades, node, canonicalNode);
+    for (let ordinal = 0; ordinal < count; ordinal++) {
+      const t = count > 1 ? ordinal / (count - 1) : 0;
+      const azimuth = ordinal * (genome.phyllotaxisAngle || 2.399963229728653) + (random() - 0.5) * 0.16;
+      const lean = 0.36 + random() * 0.24;
+      graph.organs.push({
+        kind: "grassBlade",
+        position: new THREE.Vector3((random() - 0.5) * 0.2, 0, (random() - 0.5) * 0.2),
+        direction: rotateFromAxis(new THREE.Vector3(0, 1, 0), azimuth, lean),
+        right: new THREE.Vector3(Math.cos(azimuth), 0, -Math.sin(azimuth)),
+        scale: curveValue(node, genome, t) * heightStretch * (1 - (genome.grass!.heightJitter ?? 0.2) * random()),
+        t,
+      });
+    }
+  } else if (backend === "fern") {
+    const baseline = Math.max(4, Math.min(9, Math.round(genome.fern!.pinnae / 3)));
+    const count = scaledHerbaceousCount(baseline, node, canonicalNode);
+    const frondLength = genome.nodeCount * (genome.internode.base + genome.internode.tip) * 0.5
+      * (0.4 + genome.fern!.arch * 0.16) * heightStretch;
+    for (let ordinal = 0; ordinal < count; ordinal++) {
+      const yaw = ordinal * (genome.phyllotaxisAngle || 2.399963229728653) + (random() - 0.5) * 0.16;
+      const frame = rotateFromAxis(new THREE.Vector3(0, 1, 0), yaw, 1.02 + genome.fern!.arch * 0.18 + random() * 0.1);
+      const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw)).projectOnPlane(frame).normalize();
+      graph.organs.push({
+        kind: "palmFrond",
+        position: new THREE.Vector3((random() - 0.5) * 0.045, 0.018 + random() * 0.018, (random() - 0.5) * 0.045),
+        direction: frame,
+        right,
+        scale: frondLength * (0.84 + random() * 0.22),
+        t: ordinal / Math.max(1, count - 1),
+      });
+    }
+  } else {
+    const candidates = graph.stems.slice(1);
+    if (candidates.length < 1) throw new ProcPlantProductionDagError(`${node.id} requires herbaceous support nodes`);
+    const baseline = backend === "moss"
+      ? candidates.length * Math.max(1, Math.min(4, Math.round(genome.moss!.tuftsPerClump)))
+      : candidates.length * Math.max(1, Math.min(5, Math.round(genome.groundcover!.leavesPerCluster)));
+    const count = scaledHerbaceousCount(baseline, node, canonicalNode);
+    for (let ordinal = 0; ordinal < count; ordinal++) {
+      const support = candidates[ordinal % candidates.length]!;
+      const local = Math.floor(ordinal / candidates.length);
+      const azimuth = ordinal * (genome.phyllotaxisAngle || 2.399963229728653) + (random() - 0.5) * 0.18;
+      const direction = rotateFromAxis(
+        support.direction,
+        azimuth,
+        backend === "moss" ? Math.PI / 2.8 : 0.86 + random() * 0.2,
+      ).add(new THREE.Vector3(0, backend === "moss" ? 0.72 : 0.42 + shade * 0.12, 0)).normalize();
+      let right = tangentBasis(support.direction).right.applyAxisAngle(support.direction, azimuth).projectOnPlane(direction);
+      if (right.lengthSq() < 1e-8) right = tangentBasis(direction).right;
+      right.normalize();
+      graph.organs.push({
+        kind: backend === "moss" ? "mossTuft" : "leaf",
+        position: support.position.clone().addScaledVector(right, local * (backend === "moss" ? genome.moss!.height * 0.04 : genome.groundcover!.radius * 0.018)),
+        direction,
+        right,
+        scale: backend === "moss"
+          ? genome.moss!.height * (0.78 + random() * 0.3)
+          : curveValue(node, genome, support.t) * (0.9 + random() * 0.22),
+        t: support.t,
+      });
+    }
+  }
+  return buildProcPlantGraphIr(graph.stems, graph.segments, graph.organs);
+};
+
+const addHerbaceousReproductiveOrgans = (
+  source: ProcPlantGraph,
+  genome: ProcPlantGenome,
+  backend: ProcPlantHerbaceousBackend,
+  node: ProcPlantGeneratorNode,
+  canonicalNode: ProcPlantGeneratorNode,
+  seed: number,
+) => {
+  const graph = cloneGraph(source);
+  if (!genome.flower || !node.parameters?.flower) return graph;
+  const random = randomFromSeed(seed);
+  if (backend === "grass") {
+    const blades = graph.organs.filter((organ) => organ.kind === "grassBlade");
+    if (blades.length < 1) throw new ProcPlantProductionDagError(`${node.id} requires grass foliage input`);
+    const tallest = blades.reduce((best, organ) => organ.scale > best.scale ? organ : best, blades[0]!);
+    graph.organs.push({
+      kind: "flower",
+      position: tallest.position.clone().addScaledVector(tallest.direction, tallest.scale * 0.92),
+      direction: tallest.direction.clone(),
+      right: tallest.right.clone(),
+      scale: 0.5 + random() * 0.1,
+      t: 1,
+    });
+  } else if (backend === "groundcover") {
+    const supports = graph.stems.slice(1);
+    if (supports.length < 1) throw new ProcPlantProductionDagError(`${node.id} requires groundcover support input`);
+    const baseline = Math.max(1, Math.round(supports.length * (genome.groundcover!.flowerRate ?? 0)));
+    const count = scaledHerbaceousCount(baseline, node, canonicalNode);
+    for (let ordinal = 0; ordinal < count; ordinal++) {
+      const support = supports[Math.floor(((ordinal + random()) / count) * supports.length)]!;
+      const direction = new THREE.Vector3((random() - 0.5) * 0.08, 1, (random() - 0.5) * 0.08).normalize();
+      graph.organs.push({
+        kind: "flower",
+        position: support.position.clone().addScaledVector(direction, genome.groundcover!.height * (0.72 + random() * 0.28)),
+        direction,
+        right: tangentBasis(direction).right,
+        scale: 0.7 + random() * 0.2,
+        t: 1,
+      });
+    }
+  } else {
+    throw new ProcPlantProductionDagError(`${node.id} flower semantics are unsupported for ${backend}`);
+  }
+  return buildProcPlantGraphIr(graph.stems, graph.segments, graph.organs);
+};
 
 const createArchitectureGraph = (
   genome: ProcPlantGenome,
@@ -987,6 +1250,8 @@ export const compileProcPlantProductionDag = (
 
   if (genome.vine) validateGuidedVineGraphSemantics(graph, canonical);
   assertSupportedBackend(genome);
+  const herbaceousBackend = herbaceousBackendFor(genome);
+  const canonicalNodeByStage = new Map(canonical.nodes.map((node) => [node.stage, node]));
   const maximumWork = options.maxWork ?? PROCPLANT_PRODUCTION_DAG_MAX_WORK;
   if (!Number.isInteger(maximumWork) || maximumWork < 1 || maximumWork > PROCPLANT_PRODUCTION_DAG_MAX_WORK) {
     throw new ProcPlantProductionDagError(`maxWork must be an integer in 1..${PROCPLANT_PRODUCTION_DAG_MAX_WORK}`);
@@ -997,6 +1262,9 @@ export const compileProcPlantProductionDag = (
     validateProductionNodeParameters(node, genome);
     if (genome.spaceColonization) validateSpaceColonizationNodeSemantics(node, canonicalNodeById.get(node.id));
     if (genome.branchModules) validateBranchModuleNodeSemantics(node, canonicalNodeById.get(node.id));
+    if (herbaceousBackend) {
+      validateHerbaceousNodeSemantics(node, canonicalNodeByStage.get(node.stage) ?? node, genome, herbaceousBackend);
+    }
     const unsupported = node.dependsOn
       .map((id) => nodeById.get(id)!)
       .filter((dependency) => !ALLOWED_ARTIFACT_STAGES[node.stage].includes(dependency.stage));
@@ -1066,7 +1334,16 @@ export const compileProcPlantProductionDag = (
       } else {
         const builtGraph = architectureGenome.vine
           ? buildGuidedVineProcPlantArchitectureGraph(architectureGenome, node.count)
-          : createArchitectureGraph(architectureGenome, source.environment, node, seed);
+          : herbaceousBackend
+            ? createHerbaceousArchitectureGraph(
+                architectureGenome,
+                source.environment,
+                herbaceousBackend,
+                node,
+                canonicalNodeByStage.get("architecture")!,
+                seed,
+              )
+            : createArchitectureGraph(architectureGenome, source.environment, node, seed);
         artifact = withArtifactHash({
           kind: "graph", stage: "architecture", nodeId, seed, lineage: lineageFor(node, sources),
           genome: architectureGenome, environment: source.environment, graph: builtGraph, runtime,
@@ -1111,7 +1388,8 @@ export const compileProcPlantProductionDag = (
         artifact = withArtifactHash({
           kind: "graph", stage: "branching", nodeId, seed, lineage: lineageFor(node, inputs),
           genome: inputs[0]!.genome, environment: inputs[0]!.environment,
-          graph: addBranches(base, inputs[0]!.genome, node, seed), runtime: inputs[0]!.runtime,
+          graph: herbaceousBackend ? base : addBranches(base, inputs[0]!.genome, node, seed),
+          runtime: inputs[0]!.runtime,
         });
       }
     } else if (node.stage === "foliage") {
@@ -1175,7 +1453,17 @@ export const compileProcPlantProductionDag = (
         };
         const foliageGraph = foliageGenome.vine
           ? addGuidedVineProcPlantFoliage(foliageGenome, base, seed, node.count)
-          : addFoliage(base, foliageGenome, node, seed);
+          : herbaceousBackend
+            ? addHerbaceousFoliage(
+                base,
+                foliageGenome,
+                inputs[0]!.environment,
+                herbaceousBackend,
+                node,
+                canonicalNodeByStage.get("foliage")!,
+                seed,
+              )
+            : addFoliage(base, foliageGenome, node, seed);
         artifact = withArtifactHash({
           kind: "graph", stage: "foliage", nodeId, seed, lineage: lineageFor(node, inputs),
           genome: foliageGenome, environment: inputs[0]!.environment,
@@ -1187,7 +1475,16 @@ export const compileProcPlantProductionDag = (
       const base = mergeGraphArtifacts(inputs);
       const reproductiveGraph = inputs[0]!.genome.vine
         ? addGuidedVineProcPlantReproductiveOrgans(inputs[0]!.genome, base, seed, node.count)
-        : addReproductiveOrgans(base, inputs[0]!.genome, node, seed);
+        : herbaceousBackend
+          ? addHerbaceousReproductiveOrgans(
+              base,
+              inputs[0]!.genome,
+              herbaceousBackend,
+              node,
+              canonicalNodeByStage.get("reproductive")!,
+              seed,
+            )
+          : addReproductiveOrgans(base, inputs[0]!.genome, node, seed);
       artifact = withArtifactHash({
         kind: "graph", stage: "reproductive", nodeId, seed, lineage: lineageFor(node, inputs),
         genome: inputs[0]!.genome, environment: inputs[0]!.environment,

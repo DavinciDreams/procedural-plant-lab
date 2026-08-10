@@ -84,6 +84,12 @@ export const createProcPlantAuthoringGraph = (
       : genome.vine
         ? "guided-vine"
         : "procplant-graph";
+  const herbaceousReproductiveInput = !genome.clump
+    && !genome.vine
+    && !genome.weberPenn
+    && !genome.branchModules
+    && !genome.spaceColonization
+    && Boolean((genome.grass && genome.habit === "grass") || genome.groundcover);
 
   return createProcPlantGeneratorGraph([
     {
@@ -150,13 +156,15 @@ export const createProcPlantAuthoringGraph = (
         phyllotaxy: genome.phyllotaxy?.mode ?? "spiral",
         foliageKind: genome.moss
           ? "mossTuft"
-          : genome.habit === "conifer"
-            ? "coniferSpray"
-            : genome.habit === "fern"
-              ? "fernFrond"
-              : genome.habit === "palm"
-                ? "palmFrond"
-                : "leaf",
+          : genome.habit === "grass" && genome.grass
+            ? "grassBlade"
+            : genome.habit === "fern" && genome.fern && !genome.groundcover
+              ? "palmFrond"
+              : genome.habit === "conifer"
+                ? "coniferSpray"
+                : genome.habit === "palm"
+                  ? "palmFrond"
+                  : "leaf",
       },
     },
     {
@@ -164,12 +172,18 @@ export const createProcPlantAuthoringGraph = (
       label: "Flowers and accessories",
       stage: "reproductive",
       enabled: reproductiveCount > 0,
-      dependsOn: genome.vine ? [ids.foliage] : [ids.architecture, ids.branching],
+      dependsOn: genome.vine
+        ? [ids.foliage]
+        : herbaceousReproductiveInput
+          ? [ids.architecture, ids.branching, ids.foliage]
+          : [ids.architecture, ids.branching],
       count: reproductiveCount,
       placement: { mode: "tips", density: genome.groundcover?.flowerRate ?? 1 },
       parentScope: genome.vine
         ? { mode: "stages", stages: ["foliage"] }
-        : { mode: "stages", stages: ["architecture", "branching"] },
+        : herbaceousReproductiveInput
+          ? { mode: "stages", stages: ["architecture", "branching", "foliage"] }
+          : { mode: "stages", stages: ["architecture", "branching"] },
       parameters: {
         flower: Boolean(genome.flower),
         accessories: (genome.accessoryOrgans ?? []).map((organ) => organ.kind),
