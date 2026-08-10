@@ -5749,23 +5749,89 @@ const buildDaylilyClumpParts = (
   };
 };
 
+export const PROCPLANT_CLUMP_STAGE_PLAN_VERSION = 1 as const;
+
+export interface ProcPlantClumpStagePlan {
+  version: typeof PROCPLANT_CLUMP_STAGE_PLAN_VERSION;
+  shootSeed: number;
+  placementSeed: number;
+  shootSeeds: number[];
+  scales: number[];
+  transforms: THREE.Matrix4[];
+}
+
 /**
- * Build a clump: several offset shoots of the same genome merged into one part
- * set. Each shoot gets its own seed, a golden-angle placement inside the clump
- * radius, slight scale variation, and an outward lean so the mound arches.
+ * Resolve the two independently seeded parts of the legacy clump backend.
+ * `shootSeed` controls only shoot generation; `placementSeed` controls only
+ * golden-angle offsets, scale variation, spin, and outward lean.
  */
-const buildProcPlantClumpParts = (
+export const createProcPlantClumpStagePlan = (
   genome: ProcPlantGenome,
-  seed: number,
-  env: ProcPlantEnvironment,
-  clump: NonNullable<ProcPlantGenome["clump"]>,
-): ProcPlantInstancedParts => {
+  shootSeed: number,
+  placementSeed: number,
+): ProcPlantClumpStagePlan => {
+  const clump = genome.clump;
+  if (!clump || clump.count <= 1) throw new Error("clump stage planning requires clump.count > 1");
+  if (authoredProcPlantId(genome) === "daylilyFlower") {
+    throw new Error("daylily crown/scapes are not represented by the generic clump stage plan");
+  }
   const count = Math.max(1, Math.min(24, Math.round(clump.count)));
   const radius = Math.max(0, clump.radius);
   const jitter = THREE.MathUtils.clamp(clump.jitter ?? 0.4, 0, 1);
   const scaleVar = THREE.MathUtils.clamp(clump.scaleVar ?? 0.25, 0, 1);
   const lean = clump.lean ?? 0.18;
-  const rng = rngFromSeed((seed ^ 0x27d4eb2f) >>> 0);
+  const normalizedShootSeed = shootSeed >>> 0;
+  const normalizedPlacementSeed = placementSeed >>> 0;
+  const rng = rngFromSeed((normalizedPlacementSeed ^ 0x27d4eb2f) >>> 0);
+  const shootSeeds: number[] = [];
+  const scales: number[] = [];
+  const transforms: THREE.Matrix4[] = [];
+
+  for (let i = 0; i < count; i++) {
+    shootSeeds.push((normalizedShootSeed + i * 2749) >>> 0);
+
+    const ringT = count > 1 ? i / (count - 1) : 0;
+    const spread = i === 0 ? 0 : radius * (0.35 + ringT * 0.65);
+    const angle = i * GOLDEN_ANGLE + (rng() - 0.5) * jitter * 1.4;
+    const jitterR = spread * (1 + (rng() - 0.5) * jitter);
+    const ox = Math.cos(angle) * jitterR;
+    const oz = Math.sin(angle) * jitterR;
+
+    const shootScale = 1 + (rng() - 0.5) * scaleVar;
+    scales.push(shootScale);
+    const leanAxis = new THREE.Vector3(-Math.sin(angle), 0, Math.cos(angle));
+    const leanQuat = new THREE.Quaternion().setFromAxisAngle(leanAxis, lean * ringT);
+    const spinQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rng() * Math.PI * 2, 0));
+    const quat = leanQuat.multiply(spinQuat);
+    transforms.push(new THREE.Matrix4().compose(
+      new THREE.Vector3(ox, 0, oz),
+      quat,
+      new THREE.Vector3(shootScale, shootScale, shootScale),
+    ));
+  }
+  return {
+    version: PROCPLANT_CLUMP_STAGE_PLAN_VERSION,
+    shootSeed: normalizedShootSeed,
+    placementSeed: normalizedPlacementSeed,
+    shootSeeds,
+    scales,
+    transforms,
+  };
+};
+
+/** Materialize a generic clump stage plan without coupling its two random streams. */
+export const buildProcPlantClumpStageParts = (
+  genome: ProcPlantGenome,
+  plan: ProcPlantClumpStagePlan,
+  env: ProcPlantEnvironment = defaultPlantEnvironment(),
+): ProcPlantInstancedParts => {
+  const clump = genome.clump;
+  if (!clump || clump.count <= 1) throw new Error("clump stage materialization requires clump.count > 1");
+  if (plan.version !== PROCPLANT_CLUMP_STAGE_PLAN_VERSION) throw new Error("unsupported clump stage plan version");
+  const count = Math.max(1, Math.min(24, Math.round(clump.count)));
+  if (plan.shootSeeds.length !== count || plan.scales.length !== count || plan.transforms.length !== count) {
+    throw new Error(`clump stage plan must contain exactly ${count} shoots and transforms`);
+  }
 
   let mergedStems: ProcPlantTemplate | null = null;
   const instances: ProcPlantInstance[] = [];
@@ -5778,28 +5844,9 @@ const buildProcPlantClumpParts = (
   let stemTriangles = 0;
 
   for (let i = 0; i < count; i++) {
-    const shoot = buildProcPlantSingleShootParts(genome, (seed + i * 2749) >>> 0, env);
-
-    // Placement: first shoot at center, rest spiralled out via golden angle.
-    const ringT = count > 1 ? i / (count - 1) : 0;
-    const spread = i === 0 ? 0 : radius * (0.35 + ringT * 0.65);
-    const angle = i * GOLDEN_ANGLE + (rng() - 0.5) * jitter * 1.4;
-    const jitterR = spread * (1 + (rng() - 0.5) * jitter);
-    const ox = Math.cos(angle) * jitterR;
-    const oz = Math.sin(angle) * jitterR;
-
-    const shootScale = 1 + (rng() - 0.5) * scaleVar;
-    // Peripheral shoots lean away from clump center for an arching mound.
-    const leanAxis = new THREE.Vector3(-Math.sin(angle), 0, Math.cos(angle));
-    const leanQuat = new THREE.Quaternion().setFromAxisAngle(leanAxis, lean * ringT);
-    const spinQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rng() * Math.PI * 2, 0));
-    const quat = leanQuat.multiply(spinQuat);
-
-    const matrix = new THREE.Matrix4().compose(
-      new THREE.Vector3(ox, 0, oz),
-      quat,
-      new THREE.Vector3(shootScale, shootScale, shootScale),
-    );
+    const shoot = buildProcPlantSingleShootParts(genome, plan.shootSeeds[i]!, env);
+    const matrix = plan.transforms[i]!;
+    const shootScale = plan.scales[i]!;
 
     const transformedStems = transformTemplate(shoot.stems, matrix);
     mergedStems = mergedStems ? combineTemplates(mergedStems, transformedStems) : transformedStems;
@@ -5843,7 +5890,7 @@ const buildProcPlantClumpParts = (
     stemTriangles += shoot.stats.stemTriangles;
   }
 
-  const stems = mergedStems ?? buildProcPlantSingleShootParts(genome, seed, env).stems;
+  const stems = mergedStems ?? buildProcPlantSingleShootParts(genome, plan.shootSeed, env).stems;
   const mergedGraph = buildProcPlantGraphIr(graphStems, graphSegments, graphOrgans);
   return {
     stems,
@@ -5860,6 +5907,18 @@ const buildProcPlantClumpParts = (
     },
   };
 };
+
+/** Preserve the exact legacy stream assignment used by canonical clump builds. */
+const buildProcPlantClumpParts = (
+  genome: ProcPlantGenome,
+  seed: number,
+  env: ProcPlantEnvironment,
+  _clump: NonNullable<ProcPlantGenome["clump"]>,
+): ProcPlantInstancedParts => buildProcPlantClumpStageParts(
+  genome,
+  createProcPlantClumpStagePlan(genome, seed, seed),
+  env,
+);
 
 export const createProcPlantLeafGeometry = (
   shape: LeafShapeKind,
@@ -7489,7 +7548,7 @@ export const buildProcPlantTemplate = (
 ): { template: ProcPlantTemplate; graph: ProcPlantGraph; stats: ProcPlantStats } => {
   if (genome.spaceColonization) {
     const parts = buildSpaceColonizedProcPlantParts(genome, seed, env);
-    const template = materializeProcPlantParts(genome, parts);
+    const template = materializeProcPlantInstancedParts(genome, parts);
     return {
       template,
       graph: parts.graph,
@@ -7564,7 +7623,7 @@ const geometryForCompiledInstance = (
   return createProcPlantFlowerCenterGeometry();
 };
 
-const materializeProcPlantParts = (
+export const materializeProcPlantInstancedParts = (
   genome: ProcPlantGenome,
   parts: ProcPlantInstancedParts,
 ): ProcPlantTemplate => {
@@ -7745,16 +7804,71 @@ const reducedLodGenome = (genome: ProcPlantGenome): ProcPlantGenome => ({
     : undefined,
 });
 
+/** Compile the legacy clump LOD policy while keeping shoot and placement seeds independent. */
+export const compileProcPlantClumpStageLods = (
+  genome: ProcPlantGenome,
+  shootSeed: number,
+  placementSeed: number,
+  env: ProcPlantEnvironment = defaultPlantEnvironment(),
+  levels: readonly (0 | 1 | 2 | 3)[] = [0, 1, 2, 3],
+): ProcPlantCompiledLod[] => {
+  if (!genome.clump || genome.clump.count <= 1) throw new Error("clump stage LOD compilation requires clump.count > 1");
+  const selected = [...new Set(levels)].sort((left, right) => left - right);
+  if (selected.length < 1 || selected.some((level) => !Number.isInteger(level) || level < 0 || level > 3)) {
+    throw new Error("ProcPlant clump LOD levels must contain unique indices 0..3");
+  }
+  const full = materializeProcPlantInstancedParts(
+    genome,
+    buildProcPlantClumpStageParts(genome, createProcPlantClumpStagePlan(genome, shootSeed, placementSeed), env),
+  );
+  const fullTriangles = full.idx.length / 3;
+  if (fullTriangles <= 6) throw new Error(`ProcPlant LOD compilation requires more than 6 source triangles; received ${fullTriangles}`);
+  const reducedGenome = reducedLodGenome(genome);
+  const reduced = reducedGenome.clump && reducedGenome.clump.count > 1
+    ? materializeProcPlantInstancedParts(
+        reducedGenome,
+        buildProcPlantClumpStageParts(
+          reducedGenome,
+          createProcPlantClumpStagePlan(reducedGenome, shootSeed, placementSeed),
+          env,
+        ),
+      )
+    : materializeProcPlantInstancedParts(reducedGenome, buildProcPlantInstancedParts(reducedGenome, shootSeed, env));
+  const reducedTriangles = reduced.idx.length / 3;
+  const clustered = reducedTriangles > 4 && reducedTriangles < fullTriangles
+    ? reduced
+    : createPlantClusterTemplate(full);
+  const billboard = createPlantCardTemplate(full, true);
+  const impostor = createPlantCardTemplate(full, false);
+  const treeScale = genome.habit === "tree" || genome.habit === "conifer" || genome.habit === "palm" ? 1.5 : 0.75;
+  const rows: Array<[ProcPlantCompiledLod["level"], ProcPlantCompiledLod["label"], number, ProcPlantTemplate]> = [
+    [0, "full", 0, full],
+    [1, "clustered", 18 * treeScale, clustered],
+    [2, "billboard-cross", 42 * treeScale, billboard],
+    [3, "impostor", 86 * treeScale, impostor],
+  ];
+  return rows
+    .filter(([level]) => selected.includes(level))
+    .map(([level, label, distance, template]) => ({
+      level,
+      label,
+      distance,
+      template,
+      triangles: template.idx.length / 3,
+      vertices: template.pos.length / 3,
+    }));
+};
+
 /** Compile deterministic, renderable geometry for every runtime LOD. */
 export const compileProcPlantLods = (
   genome: ProcPlantGenome,
   seed = 1,
   env: ProcPlantEnvironment = defaultPlantEnvironment(),
 ): ProcPlantCompiledLod[] => {
-  const full = materializeProcPlantParts(genome, buildProcPlantInstancedParts(genome, seed, env));
+  const full = materializeProcPlantInstancedParts(genome, buildProcPlantInstancedParts(genome, seed, env));
   const fullTriangles = full.idx.length / 3;
   if (fullTriangles <= 6) throw new Error(`ProcPlant LOD compilation requires more than 6 source triangles; received ${fullTriangles}`);
-  const reduced = materializeProcPlantParts(
+  const reduced = materializeProcPlantInstancedParts(
     reducedLodGenome(genome),
     buildProcPlantInstancedParts(reducedLodGenome(genome), seed, env),
   );

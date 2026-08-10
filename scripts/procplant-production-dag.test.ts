@@ -211,7 +211,7 @@ const tooMuchWork = Array.from({ length: 11 }, (_, index) => ({
 }));
 assert.throws(() => createProcPlantGeneratorGraph(tooMuchWork, seed), /operation cap/);
 
-const unsupportedGenome = procPlantPresets.phiFern!;
+const unsupportedGenome = procPlantPresets.cloverGroundcover!;
 const unsupportedGraph = applyProcPlantGeneratorGraphOperations(
   createProcPlantAuthoringGraph(unsupportedGenome, seed),
   [{ op: "set-seed", nodeId: createProcPlantAuthoringGraph(unsupportedGenome, seed).nodes.find((node) => node.stage === "foliage")!.id, value: 7 }],
