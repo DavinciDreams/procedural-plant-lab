@@ -27,6 +27,7 @@ import {
   type ProcPlantGenome,
   type ProcPlantInstanceKind,
   type ProcPlantFoliageClusterKind,
+  type ProcPlantInstancedParts,
   type ProcPlantLodPackage,
 } from "./procplants";
 
@@ -155,9 +156,10 @@ export const inspectProcPlantReadiness = (
   seed = 1,
   env: ProcPlantEnvironment = defaultPlantEnvironment(),
   profileId: ProcPlantExportProfileId = "tellus-realtime",
+  exactParts?: ProcPlantInstancedParts,
 ): ProcPlantReadinessReport => {
   const profile = PROCPLANT_EXPORT_PROFILES[profileId];
-  const built = buildProcPlantInstancedParts(genome, seed, env);
+  const built = exactParts ?? buildProcPlantInstancedParts(genome, seed, env);
   const counts = new Map<InstanceKind, number>();
   for (const instance of built.instances) counts.set(instance.kind, (counts.get(instance.kind) ?? 0) + 1);
 

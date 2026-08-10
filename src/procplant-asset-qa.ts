@@ -2,6 +2,7 @@ import {
   defaultPlantEnvironment,
   type ProcPlantEnvironment,
   type ProcPlantGenome,
+  type ProcPlantInstancedParts,
 } from "./procplants";
 import {
   inspectProcPlantReadiness,
@@ -35,6 +36,8 @@ export interface ProcPlantAssetQaOptions {
   providesUvs?: boolean;
   providesTangents?: boolean;
   branchLeafIntersections?: number;
+  /** Exact already-authored geometry, used when edits differ from the genome compiler source. */
+  structuralParts?: ProcPlantInstancedParts;
 }
 
 export interface ProcPlantAssetQaProfile {
@@ -167,7 +170,7 @@ export const inspectProcPlantAssetQa = (
   options: ProcPlantAssetQaOptions = {},
 ): ProcPlantAssetQaReport => {
   const profile = PROCPLANT_ASSET_QA_PROFILES[profileId];
-  const structural = inspectProcPlantReadiness(genome, seed, env, profile.structuralProfile);
+  const structural = inspectProcPlantReadiness(genome, seed, env, profile.structuralProfile, options.structuralParts);
   const coverage = Math.min(1, Math.max(0.05, options.cutoutCoverage ?? 1));
   const organFraction = structural.geometry.triangles > 0
     ? structural.geometry.organTriangles / structural.geometry.triangles

@@ -191,6 +191,13 @@ const unmatchedBaked = applyProcPlantWeberPennBakedTrimOverrides(bakedSource, cr
 assert.equal(unmatchedBaked.audit.status, "no-op");
 assert.strictEqual(unmatchedBaked.baked, baked, "unmatched baked identities must fail closed");
 
+const removeCompleteSkeleton = applyProcPlantWeberPennBakedTrimOverrides(bakedSource, createProcPlantWeberPennTrimOverrideSet(bakedTarget, [
+  createProcPlantWeberPennTrimOperation("remove", { kind: "segment-ids", segmentIds: ["weber-penn:stem:0"] }),
+]));
+assert.equal(removeCompleteSkeleton.audit.status, "unsupported");
+assert.strictEqual(removeCompleteSkeleton.baked, baked, "removing the complete skeleton must fail closed to exportable source geometry");
+assert.match(removeCompleteSkeleton.audit.operations.at(-1)!.reason!, /complete baked branch skeleton/);
+
 const staleTarget = { ...bakedTarget, topologySignature: "fnv1a32:00000000" };
 const stale = applyProcPlantWeberPennBakedTrimOverrides(
   { target: staleTarget, baked },
@@ -200,5 +207,60 @@ const stale = applyProcPlantWeberPennBakedTrimOverrides(
 );
 assert.equal(stale.audit.status, "target-mismatch");
 assert.strictEqual(stale.baked, baked, "stale topology bindings must preserve the exact source reference");
+
+const integratedGenome = procPlantPresets.oakCanopy!;
+const integratedSource = buildProcPlantTemplate(integratedGenome, seed, defaultPlantEnvironment());
+assert.ok(integratedSource.weberPennTrim);
+assert.ok(integratedSource.weberPennTrim.pickerGraph.segmentRecords.length > 0);
+assert.ok(Object.values(integratedSource.weberPennTrim.pickerStemIds).every((id) => /^weber-penn:stem:\d+$/.test(id)));
+const exactEmpty = buildProcPlantTemplate(integratedGenome, seed, defaultPlantEnvironment(), {
+  trimOverrides: createProcPlantWeberPennTrimOverrideSet(integratedSource.weberPennTrim.target),
+});
+assert.deepEqual(Array.from(exactEmpty.template.pos), Array.from(integratedSource.template.pos));
+assert.deepEqual(Array.from(exactEmpty.template.idx), Array.from(integratedSource.template.idx));
+assert.deepEqual(
+  exactEmpty.graph.attachments.map((attachment) => attachment.id),
+  integratedSource.graph.attachments.map((attachment) => attachment.id),
+  "an empty integrated trim must preserve public attachment identities and order",
+);
+
+const integratedOverrides = createProcPlantWeberPennTrimOverrideSet(integratedSource.weberPennTrim.target, [
+  createProcPlantWeberPennTrimOperation("remove", { kind: "branch-depth", minDepth: 2 }),
+]);
+const integratedTrimmed = buildProcPlantTemplate(integratedGenome, seed, defaultPlantEnvironment(), {
+  trimOverrides: integratedOverrides,
+});
+assert.equal(integratedTrimmed.weberPennTrim?.trimAudit?.status, "applied");
+assert.ok(integratedTrimmed.template.idx.length < integratedSource.template.idx.length,
+  "build integration must remove real preview/export triangle indices");
+assert.ok(integratedTrimmed.graph.attachments.length < integratedSource.graph.attachments.length,
+  "native leaf/crown-fill attachment records must be cleaned with their owner stems");
+const removedIntegratedLeaves = new Set(integratedTrimmed.weberPennTrim!.trimAudit!.removedLeafIds);
+assert.ok(removedIntegratedLeaves.size > 0);
+assert.ok(integratedTrimmed.graph.attachments.every((attachment) => !removedIntegratedLeaves.has(attachment.id)));
+const removedIntegratedStems = new Set(integratedTrimmed.weberPennTrim!.trimAudit!.removedStemIds);
+assert.ok(Object.values(integratedTrimmed.weberPennTrim!.pickerStemIds).every((id) => !removedIntegratedStems.has(id)),
+  "trimmed picker graph cannot advertise removed source stems");
+assert.deepEqual(Array.from(integratedSource.template.idx), Array.from(exactEmpty.template.idx),
+  "integrated trim builds must not mutate the source template");
+
+const unsupportedIntegrated = buildProcPlantTemplate(integratedGenome, seed, defaultPlantEnvironment(), {
+  trimOverrides: createProcPlantWeberPennTrimOverrideSet(integratedSource.weberPennTrim.target, [
+    createProcPlantWeberPennTrimOperation("remove", { kind: "height-plane", height: 0.5, side: "above" }),
+  ]),
+});
+assert.equal(unsupportedIntegrated.weberPennTrim?.trimAudit?.status, "unsupported");
+assert.deepEqual(Array.from(unsupportedIntegrated.template.idx), Array.from(integratedSource.template.idx),
+  "unsupported integrated selectors must preserve exact generated geometry");
+
+const staleIntegratedTarget = { ...integratedSource.weberPennTrim.target, topologySignature: "fnv1a32:00000000" as const };
+const staleIntegrated = buildProcPlantTemplate(integratedGenome, seed, defaultPlantEnvironment(), {
+  trimOverrides: createProcPlantWeberPennTrimOverrideSet(staleIntegratedTarget, [
+    createProcPlantWeberPennTrimOperation("remove", { kind: "branch-depth", minDepth: 2 }),
+  ]),
+});
+assert.equal(staleIntegrated.weberPennTrim?.trimAudit?.status, "target-mismatch");
+assert.deepEqual(Array.from(staleIntegrated.template.idx), Array.from(integratedSource.template.idx),
+  "stale integrated targets must preserve exact generated geometry atomically");
 
 console.log("procplant Weber-Penn trim override tests passed");
