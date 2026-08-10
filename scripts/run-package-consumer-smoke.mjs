@@ -99,6 +99,7 @@ import {
   applyProcPlantVineGuidePackage,
   createProcPlantVineGuidePackage,
   createProcPlantVineGuideTarget,
+  appendProcPlantVineGuidePointOnStaticSupport,
   type ProcPlantGraph,
   type ProcPlantThreePlacementDecalBindingMetadata,
 } from "procplants";
@@ -123,7 +124,11 @@ const optInBuild = buildProcPlantTemplateWithCrownLightPruning(genome, 612072, d
 const decalExportSupport: ProcPlantThreePlacementDecalBindingMetadata["exportSupport"] = "metadata-only";
 const vineGenome = procPlantPresets.floweringWallCreeper!;
 let vineGuide = createProcPlantVineGuidePackage(createProcPlantVineGuideTarget(vineGenome, 612072));
-vineGuide = appendProcPlantVineGuidePoint(vineGuide, [0, 0, 0]);
+const staticSnap = appendProcPlantVineGuidePointOnStaticSupport(vineGuide, [0, 0.2, 0], {
+  primitives: [{ id: "ground", role: "obstacle", shape: "plane", point: [0, 0, 0], normal: [0, 1, 0] }],
+}, { clearance: 0.02, maxSnapDistance: 0.5 });
+if (!staticSnap.changed) throw new Error("static vine support export drift");
+vineGuide = staticSnap.authored;
 vineGuide = appendProcPlantVineGuidePoint(vineGuide, [0.2, 1, 0]);
 const authoredVine = applyProcPlantVineGuidePackage(vineGenome, 612072, vineGuide);
 

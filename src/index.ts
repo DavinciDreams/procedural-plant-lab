@@ -50,6 +50,7 @@ export * from "./procplant-instanced-export";
 export * from "./procplant-organ-placement-overrides";
 export * from "./procplant-placement-decal-three";
 export * from "./procplant-vine-guide-authoring";
+export * from "./procplant-vine-surface-authoring";
 export * from "./procplant-organ-variants";
 export * from "./procplant-instance-lod-pool";
 export * from "./procplant-impostor";

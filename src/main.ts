@@ -463,6 +463,7 @@ app.innerHTML = `
         <button id="clearPlacementDecal" type="button" disabled>Clear Decal Binding</button>
         <input id="placementDecalFile" type="file" accept="image/png,image/webp,image/jpeg" hidden />
         <button id="vineGuideMode" type="button" aria-pressed="false" disabled>Place Vine Guide</button>
+        <button id="vineGuideSupportMode" type="button" aria-pressed="false" disabled>Support: Authoring Plane</button>
         <button id="undoVineGuide" type="button" disabled>Undo Guide Point</button>
         <button id="resetVineGuide" type="button" disabled>Reset Vine Guide</button>
       </div>
@@ -743,6 +744,7 @@ let vineGuidePackage: ProcPlantVineGuidePackage | null = null;
 let pruneModeVisible = false;
 let placementModeVisible = false;
 let vineGuideModeVisible = false;
+let vineGuideStaticSupportEnabled = false;
 let crownVolumeModeVisible = false;
 let debugIrVisible = false;
 let debugFramesVisible = false;
@@ -946,6 +948,7 @@ const clearPlacementDecalButton = document.querySelector<HTMLButtonElement>("#cl
 const placementDecalFileInput = document.querySelector<HTMLInputElement>("#placementDecalFile")!;
 const placementDecalStatus = document.querySelector<HTMLOutputElement>("#placementDecalStatus")!;
 const vineGuideModeButton = document.querySelector<HTMLButtonElement>("#vineGuideMode")!;
+const vineGuideSupportModeButton = document.querySelector<HTMLButtonElement>("#vineGuideSupportMode")!;
 const undoVineGuideButton = document.querySelector<HTMLButtonElement>("#undoVineGuide")!;
 const resetVineGuideButton = document.querySelector<HTMLButtonElement>("#resetVineGuide")!;
 let pendingVineGuideSerialized: string | null = null;
@@ -1264,6 +1267,7 @@ type ProcPlantCrownVoxelMaskFitUiModule = typeof import("./procplant-crown-voxel
 type ProcPlantOrganPlacementModule = typeof import("./procplant-organ-placement-overrides");
 type ProcPlantPlacementDecalThreeModule = typeof import("./procplant-placement-decal-three");
 type ProcPlantVineGuideAuthoringModule = typeof import("./procplant-vine-guide-authoring");
+type ProcPlantVineSurfaceAuthoringModule = typeof import("./procplant-vine-surface-authoring");
 type ProcPlantGeneratorGraphOperation = import("./procplant-generator-graph").ProcPlantGeneratorGraphOperation;
 let procPlantRulesModule: ProcPlantRulesModule | null = null;
 let procPlantRulesPromise: Promise<ProcPlantRulesModule> | null = null;
@@ -1290,6 +1294,8 @@ let procPlantPlacementDecalThreeModule: ProcPlantPlacementDecalThreeModule | nul
 let procPlantPlacementDecalThreePromise: Promise<ProcPlantPlacementDecalThreeModule> | null = null;
 let procPlantVineGuideAuthoringModule: ProcPlantVineGuideAuthoringModule | null = null;
 let procPlantVineGuideAuthoringPromise: Promise<ProcPlantVineGuideAuthoringModule> | null = null;
+let procPlantVineSurfaceAuthoringModule: ProcPlantVineSurfaceAuthoringModule | null = null;
+let procPlantVineSurfaceAuthoringPromise: Promise<ProcPlantVineSurfaceAuthoringModule> | null = null;
 const graphOverrideOperations = new Map<string, ProcPlantGeneratorGraphOperation[]>();
 const loadProcPlantGraphEditorUi = () => {
   if (procPlantGraphEditorUiModule) return Promise.resolve(procPlantGraphEditorUiModule);
@@ -1411,6 +1417,18 @@ const loadProcPlantVineGuideAuthoring = () => {
     procPlantVineGuideAuthoringPromise = null;
   });
   return procPlantVineGuideAuthoringPromise;
+};
+const loadProcPlantVineSurfaceAuthoring = () => {
+  if (procPlantVineSurfaceAuthoringModule) return Promise.resolve(procPlantVineSurfaceAuthoringModule);
+  if (procPlantVineSurfaceAuthoringPromise) return procPlantVineSurfaceAuthoringPromise;
+  procPlantVineSurfaceAuthoringPromise = import("./procplant-vine-surface-authoring").then((module) => {
+    procPlantVineSurfaceAuthoringModule = module;
+    app.dataset.vineSurfaceAuthoringLoaded = "true";
+    return module;
+  }).finally(() => {
+    procPlantVineSurfaceAuthoringPromise = null;
+  });
+  return procPlantVineSurfaceAuthoringPromise;
 };
 const loadProcPlantRules = () => {
   if (procPlantRulesModule) return Promise.resolve(procPlantRulesModule);
@@ -3031,6 +3049,9 @@ const syncVineGuideButtons = () => {
   vineGuideModeButton.disabled = regenerationBusy || !available;
   vineGuideModeButton.setAttribute("aria-pressed", String(vineGuideModeVisible && available));
   vineGuideModeButton.textContent = vineGuideModeVisible ? "Finish Vine Guide" : "Place Vine Guide";
+  vineGuideSupportModeButton.disabled = regenerationBusy || !available;
+  vineGuideSupportModeButton.setAttribute("aria-pressed", String(vineGuideStaticSupportEnabled));
+  vineGuideSupportModeButton.textContent = vineGuideStaticSupportEnabled ? "Support: Static Ground" : "Support: Authoring Plane";
   undoVineGuideButton.disabled = regenerationBusy || !vineGuidePackage?.points.length;
   resetVineGuideButton.disabled = regenerationBusy || !vineGuidePackage;
   app.dataset.vineGuideAvailable = String(available);
@@ -4519,8 +4540,20 @@ vineGuideModeButton.addEventListener("click", async () => {
   syncVineGuideButtons();
   refreshVineGuideVisualization();
   setSaveStatus(vineGuideModeVisible
-    ? "Vine guide mode: click points on the camera-facing plane; orbit between clicks to change depth. This authors a static centerline only."
+    ? vineGuideStaticSupportEnabled
+      ? "Vine guide mode: click the static ground support. Points are materialized with 0.02 local-unit clearance; no live attachment is retained."
+      : "Vine guide mode: click points on the camera-facing plane; orbit between clicks to change depth. This authors a static centerline only."
     : "Vine guide mode closed.");
+});
+
+vineGuideSupportModeButton.addEventListener("click", async () => {
+  if (regenerationBusy || !selectedSourceGenome().vine) return;
+  vineGuideStaticSupportEnabled = !vineGuideStaticSupportEnabled;
+  if (vineGuideStaticSupportEnabled) await loadProcPlantVineSurfaceAuthoring();
+  syncVineGuideButtons();
+  setSaveStatus(vineGuideStaticSupportEnabled
+    ? "Static support snapping is enabled for the immutable ground mesh. Every click must pass the bounded surface and clearance audit."
+    : "Static support snapping is disabled; clicks use the camera-facing authoring plane.");
 });
 
 undoVineGuideButton.addEventListener("click", async () => {
@@ -4578,12 +4611,16 @@ canvas.addEventListener("click", async (event) => {
   const planePoint = vineGuidePackage?.points.at(-1)
     ? heroLodState.mesh.localToWorld(new THREE.Vector3(...vineGuidePackage.points.at(-1)!.position))
     : controls.target.clone();
-  const worldPoint = raycaster.ray.intersectPlane(
-    new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal, planePoint),
-    new THREE.Vector3(),
-  );
+  const worldPoint = vineGuideStaticSupportEnabled
+    ? raycaster.intersectObject(ground, false)[0]?.point.clone() ?? null
+    : raycaster.ray.intersectPlane(
+        new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal, planePoint),
+        new THREE.Vector3(),
+      );
   if (!worldPoint) {
-    setSaveStatus("The viewport ray did not intersect the static guide authoring plane.");
+    setSaveStatus(vineGuideStaticSupportEnabled
+      ? "The viewport ray did not hit the registered static ground support. No point was added."
+      : "The viewport ray did not intersect the static guide authoring plane.");
     return;
   }
   const localPoint = heroLodState.mesh.worldToLocal(worldPoint.clone());
@@ -4592,13 +4629,46 @@ canvas.addEventListener("click", async (event) => {
     module.createProcPlantVineGuideTarget(sourceGenome, state.seed),
   );
   try {
-    vineGuidePackage = module.appendProcPlantVineGuidePoint(vineGuidePackage, position);
+    if (vineGuideStaticSupportEnabled) {
+      const surface = await loadProcPlantVineSurfaceAuthoring();
+      ground.updateMatrixWorld(true);
+      heroLodState.mesh.updateMatrixWorld(true);
+      const supportToHero = heroLodState.mesh.matrixWorld.clone().invert().multiply(ground.matrixWorld);
+      const support = surface.createProcPlantVineStaticMeshSupportIndex({
+        id: "lab-static-ground",
+        positions: ground.geometry.getAttribute("position").array,
+        indices: ground.geometry.index?.array,
+        worldMatrix: supportToHero.elements,
+      }, { maxTriangles: 256, maxVertices: 512 });
+      const appended = surface.appendProcPlantVineGuidePointOnStaticSupport(
+        vineGuidePackage,
+        position,
+        { meshes: [support] },
+        { supportIds: [support.id], clearance: 0.02, maxSnapDistance: 0.05 },
+      );
+      if (!appended.changed) {
+        app.dataset.vineGuideCollision = appended.snap.reason ?? "unsupported";
+        setSaveStatus(`Static support snap rejected: ${appended.snap.reason ?? "unsupported"}. No point was added.`);
+        return;
+      }
+      vineGuidePackage = appended.authored;
+      app.dataset.vineGuideProjection = "static-mesh-surface";
+      app.dataset.vineGuideCollision = "static-clearance-verified";
+      app.dataset.vineGuideSupportId = appended.snap.supportId ?? "";
+      app.dataset.vineGuideSupportClearance = String(appended.snap.clearance);
+      app.dataset.vineGuideVerifiedClearance = String(appended.snap.verifiedClearance ?? "");
+    } else {
+      vineGuidePackage = module.appendProcPlantVineGuidePoint(vineGuidePackage, position);
+      app.dataset.vineGuideProjection = "camera-facing-plane";
+      app.dataset.vineGuideCollision = "static-none";
+      delete app.dataset.vineGuideSupportId;
+      delete app.dataset.vineGuideSupportClearance;
+      delete app.dataset.vineGuideVerifiedClearance;
+    }
   } catch (error) {
     setSaveStatus(error instanceof Error ? error.message : String(error));
     return;
   }
-  app.dataset.vineGuideProjection = "camera-facing-plane";
-  app.dataset.vineGuideCollision = "static-none";
   app.dataset.vineGuideStatus = vineGuidePackage.points.length < 2 ? "draft" : "pending-regeneration";
   app.dataset.vineGuideTargetMatched = "true";
   syncVineGuideButtons();
