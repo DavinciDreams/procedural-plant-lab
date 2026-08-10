@@ -131,7 +131,7 @@ assert.deepEqual({
   nativeLeafVertices: baked.leaves.positions.length / 3,
   nativeLeafTriangles: baked.leaves.indices.length / 3,
 }, {
-  signature: "fnv1a32:118119ea",
+  signature: "fnv1a32:27384fc4",
   branchVertices: 3799,
   branchTriangles: 6828,
   nativeLeafVertices: 1080,
@@ -147,6 +147,8 @@ assert.equal(bakedStemRanges.reduce((sum, range) => sum + range.indexCount, 0), 
 assert.equal(baked.topology.leaves.reduce((sum, range) => sum + range.vertexCount, 0), baked.leaves.positions.length / 3);
 assert.equal(baked.topology.leaves.reduce((sum, range) => sum + range.indexCount, 0), baked.leaves.indices.length);
 assert.ok(baked.topology.leaves.every((leaf) => rawTree.stems[leaf.parentStemIndex] !== undefined));
+assert.ok(baked.topology.stems.every((stem) => stem.tipHeightYUp === null || Number.isFinite(stem.tipHeightYUp)));
+assert.ok(baked.topology.leaves.every((leaf) => Number.isFinite(leaf.attachmentHeightYUp)));
 
 const bakedTarget = bindProcPlantWeberPennTrimTarget({ backend: "weber-penn", genomeId: "small-pine-test", seed: 447_031 }, baked);
 const bakedSource = { target: bakedTarget, baked };
@@ -185,6 +187,96 @@ const leafOnly = applyProcPlantWeberPennBakedTrimOverrides(bakedSource, createPr
 assert.equal(leafOnly.audit.afterNativeLeafTriangles, leafOnly.audit.beforeNativeLeafTriangles - baked.topology.leaves[0]!.indexCount / 3);
 assert.equal(leafOnly.audit.afterBranchTriangles, leafOnly.audit.beforeBranchTriangles);
 
+const bakedStemIndices = new Set(baked.topology.stems.filter((stem) => stem.baked).map((stem) => stem.stemIndex));
+const sourceTips = baked.topology.stems.filter((stem) =>
+  stem.baked && stem.depth > 0 && !stem.childStemIndices.some((child) => bakedStemIndices.has(child))
+);
+assert.ok(sourceTips.length > 0);
+const firstTip = sourceTips[0]!;
+const selectorOverrideSet = createProcPlantWeberPennTrimOverrideSet(bakedTarget, [
+  createProcPlantWeberPennTrimOperation("remove", {
+    kind: "attachment-ids",
+    attachmentIds: [`weber-penn:branch-tip:${firstTip.stemIndex}`],
+  }),
+  createProcPlantWeberPennTrimOperation("remove", { kind: "axial-range", min: 0, max: 0.28 }),
+  createProcPlantWeberPennTrimOperation("remove", { kind: "height-plane", height: 0.28, side: "below" }),
+]);
+const serializedSelectors = serializeProcPlantWeberPennTrimOverrides(selectorOverrideSet);
+assert.deepEqual(deserializeProcPlantWeberPennTrimOverrides(serializedSelectors), selectorOverrideSet);
+assert.equal(
+  serializeProcPlantWeberPennTrimOverrides(deserializeProcPlantWeberPennTrimOverrides(serializedSelectors)),
+  serializedSelectors,
+  "stable branch-tip/range/plane selector bindings must round-trip deterministically",
+);
+const branchTipOnly = applyProcPlantWeberPennBakedTrimOverrides(bakedSource, createProcPlantWeberPennTrimOverrideSet(bakedTarget, [
+  createProcPlantWeberPennTrimOperation("remove", {
+    kind: "attachment-ids",
+    attachmentIds: [`weber-penn:branch-tip:${firstTip.stemIndex}`],
+  }),
+]));
+assert.equal(branchTipOnly.audit.status, "applied");
+assert.ok(branchTipOnly.audit.removedStemIds.includes(`weber-penn:stem:${firstTip.stemIndex}`));
+assert.ok(branchTipOnly.audit.afterBranchTriangles < branchTipOnly.audit.beforeBranchTriangles,
+  "a stable branch-tip identity must remove its exact native owner range");
+assert.ok(branchTipOnly.baked.topology.leaves.every((leaf) =>
+  branchTipOnly.baked.topology.stems.some((stem) => stem.stemIndex === leaf.parentStemIndex)
+), "branch-tip removal must repair native leaf ownership");
+
+const retainedTipOnly = applyProcPlantWeberPennBakedTrimOverrides(bakedSource, createProcPlantWeberPennTrimOverrideSet(bakedTarget, [
+  createProcPlantWeberPennTrimOperation("retain", {
+    kind: "attachment-ids",
+    attachmentIds: [`weber-penn:branch-tip:${firstTip.stemIndex}`],
+  }),
+]));
+assert.equal(retainedTipOnly.audit.status, "applied");
+assert.ok(retainedTipOnly.audit.afterBranchTriangles < retainedTipOnly.audit.beforeBranchTriangles);
+const retainedTipStemIds = new Set(retainedTipOnly.baked.topology.stems.map((stem) => stem.stemIndex));
+assert.ok(retainedTipStemIds.has(firstTip.stemIndex), "retain must preserve the exact selected native tip owner");
+for (const stem of retainedTipOnly.baked.topology.stems) {
+  assert.ok(stem.parentStemIndex === null || retainedTipStemIds.has(stem.parentStemIndex),
+    "retaining a tip must preserve its complete native ancestor chain");
+}
+assert.ok(retainedTipOnly.baked.topology.leaves.every((leaf) => retainedTipStemIds.has(leaf.parentStemIndex)),
+  "retaining a tip must remove native leaves whose owner was pruned");
+
+const allSourceTips = applyProcPlantWeberPennBakedTrimOverrides(bakedSource, createProcPlantWeberPennTrimOverrideSet(bakedTarget, [
+  createProcPlantWeberPennTrimOperation("remove", { kind: "attachment-kind", attachmentKinds: ["branch-tip"] }),
+]));
+assert.equal(allSourceTips.audit.status, "applied");
+assert.ok(allSourceTips.audit.removedStemIds.length >= sourceTips.length);
+
+const unknownTip = applyProcPlantWeberPennBakedTrimOverrides(bakedSource, createProcPlantWeberPennTrimOverrideSet(bakedTarget, [
+  createProcPlantWeberPennTrimOperation("remove", {
+    kind: "attachment-ids",
+    attachmentIds: ["weber-penn:branch-tip:999999"],
+  }),
+]));
+assert.equal(unknownTip.audit.status, "no-op");
+assert.strictEqual(unknownTip.baked, baked, "unknown branch-tip identities must preserve the exact source reference");
+
+const lowerRange = applyProcPlantWeberPennBakedTrimOverrides(bakedSource, createProcPlantWeberPennTrimOverrideSet(bakedTarget, [
+  createProcPlantWeberPennTrimOperation("remove", { kind: "axial-range", min: 0, max: 0.28 }),
+]));
+assert.equal(lowerRange.audit.status, "applied");
+assert.ok(lowerRange.audit.afterBranchTriangles < lowerRange.audit.beforeBranchTriangles);
+assert.ok(lowerRange.audit.afterNativeLeafTriangles < lowerRange.audit.beforeNativeLeafTriangles);
+
+const belowPlane = applyProcPlantWeberPennBakedTrimOverrides(bakedSource, createProcPlantWeberPennTrimOverrideSet(bakedTarget, [
+  createProcPlantWeberPennTrimOperation("remove", { kind: "height-plane", height: 0.28, side: "below" }),
+]));
+assert.equal(belowPlane.audit.status, "applied");
+assert.deepEqual(belowPlane.audit.removedStemIds, lowerRange.audit.removedStemIds,
+  "equivalent normalized range/plane selectors must resolve the same whole stem owners");
+assert.deepEqual(belowPlane.audit.removedLeafIds, lowerRange.audit.removedLeafIds);
+
+const unsafeUpperPlane = applyProcPlantWeberPennBakedTrimOverrides(bakedSource, createProcPlantWeberPennTrimOverrideSet(bakedTarget, [
+  createProcPlantWeberPennTrimOperation("remove", { kind: "height-plane", height: 0.82, side: "above" }),
+]));
+assert.equal(unsafeUpperPlane.audit.status, "unsupported");
+assert.strictEqual(unsafeUpperPlane.baked, baked,
+  "a plane that selects the unsplittable trunk owner must fail closed rather than invent a partial baked range");
+assert.match(unsafeUpperPlane.audit.operations.at(-1)!.reason!, /complete baked branch skeleton/);
+
 const unmatchedBaked = applyProcPlantWeberPennBakedTrimOverrides(bakedSource, createProcPlantWeberPennTrimOverrideSet(bakedTarget, [
   createProcPlantWeberPennTrimOperation("remove", { kind: "segment-ids", segmentIds: ["weber-penn:stem:999999"] }),
 ]));
@@ -213,6 +305,32 @@ const integratedSource = buildProcPlantTemplate(integratedGenome, seed, defaultP
 assert.ok(integratedSource.weberPennTrim);
 assert.ok(integratedSource.weberPennTrim.pickerGraph.segmentRecords.length > 0);
 assert.ok(Object.values(integratedSource.weberPennTrim.pickerStemIds).every((id) => /^weber-penn:stem:\d+$/.test(id)));
+
+const branchTipGenome = structuredClone(integratedGenome);
+branchTipGenome.id = "oak-canopy-branch-tip-trim-test";
+branchTipGenome.weberPenn = {
+  ...branchTipGenome.weberPenn!,
+  nativeLeaves: false,
+  crownFill: true,
+  foliageSource: "procplants",
+  fillAnchor: "branch-tips",
+};
+branchTipGenome.foliage = { ...branchTipGenome.foliage!, mass: 0.65 };
+const branchTipSource = buildProcPlantTemplate(branchTipGenome, seed, defaultPlantEnvironment());
+assert.ok(branchTipSource.weberPennTrim);
+assert.ok(branchTipSource.graph.attachments.length > 0);
+assert.ok(branchTipSource.graph.attachments.every((attachment) => /^weber-penn:branch-tip:\d+$/.test(attachment.id)));
+const integratedTipId = branchTipSource.graph.attachments[0]!.id;
+const integratedTipTrimmed = buildProcPlantTemplate(branchTipGenome, seed, defaultPlantEnvironment(), {
+  trimOverrides: createProcPlantWeberPennTrimOverrideSet(branchTipSource.weberPennTrim.target, [
+    createProcPlantWeberPennTrimOperation("remove", { kind: "attachment-ids", attachmentIds: [integratedTipId] }),
+  ]),
+});
+assert.equal(integratedTipTrimmed.weberPennTrim?.trimAudit?.status, "applied");
+assert.ok(!integratedTipTrimmed.graph.attachments.some((attachment) => attachment.id === integratedTipId),
+  "trimmed crown-fill graph must remove the native branch-tip anchor");
+assert.ok(integratedTipTrimmed.template.idx.length < branchTipSource.template.idx.length,
+  "branch-tip trim must remove native stem and attached crown-fill geometry");
 const exactEmpty = buildProcPlantTemplate(integratedGenome, seed, defaultPlantEnvironment(), {
   trimOverrides: createProcPlantWeberPennTrimOverrideSet(integratedSource.weberPennTrim.target),
 });
@@ -244,14 +362,14 @@ assert.ok(Object.values(integratedTrimmed.weberPennTrim!.pickerStemIds).every((i
 assert.deepEqual(Array.from(integratedSource.template.idx), Array.from(exactEmpty.template.idx),
   "integrated trim builds must not mutate the source template");
 
-const unsupportedIntegrated = buildProcPlantTemplate(integratedGenome, seed, defaultPlantEnvironment(), {
+const heightTrimmedIntegrated = buildProcPlantTemplate(integratedGenome, seed, defaultPlantEnvironment(), {
   trimOverrides: createProcPlantWeberPennTrimOverrideSet(integratedSource.weberPennTrim.target, [
-    createProcPlantWeberPennTrimOperation("remove", { kind: "height-plane", height: 0.5, side: "above" }),
+    createProcPlantWeberPennTrimOperation("remove", { kind: "height-plane", height: 0.28, side: "below" }),
   ]),
 });
-assert.equal(unsupportedIntegrated.weberPennTrim?.trimAudit?.status, "unsupported");
-assert.deepEqual(Array.from(unsupportedIntegrated.template.idx), Array.from(integratedSource.template.idx),
-  "unsupported integrated selectors must preserve exact generated geometry");
+assert.equal(heightTrimmedIntegrated.weberPennTrim?.trimAudit?.status, "applied");
+assert.ok(heightTrimmedIntegrated.template.idx.length < integratedSource.template.idx.length,
+  "normalized height-plane trim must remove exact integrated owner ranges");
 
 const staleIntegratedTarget = { ...integratedSource.weberPennTrim.target, topologySignature: "fnv1a32:00000000" as const };
 const staleIntegrated = buildProcPlantTemplate(integratedGenome, seed, defaultPlantEnvironment(), {

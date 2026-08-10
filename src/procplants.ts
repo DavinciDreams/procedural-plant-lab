@@ -7637,7 +7637,9 @@ const buildWeberPennProcPlantTemplateInternal = (
         if (direction.lengthSq() < 0.0001) direction.set(position.x, 0.1, position.z);
         direction.normalize();
         return {
-          id: `weber-penn:branch-tip:${index}`,
+          // Bind the public anchor to the native owner identity, not the
+          // position of that stem in a capped/sorted preview subset.
+          id: `weber-penn:branch-tip:${stem.index}`,
           ownerStemIndex: stem.index,
           position,
           direction,

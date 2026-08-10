@@ -50,6 +50,8 @@ export type BakedStemRange = BakedGeometryRange & {
   parentStemIndex: number | null;
   childStemIndices: number[];
   baked: boolean;
+  /** Exact source tip height in the baker's Y-up coordinate system. */
+  tipHeightYUp: number | null;
 };
 
 export type BakedLeafRange = BakedGeometryRange & {
@@ -60,6 +62,8 @@ export type BakedLeafRange = BakedGeometryRange & {
   parentStemIndex: number;
   parentAxialT: number;
   isBlossom: boolean;
+  /** Exact source attachment height in the baker's Y-up coordinate system. */
+  attachmentHeightYUp: number;
 };
 
 export type BakedTreeTopology = {
@@ -506,6 +510,8 @@ export function bakeTree(tree: TreeData, options: BakeOptions = {}): BakedTree {
     parentStemIndex: stem.parentIndex,
     childStemIndices: stem.childIndices.slice(),
     baked: bakedStemIndices.has(stem.index),
+    // Z-up vendor source becomes Y-up in the baked geometry.
+    tipHeightYUp: stem.points.length > 0 ? stem.points[stem.points.length - 1]!.position.z : null,
     ...(stemRanges.get(stem.index) ?? { vertexStart: 0, vertexCount: 0, indexStart: 0, indexCount: 0 }),
   }));
 
@@ -554,6 +560,7 @@ export function bakeTree(tree: TreeData, options: BakeOptions = {}): BakedTree {
         parentStemIndex: leaf.parentStemIndex,
         parentAxialT: leaf.parentAxialT,
         isBlossom: leaf.isBlossom,
+        attachmentHeightYUp: leaf.position.z,
         vertexStart,
         vertexCount: leafAcc.positions.length / 3 - vertexStart,
         indexStart,
