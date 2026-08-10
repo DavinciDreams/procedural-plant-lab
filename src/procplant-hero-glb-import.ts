@@ -77,6 +77,46 @@ export interface ProcPlantHeroGlbTexture extends ProcPlantHeroGlbImageInspection
   bytes: Uint8Array;
 }
 
+export interface ProcPlantHeroGlbSampler {
+  samplerIndex: number | null;
+  magFilter: 9728 | 9729 | null;
+  minFilter: 9728 | 9729 | 9984 | 9985 | 9986 | 9987 | null;
+  wrapS: 33071 | 33648 | 10497;
+  wrapT: 33071 | 33648 | 10497;
+}
+
+export interface ProcPlantHeroGlbTextureTransform {
+  offset: readonly [number, number];
+  rotation: number;
+  scale: readonly [number, number];
+  texCoord: 0;
+}
+
+export interface ProcPlantHeroGlbTextureBinding {
+  textureIndex: number;
+  imageIndex: number;
+  texCoord: 0;
+  sampler: ProcPlantHeroGlbSampler;
+  transform: ProcPlantHeroGlbTextureTransform;
+}
+
+export interface ProcPlantHeroGlbMaterial {
+  materialIndex: number;
+  name: string;
+  baseColorFactor: readonly [number, number, number, number];
+  metallicFactor: number;
+  roughnessFactor: number;
+  baseColorTexture: ProcPlantHeroGlbTextureBinding | null;
+  metallicRoughnessTexture: ProcPlantHeroGlbTextureBinding | null;
+  normalTexture: (ProcPlantHeroGlbTextureBinding & { scale: number }) | null;
+  occlusionTexture: (ProcPlantHeroGlbTextureBinding & { strength: number }) | null;
+  emissiveFactor: readonly [number, number, number];
+  emissiveTexture: ProcPlantHeroGlbTextureBinding | null;
+  alphaMode: "OPAQUE" | "MASK" | "BLEND";
+  alphaCutoff: number;
+  doubleSided: boolean;
+}
+
 export interface ProcPlantHeroGlbMeshPrimitive {
   instanceId: string;
   nodeIndex: number | null;
@@ -100,6 +140,7 @@ export interface ProcPlantHeroGlbImportPackage {
   inspection: ProcPlantHeroGlbInspection;
   meshes: ProcPlantHeroGlbMeshPrimitive[];
   textures: ProcPlantHeroGlbTexture[];
+  materials: ProcPlantHeroGlbMaterial[];
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -166,6 +207,27 @@ const integer = (value: unknown, minimum: number, maximum: number, label: string
 
 const option = (value: number | undefined, fallback: number, label: string, maximum: number) =>
   integer(value ?? fallback, 1, maximum, label);
+
+const finiteNumber = (value: unknown, fallback: number, minimum: number, maximum: number, label: string) => {
+  const resolved = value === undefined ? fallback : value;
+  if (typeof resolved !== "number" || !Number.isFinite(resolved) || resolved < minimum || resolved > maximum) {
+    throw new Error(`${label} must be a finite number in [${minimum}, ${maximum}]`);
+  }
+  return resolved;
+};
+
+const finiteTuple = <N extends number>(
+  value: unknown,
+  fallback: readonly number[],
+  length: N,
+  minimum: number,
+  maximum: number,
+  label: string,
+) => {
+  const resolved = value === undefined ? [...fallback] : value;
+  if (!Array.isArray(resolved) || resolved.length !== length) throw new Error(`${label} must contain ${length} numbers`);
+  return resolved.map((entry, index) => finiteNumber(entry, 0, minimum, maximum, `${label}[${index}]`)) as number[];
+};
 
 const resolveLimits = (limits: ProcPlantHeroGlbMeshExtractionOptions): ResolvedLimits => ({
   maxBytes: option(limits.maxBytes, 256 * 1024 * 1024, "maxBytes", 1024 * 1024 * 1024),
@@ -298,17 +360,102 @@ const parseHeroGlb = (source: ArrayBuffer | Uint8Array, inputLimits: ProcPlantHe
 
 const textureSourceIndex = (parsed: ParsedHeroGlb, textureIndex: number) => {
   const texture = record(parsed.textures[textureIndex], `glTF textures[${textureIndex}]`);
-  const candidates: unknown[] = [];
-  if (texture.source !== undefined) candidates.push(texture.source);
+  let extensionSource: unknown;
   if (texture.extensions !== undefined) {
     const extensions = record(texture.extensions, `glTF textures[${textureIndex}].extensions`);
     for (const extensionName of ["KHR_texture_basisu", "EXT_texture_webp"]) {
-      if (extensions[extensionName] !== undefined) candidates.push(record(extensions[extensionName], extensionName).source);
+      if (extensions[extensionName] !== undefined) {
+        if (extensionSource !== undefined) throw new Error(`glTF textures[${textureIndex}] declares multiple image source extensions`);
+        extensionSource = record(extensions[extensionName], extensionName).source;
+      }
     }
   }
-  if (candidates.length !== 1) throw new Error(`glTF textures[${textureIndex}] must resolve exactly one image source`);
-  return integer(candidates[0], 0, parsed.images.length - 1, `glTF textures[${textureIndex}].source`);
+  const source = extensionSource ?? texture.source;
+  if (source === undefined) throw new Error(`glTF textures[${textureIndex}] must resolve an image source`);
+  return integer(source, 0, parsed.images.length - 1, `glTF textures[${textureIndex}].source`);
 };
+
+const resolveSampler = (parsed: ParsedHeroGlb, textureIndex: number): ProcPlantHeroGlbSampler => {
+  const texture = record(parsed.textures[textureIndex], `glTF textures[${textureIndex}]`);
+  if (texture.sampler === undefined) return { samplerIndex: null, magFilter: null, minFilter: null, wrapS: 10497, wrapT: 10497 };
+  const samplerIndex = integer(texture.sampler, 0, parsed.samplers.length - 1, `glTF textures[${textureIndex}].sampler`);
+  const sampler = record(parsed.samplers[samplerIndex], `glTF samplers[${samplerIndex}]`);
+  const magFilter = sampler.magFilter === undefined ? null : integer(sampler.magFilter, 9728, 9729, `glTF samplers[${samplerIndex}].magFilter`);
+  const allowedMinFilters = new Set([9728, 9729, 9984, 9985, 9986, 9987]);
+  const minFilter = sampler.minFilter === undefined ? null : integer(sampler.minFilter, 9728, 9987, `glTF samplers[${samplerIndex}].minFilter`);
+  if (minFilter !== null && !allowedMinFilters.has(minFilter)) throw new Error(`glTF samplers[${samplerIndex}].minFilter is unsupported`);
+  const wrap = (value: unknown, label: string) => {
+    const resolved = value === undefined ? 10497 : integer(value, 0, 100_000, label);
+    if (resolved !== 33071 && resolved !== 33648 && resolved !== 10497) throw new Error(`${label} is unsupported`);
+    return resolved as 33071 | 33648 | 10497;
+  };
+  return {
+    samplerIndex,
+    magFilter: magFilter as 9728 | 9729 | null,
+    minFilter: minFilter as ProcPlantHeroGlbSampler["minFilter"],
+    wrapS: wrap(sampler.wrapS, `glTF samplers[${samplerIndex}].wrapS`),
+    wrapT: wrap(sampler.wrapT, `glTF samplers[${samplerIndex}].wrapT`),
+  };
+};
+
+const resolveTextureBinding = (parsed: ParsedHeroGlb, value: unknown, label: string): ProcPlantHeroGlbTextureBinding | null => {
+  if (value === undefined) return null;
+  const info = record(value, label);
+  const textureIndex = integer(info.index, 0, parsed.textures.length - 1, `${label}.index`);
+  let texCoord = integer(info.texCoord ?? 0, 0, 7, `${label}.texCoord`);
+  let offset = [0, 0];
+  let rotation = 0;
+  let scale = [1, 1];
+  if (info.extensions !== undefined) {
+    const extensions = record(info.extensions, `${label}.extensions`);
+    if (extensions.KHR_texture_transform !== undefined) {
+      const transform = record(extensions.KHR_texture_transform, `${label}.extensions.KHR_texture_transform`);
+      offset = finiteTuple(transform.offset, [0, 0], 2, -1e6, 1e6, `${label}.offset`);
+      rotation = finiteNumber(transform.rotation, 0, -1e6, 1e6, `${label}.rotation`);
+      scale = finiteTuple(transform.scale, [1, 1], 2, -1e6, 1e6, `${label}.scale`);
+      if (transform.texCoord !== undefined) texCoord = integer(transform.texCoord, 0, 7, `${label}.transform.texCoord`);
+    }
+  }
+  if (texCoord !== 0) throw new Error(`${label} requires TEXCOORD_${texCoord}; imported hero authoring supports UV0 only`);
+  return {
+    textureIndex,
+    imageIndex: textureSourceIndex(parsed, textureIndex),
+    texCoord: 0,
+    sampler: resolveSampler(parsed, textureIndex),
+    transform: { offset: offset as [number, number], rotation, scale: scale as [number, number], texCoord: 0 },
+  };
+};
+
+const extractMaterials = (parsed: ParsedHeroGlb): ProcPlantHeroGlbMaterial[] =>
+  array(parsed.json.materials, "glTF materials").map((value, materialIndex) => {
+    const material = record(value, `glTF materials[${materialIndex}]`);
+    const pbr = material.pbrMetallicRoughness === undefined ? {} : record(material.pbrMetallicRoughness, `materials[${materialIndex}].pbrMetallicRoughness`);
+    const baseColorFactor = finiteTuple(pbr.baseColorFactor, [1, 1, 1, 1], 4, 0, 1, `materials[${materialIndex}].baseColorFactor`) as [number, number, number, number];
+    const emissiveFactor = finiteTuple(material.emissiveFactor, [0, 0, 0], 3, 0, 1, `materials[${materialIndex}].emissiveFactor`) as [number, number, number];
+    const alphaMode = material.alphaMode ?? "OPAQUE";
+    if (alphaMode !== "OPAQUE" && alphaMode !== "MASK" && alphaMode !== "BLEND") throw new Error(`materials[${materialIndex}].alphaMode is unsupported`);
+    if (material.doubleSided !== undefined && typeof material.doubleSided !== "boolean") throw new Error(`materials[${materialIndex}].doubleSided must be boolean`);
+    const normalBase = resolveTextureBinding(parsed, material.normalTexture, `materials[${materialIndex}].normalTexture`);
+    const normalInfo = material.normalTexture === undefined ? null : record(material.normalTexture, `materials[${materialIndex}].normalTexture`);
+    const occlusionBase = resolveTextureBinding(parsed, material.occlusionTexture, `materials[${materialIndex}].occlusionTexture`);
+    const occlusionInfo = material.occlusionTexture === undefined ? null : record(material.occlusionTexture, `materials[${materialIndex}].occlusionTexture`);
+    return {
+      materialIndex,
+      name: typeof material.name === "string" && material.name.length <= 128 ? material.name : `material-${materialIndex}`,
+      baseColorFactor,
+      metallicFactor: finiteNumber(pbr.metallicFactor, 1, 0, 1, `materials[${materialIndex}].metallicFactor`),
+      roughnessFactor: finiteNumber(pbr.roughnessFactor, 1, 0, 1, `materials[${materialIndex}].roughnessFactor`),
+      baseColorTexture: resolveTextureBinding(parsed, pbr.baseColorTexture, `materials[${materialIndex}].baseColorTexture`),
+      metallicRoughnessTexture: resolveTextureBinding(parsed, pbr.metallicRoughnessTexture, `materials[${materialIndex}].metallicRoughnessTexture`),
+      normalTexture: normalBase ? { ...normalBase, scale: finiteNumber(normalInfo?.scale, 1, 0, 1e6, `materials[${materialIndex}].normalTexture.scale`) } : null,
+      occlusionTexture: occlusionBase ? { ...occlusionBase, strength: finiteNumber(occlusionInfo?.strength, 1, 0, 1, `materials[${materialIndex}].occlusionTexture.strength`) } : null,
+      emissiveFactor,
+      emissiveTexture: resolveTextureBinding(parsed, material.emissiveTexture, `materials[${materialIndex}].emissiveTexture`),
+      alphaMode,
+      alphaCutoff: finiteNumber(material.alphaCutoff, 0.5, 0, 1, `materials[${materialIndex}].alphaCutoff`),
+      doubleSided: material.doubleSided === true,
+    };
+  });
 
 const validateStructuralReferences = (parsed: ParsedHeroGlb) => {
   const scenes = array(parsed.json.scenes, "glTF scenes");
@@ -815,7 +962,7 @@ const inspectParsed = (parsed: ParsedHeroGlb, textures: readonly ProcPlantHeroGl
     throw new Error("glTF extensionsRequired must be a subset of extensionsUsed");
   }
   const unsupportedRequired = extensionsRequired.find((extension) =>
-    extension !== "KHR_texture_basisu" && extension !== "EXT_texture_webp");
+    extension !== "KHR_texture_basisu" && extension !== "EXT_texture_webp" && extension !== "KHR_texture_transform");
   if (unsupportedRequired) throw new Error(`unsupported required hero GLB extension ${unsupportedRequired}`);
   const asset = record(parsed.json.asset, "glTF asset");
   return {
@@ -844,6 +991,7 @@ export const inspectProcPlantHeroGlb = (
 ): ProcPlantHeroGlbInspection => {
   const parsed = parseHeroGlb(source, limits);
   const textures = extractTextures(parsed);
+  extractMaterials(parsed);
   return inspectParsed(parsed, textures);
 };
 
@@ -969,11 +1117,13 @@ export const importProcPlantHeroGlb = (
 ): ProcPlantHeroGlbImportPackage => {
   const parsed = parseHeroGlb(source, options);
   const textures = extractTextures(parsed);
+  const materials = extractMaterials(parsed);
   return {
     contract: PROCPLANT_HERO_GLB_IMPORT_CONTRACT,
     version: PROCPLANT_HERO_GLB_IMPORT_VERSION,
     inspection: inspectParsed(parsed, textures),
     meshes: extractProcPlantHeroGlbMeshes(source, options),
     textures,
+    materials,
   };
 };

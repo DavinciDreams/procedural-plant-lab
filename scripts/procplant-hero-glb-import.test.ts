@@ -72,8 +72,19 @@ const makeGlb = (
       { bufferView: 3, componentType: 5123, count: 3, type: "SCALAR" },
     ],
     images: [{ name: "Bark albedo", bufferView: 4, mimeType: "image/png" }],
-    textures: [{ source: 0 }],
-    materials: [{ name: "Bark", pbrMetallicRoughness: { baseColorTexture: { index: 0 } } }],
+    samplers: [{ magFilter: 9728, minFilter: 9985, wrapS: 33071, wrapT: 33648 }],
+    textures: [{ source: 0, sampler: 0 }],
+    materials: [{
+      name: "Bark",
+      pbrMetallicRoughness: {
+        baseColorFactor: [0.4, 0.3, 0.2, 0.75], metallicFactor: 0.15, roughnessFactor: 0.82,
+        baseColorTexture: { index: 0, extensions: { KHR_texture_transform: { offset: [0.125, 0.25], rotation: 0.5, scale: [2, 3] } } },
+      },
+      normalTexture: { index: 0, scale: 0.7 },
+      occlusionTexture: { index: 0, strength: 0.6 },
+      emissiveFactor: [0.01, 0.02, 0.03], emissiveTexture: { index: 0 },
+      alphaMode: "MASK", alphaCutoff: 0.35, doubleSided: true,
+    }],
     meshes: [{ name: "Scanned trunk", primitives: [{
       attributes: { POSITION: 0, NORMAL: 1, TEXCOORD_0: 2 },
       indices: 3,
@@ -216,7 +227,23 @@ const imported = importProcPlantHeroGlb(source);
 assert.equal(imported.contract, PROCPLANT_HERO_GLB_IMPORT_CONTRACT);
 assert.equal(imported.meshes.length, 1);
 assert.equal(imported.textures.length, 1);
+assert.equal(imported.materials.length, 1);
+assert.deepEqual(imported.materials[0]!.baseColorFactor, [0.4, 0.3, 0.2, 0.75]);
+assert.equal(imported.materials[0]!.metallicFactor, 0.15);
+assert.equal(imported.materials[0]!.roughnessFactor, 0.82);
+assert.deepEqual(imported.materials[0]!.baseColorTexture, {
+  textureIndex: 0, imageIndex: 0, texCoord: 0,
+  sampler: { samplerIndex: 0, magFilter: 9728, minFilter: 9985, wrapS: 33071, wrapT: 33648 },
+  transform: { offset: [0.125, 0.25], rotation: 0.5, scale: [2, 3], texCoord: 0 },
+});
+assert.equal(imported.materials[0]!.normalTexture?.scale, 0.7);
+assert.equal(imported.materials[0]!.occlusionTexture?.strength, 0.6);
+assert.deepEqual(imported.materials[0]!.emissiveFactor, [0.01, 0.02, 0.03]);
+assert.equal(imported.materials[0]!.alphaMode, "MASK");
+assert.equal(imported.materials[0]!.alphaCutoff, 0.35);
+assert.equal(imported.materials[0]!.doubleSided, true);
 assert.deepEqual(imported.inspection, first);
+assert.deepEqual(importProcPlantHeroGlb(source).materials, imported.materials, "resolved material records must be deterministic");
 
 const dataUri = `data:image/png;base64,${Buffer.from(png).toString("base64")}`;
 const dataUriGlb = makeGlb((json) => {
@@ -225,6 +252,17 @@ const dataUriGlb = makeGlb((json) => {
 const inlineTexture = extractProcPlantHeroGlbTextures(dataUriGlb)[0]!;
 assert.equal(inlineTexture.source, "data-uri");
 assert.deepEqual(inlineTexture.bytes, png);
+
+const ktx2 = Uint8Array.of(0xab, 0x4b, 0x54, 0x58, 0x20, 0x32, 0x30, 0xbb, 0x0d, 0x0a, 0x1a, 0x0a);
+const ktxGlb = makeGlb((json) => {
+  json.extensionsUsed = ["KHR_texture_basisu"];
+  json.extensionsRequired = ["KHR_texture_basisu"];
+  json.images = [{ name: "Compressed bark", uri: `data:image/ktx2;base64,${Buffer.from(ktx2).toString("base64")}` }];
+  json.textures = [{ source: 0, sampler: 0, extensions: { KHR_texture_basisu: { source: 0 } } }];
+});
+const ktxImported = importProcPlantHeroGlb(ktxGlb);
+assert.equal(ktxImported.textures[0]!.mimeType, "image/ktx2", "KTX2 bytes remain supported by deterministic ingestion");
+assert.equal(ktxImported.materials[0]!.baseColorTexture?.imageIndex, 0, "basisu extension source may retain a fallback source");
 
 assert.throws(() => inspectProcPlantHeroGlb(source, { maxBytes: source.length - 1 }), /exceeds maxBytes/);
 assert.throws(() => inspectProcPlantHeroGlb(source, { maxImageBytes: png.length - 1 }), /byteLength/);
@@ -280,10 +318,16 @@ assert.throws(() => extractProcPlantHeroGlbMeshes(makeGlb((_json, binary) => {
 assert.throws(() => inspectProcPlantHeroGlb(makeGlb((json) => {
   json.images[0] = { uri: "data:image/png;base64,%%%=" };
 })), /non-base64 URI|invalid base64/);
+assert.throws(() => importProcPlantHeroGlb(makeGlb((json) => {
+  json.materials[0].pbrMetallicRoughness.baseColorTexture.texCoord = 1;
+})), /supports UV0 only/);
+assert.throws(() => importProcPlantHeroGlb(makeGlb((json) => {
+  json.samplers[0].wrapS = 12345;
+})), /wrapS is unsupported/);
 
 console.log("ok 1 - bounded GLB inspection is deterministic and nonmutating");
 console.log("ok 2 - hero mesh positions, normals, normalized UVs, and indices decode renderer-independently");
-console.log("ok 3 - embedded and data-URI bark textures extract as isolated byte copies");
+console.log("ok 3 - embedded and data-URI bark textures and deterministic PBR records extract as isolated data");
 console.log("ok 4 - byte/count/output caps and unsupported compressed, sparse, external, or non-triangle inputs fail closed");
 console.log("ok 5 - static hierarchy TRS/matrices, inverse-transpose normals, and stable mesh instancing provenance bake exactly");
 console.log("1..5");
