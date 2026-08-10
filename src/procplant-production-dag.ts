@@ -7,18 +7,26 @@ import {
   buildGuidedVineProcPlantArchitectureGraph,
   buildProcPlantGraphIr,
   buildProcPlantClumpStageParts,
+  buildProcPlantDaylilyStageParts,
   buildProcPlantTemplate,
   buildProcPlantTemplateFromGraph,
   buildWeberPennProcPlantStageParts,
   compileProcPlantClumpStageLods,
+  compileProcPlantDaylilyStageLods,
   compileProcPlantLods,
   compileProcPlantLodsFromTemplate,
   createProcPlantClumpStagePlan,
+  createProcPlantDaylilyCrownStagePlan,
+  createProcPlantDaylilyFoliageStagePlan,
+  createProcPlantDaylilyReproductiveStagePlan,
   defaultPlantEnvironment,
   materializeProcPlantParts,
   materializeBranchModuleProcPlantParts,
   materializeProcPlantInstancedParts,
   type ProcPlantClumpStagePlan,
+  type ProcPlantDaylilyCrownStagePlan,
+  type ProcPlantDaylilyFoliageStagePlan,
+  type ProcPlantDaylilyReproductiveStagePlan,
   type ProcPlantCompiledLod,
   type ProcPlantBranchModuleStageParts,
   type ProcPlantEnvironment,
@@ -167,6 +175,31 @@ export interface ProcPlantClumpPartsStageArtifact extends ArtifactBase<"clump-pa
   runtime: { windFlex: number; phototropism: number };
 }
 
+export interface ProcPlantDaylilyCrownStageArtifact extends ArtifactBase<"daylily-crowns", "architecture"> {
+  genome: ProcPlantGenome;
+  environment: ProcPlantEnvironment;
+  plan: ProcPlantDaylilyCrownStagePlan;
+  runtime: { windFlex: number; phototropism: number };
+}
+
+export interface ProcPlantDaylilyFoliageStageArtifact extends ArtifactBase<"daylily-foliage", "foliage"> {
+  genome: ProcPlantGenome;
+  environment: ProcPlantEnvironment;
+  crownPlan: ProcPlantDaylilyCrownStagePlan;
+  plan: ProcPlantDaylilyFoliageStagePlan;
+  runtime: { windFlex: number; phototropism: number };
+}
+
+export interface ProcPlantDaylilyReproductiveStageArtifact extends ArtifactBase<"daylily-reproductive", "reproductive"> {
+  genome: ProcPlantGenome;
+  environment: ProcPlantEnvironment;
+  crownPlan: ProcPlantDaylilyCrownStagePlan;
+  foliagePlan: ProcPlantDaylilyFoliageStagePlan;
+  plan: ProcPlantDaylilyReproductiveStagePlan;
+  parts: ProcPlantInstancedParts;
+  runtime: { windFlex: number; phototropism: number };
+}
+
 export type ProcPlantProductionStageArtifact =
   | ProcPlantSourceStageArtifact
   | ProcPlantGraphStageArtifact
@@ -180,7 +213,10 @@ export type ProcPlantProductionStageArtifact =
   | ProcPlantLodStageArtifact
   | ProcPlantOutputStageArtifact
   | ProcPlantClumpTransformStageArtifact
-  | ProcPlantClumpPartsStageArtifact;
+  | ProcPlantClumpPartsStageArtifact
+  | ProcPlantDaylilyCrownStageArtifact
+  | ProcPlantDaylilyFoliageStageArtifact
+  | ProcPlantDaylilyReproductiveStageArtifact;
 
 type WithoutArtifactHash<T> = T extends { hash: string } ? Omit<T, "hash"> : never;
 type ProcPlantUnhashedStageArtifact = WithoutArtifactHash<ProcPlantProductionStageArtifact>;
@@ -1660,6 +1696,23 @@ const artifactHashPayload = (artifact: ProcPlantUnhashedStageArtifact) => {
     graph: graphHash(artifact.parts.graph),
     template: templateHash(materializeProcPlantInstancedParts(artifact.genome, artifact.parts)),
   };
+  if (artifact.kind === "daylily-crowns") return {
+    kind: artifact.kind, nodeId: artifact.nodeId, seed: artifact.seed, lineage: artifact.lineage,
+    crowns: artifact.plan.crowns.map((crown) => [crown.ordinal, crown.ringT, crown.angle, crown.position.toArray()]),
+  };
+  if (artifact.kind === "daylily-foliage") return {
+    kind: artifact.kind, nodeId: artifact.nodeId, seed: artifact.seed, lineage: artifact.lineage,
+    crownSeed: artifact.crownPlan.architectureSeed,
+    organs: artifact.plan.organs.map(organSignature),
+  };
+  if (artifact.kind === "daylily-reproductive") return {
+    kind: artifact.kind, nodeId: artifact.nodeId, seed: artifact.seed, lineage: artifact.lineage,
+    crownSeed: artifact.crownPlan.architectureSeed, foliageSeed: artifact.foliagePlan.foliageSeed,
+    stems: artifact.plan.stems.map((stem) => [stem.position.toArray(), stem.direction.toArray(), stem.radius, stem.depth, stem.t]),
+    segments: artifact.plan.segments, organs: artifact.plan.organs.map(organSignature),
+    graph: graphHash(artifact.parts.graph),
+    template: templateHash(materializeProcPlantInstancedParts(artifact.genome, artifact.parts)),
+  };
   if (artifact.kind === "graph") return { kind: artifact.kind, stage: artifact.stage, nodeId: artifact.nodeId, seed: artifact.seed, lineage: artifact.lineage, graph: graphHash(artifact.graph), runtime: artifact.runtime };
   if (artifact.kind === "space-colonization-plan") return {
     kind: artifact.kind, stage: artifact.stage, nodeId: artifact.nodeId, seed: artifact.seed,
@@ -1716,6 +1769,10 @@ const artifactWork = (artifact: ProcPlantProductionStageArtifact) => {
   if (artifact.kind === "source") return 1;
   if (artifact.kind === "clump-transforms") return artifact.plan.transforms.length;
   if (artifact.kind === "clump-parts") return artifact.parts.graph.stems.length + artifact.parts.graph.segments.length + artifact.parts.instances.length;
+  if (artifact.kind === "daylily-crowns") return artifact.plan.crowns.length;
+  if (artifact.kind === "daylily-foliage") return artifact.plan.organs.length;
+  if (artifact.kind === "daylily-reproductive") return artifact.parts.graph.stems.length
+    + artifact.parts.graph.segments.length + artifact.parts.graph.organs.length + artifact.parts.instances.length;
   if (artifact.kind === "graph") return artifact.graph.stems.length + artifact.graph.segments.length + artifact.graph.organs.length;
   if (artifact.kind === "space-colonization-plan") return 1 + (artifact.genome.spaceColonization?.freeform?.volumes.length ?? 0);
   if (artifact.kind === "space-colonization-parts") return artifact.parts.graph.stems.length
@@ -1748,16 +1805,16 @@ const assertSupportedClumpGraph = (
   canonical: ProcPlantGeneratorGraph,
 ) => {
   if (!genome.clump || genome.clump.count <= 1) throw new ProcPlantProductionDagError("clump-specialized DAG requires clump.count > 1");
-  if (genome.id.split("@", 1)[0] === "daylilyFlower") {
-    throw new ProcPlantProductionDagError("typed clump DAG does not support the specialized daylily crown/scapes backend");
-  }
+  const daylily = genome.id.split("@", 1)[0] === "daylilyFlower";
   if (graph.nodes.length !== canonical.nodes.length) {
     throw new ProcPlantProductionDagError("typed clump DAG does not support added or removed stages");
   }
   const canonicalById = new Map(canonical.nodes.map((node) => [node.id, node]));
   const normalizeNode = (node: ProcPlantGeneratorNode, reference: ProcPlantGeneratorNode) => {
     const normalized = structuredClone(node);
-    if (node.stage === "architecture" || node.stage === "foliage") delete normalized.seedOverride;
+    if (node.stage === "architecture" || node.stage === "foliage" || (daylily && node.stage === "reproductive")) {
+      delete normalized.seedOverride;
+    }
     if (node.stage === "material" || node.stage === "lod") normalized.parameters = structuredClone(reference.parameters);
     return normalized;
   };
@@ -1788,6 +1845,142 @@ const assertSupportedClumpGraph = (
     throw new ProcPlantProductionDagError(`${lod.id}.parameters.levels must contain LOD indices 0..3`);
   }
   return nodes;
+};
+
+const compileProcPlantDaylilyProductionDag = (
+  genome: ProcPlantGenome,
+  graph: ProcPlantGeneratorGraph,
+  canonical: ProcPlantGeneratorGraph,
+  order: readonly string[],
+  environment: ProcPlantEnvironment,
+  maximumWork: number,
+): ProcPlantProductionDagResult => {
+  const nodes = assertSupportedClumpGraph(genome, graph, canonical);
+  const source = nodes.get("source")!;
+  const architecture = nodes.get("architecture")!;
+  const foliage = nodes.get("foliage")!;
+  const reproductive = nodes.get("reproductive")!;
+  const material = nodes.get("material")!;
+  const lod = nodes.get("lod")!;
+  const output = nodes.get("output")!;
+  const architectureSeed = (architecture.seedOverride ?? graph.seed) >>> 0;
+  const foliageSeed = (foliage.seedOverride ?? graph.seed) >>> 0;
+  const reproductiveSeed = (reproductive.seedOverride ?? graph.seed) >>> 0;
+  const materialGenome: ProcPlantGenome = {
+    ...genome,
+    leaf: {
+      ...genome.leaf,
+      colorA: Number(material.parameters?.leafColorA),
+      colorB: Number(material.parameters?.leafColorB),
+    },
+  };
+  const runtime = {
+    windFlex: genome.treeRealism?.windFlex ?? 0.35,
+    phototropism: genome.lightResponse.phototropism,
+  };
+  const crownPlan = createProcPlantDaylilyCrownStagePlan(materialGenome, architectureSeed, environment);
+  const foliagePlan = createProcPlantDaylilyFoliageStagePlan(materialGenome, crownPlan, foliageSeed, environment);
+  const reproductivePlan = createProcPlantDaylilyReproductiveStagePlan(materialGenome, crownPlan, reproductiveSeed, environment);
+  const parts = buildProcPlantDaylilyStageParts(materialGenome, crownPlan, foliagePlan, reproductivePlan);
+  if (parts.graph.stems.length > PROCPLANT_PRODUCTION_DAG_MAX_GRAPH_STEMS ||
+    parts.graph.organs.length > PROCPLANT_PRODUCTION_DAG_MAX_GRAPH_ORGANS ||
+    parts.instances.length > PROCPLANT_PRODUCTION_DAG_MAX_GRAPH_ORGANS) {
+    throw new ProcPlantProductionDagError("daylily reproductive stage exceeds production geometry caps");
+  }
+  const template = materializeProcPlantInstancedParts(materialGenome, parts);
+  const levels = lod.parameters!.levels as (0 | 1 | 2 | 3)[];
+  const lods = compileProcPlantDaylilyStageLods(
+    materialGenome,
+    architectureSeed,
+    foliageSeed,
+    reproductiveSeed,
+    environment,
+    levels,
+  );
+  const full = lods.find((entry) => entry.level === 0);
+  if (!full) throw new ProcPlantProductionDagError(`${output.id} requires LOD level 0 for runtime output`);
+  if (templateHash(full.template) !== templateHash(template)) {
+    throw new ProcPlantProductionDagError("daylily material and LOD0 stages produced different canonical bytes");
+  }
+  const stats: ProcPlantStats = {
+    stems: parts.stats.stems,
+    leaves: parts.stats.leaves,
+    flowers: parts.stats.flowers,
+    triangles: template.idx.length / 3,
+  };
+  const artifacts: Record<string, ProcPlantProductionStageArtifact> = Object.create(null) as Record<string, ProcPlantProductionStageArtifact>;
+  artifacts[source.id] = withArtifactHash({
+    kind: "source", stage: "source", nodeId: source.id, seed: graph.seed, lineage: [source.id], genome, environment,
+  });
+  artifacts[architecture.id] = withArtifactHash({
+    kind: "daylily-crowns", stage: "architecture", nodeId: architecture.id, seed: architectureSeed,
+    lineage: [source.id, architecture.id].sort(), genome: materialGenome, environment, plan: crownPlan, runtime,
+  });
+  artifacts[foliage.id] = withArtifactHash({
+    kind: "daylily-foliage", stage: "foliage", nodeId: foliage.id, seed: foliageSeed,
+    lineage: [source.id, architecture.id, foliage.id].sort(), genome: materialGenome, environment,
+    crownPlan, plan: foliagePlan, runtime,
+  });
+  artifacts[reproductive.id] = withArtifactHash({
+    kind: "daylily-reproductive", stage: "reproductive", nodeId: reproductive.id, seed: reproductiveSeed,
+    lineage: [source.id, architecture.id, reproductive.id].sort(), genome: materialGenome, environment,
+    crownPlan, foliagePlan, plan: reproductivePlan, parts, runtime,
+  });
+  const completeLineage = [source.id, architecture.id, foliage.id, reproductive.id];
+  artifacts[material.id] = withArtifactHash({
+    kind: "material", stage: "material", nodeId: material.id,
+    seed: deriveProcPlantGeneratorNodeSeed(graph.seed, material.id),
+    lineage: [...completeLineage, material.id].sort(), genome: materialGenome, environment,
+    graph: parts.graph, template, stats,
+  });
+  artifacts[lod.id] = withArtifactHash({
+    kind: "lod", stage: "lod", nodeId: lod.id, seed: deriveProcPlantGeneratorNodeSeed(graph.seed, lod.id),
+    lineage: [...completeLineage, material.id, lod.id].sort(), genome: materialGenome,
+    graph: parts.graph, lods, stats, runtime,
+  });
+  artifacts[output.id] = withArtifactHash({
+    kind: "output", stage: "output", nodeId: output.id, seed: deriveProcPlantGeneratorNodeSeed(graph.seed, output.id),
+    lineage: [...completeLineage, material.id, lod.id, output.id].sort(),
+    build: { template: full.template, graph: parts.graph, stats: { ...stats, triangles: full.triangles } }, lods, runtime,
+  });
+  const records: ProcPlantProductionDagRecord[] = [];
+  let work = 0;
+  for (const nodeId of order) {
+    const node = graph.nodes.find((entry) => entry.id === nodeId)!;
+    const artifact = artifacts[nodeId];
+    const operationWork = nodeWork(node);
+    const materializedWork = artifact ? artifactWork(artifact) : 0;
+    work += operationWork + materializedWork;
+    if (work > maximumWork) throw new ProcPlantProductionDagError(`production DAG exceeds the ${maximumWork} work cap at ${node.id}`);
+    const seed = node.stage === "architecture"
+      ? architectureSeed
+      : node.stage === "foliage"
+        ? foliageSeed
+        : node.stage === "reproductive"
+          ? reproductiveSeed
+          : node.seedOverride ?? deriveProcPlantGeneratorNodeSeed(graph.seed, node.id);
+    records.push({
+      nodeId,
+      stage: node.stage,
+      seed,
+      status: !node.enabled ? "disabled" : artifact ? "executed" : "legacy",
+      dependencyIds: [...node.dependsOn].sort(),
+      artifactKind: artifact?.kind ?? null,
+      artifactHash: artifact?.hash ?? null,
+      work: operationWork + materializedWork,
+    });
+  }
+  return {
+    version: PROCPLANT_PRODUCTION_DAG_RESULT_VERSION,
+    path: "typed-artifacts",
+    graph,
+    previewHash: summarizeProcPlantGeneratorGraph(graph).hash,
+    artifacts,
+    records,
+    build: (artifacts[output.id] as ProcPlantOutputStageArtifact).build,
+    lods,
+    work,
+  };
 };
 
 const compileProcPlantClumpProductionDag = (
@@ -1946,6 +2139,9 @@ export const compileProcPlantProductionDag = (
     throw new ProcPlantProductionDagError(`maxWork must be an integer in 1..${PROCPLANT_PRODUCTION_DAG_MAX_WORK}`);
   }
   if (genome.clump && genome.clump.count > 1) {
+    if (genome.id.split("@", 1)[0] === "daylilyFlower") {
+      return compileProcPlantDaylilyProductionDag(genome, graph, canonical, order, environment, maximumWork);
+    }
     return compileProcPlantClumpProductionDag(genome, graph, canonical, order, environment, maximumWork);
   }
   assertSupportedBackend(genome);

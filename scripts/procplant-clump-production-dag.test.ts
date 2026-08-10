@@ -148,16 +148,6 @@ assert.throws(
   /work cap/,
 );
 
-const daylily = procPlantPresets.daylilyFlower!;
-const daylilyGraph = createProcPlantAuthoringGraph(daylily, seed);
-const daylilyEdited = applyProcPlantGeneratorGraphOperations(daylilyGraph, [{
-  op: "set-seed", nodeId: daylilyGraph.nodes.find((node) => node.stage === "architecture")!.id, value: 9,
-}]);
-assert.throws(
-  () => compileProcPlantProductionDag(daylily, daylilyEdited, environment, { canonicalSeed: seed }),
-  /does not support the specialized daylily crown\/scapes backend/,
-);
-
 const explicitPlan = createProcPlantClumpStagePlan(genome, seed, seed);
 assert.deepEqual(explicitPlan.shootSeeds, [612072, 614821, 617570, 620319, 623068]);
 const [coverageX, coverageZ] = footprint(canonicalLods[0]!.template);

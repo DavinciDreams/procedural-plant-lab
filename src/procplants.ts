@@ -5993,46 +5993,109 @@ const buildProcPlantSingleShootParts = (
   };
 };
 
-const buildDaylilyClumpParts = (
+export const PROCPLANT_DAYLILY_STAGE_PLAN_VERSION = 1 as const;
+
+export interface ProcPlantDaylilyCrown {
+  ordinal: number;
+  ringT: number;
+  angle: number;
+  position: THREE.Vector3;
+}
+
+export interface ProcPlantDaylilyCrownStagePlan {
+  version: typeof PROCPLANT_DAYLILY_STAGE_PLAN_VERSION;
+  architectureSeed: number;
+  crowns: ProcPlantDaylilyCrown[];
+}
+
+export interface ProcPlantDaylilyFoliageStagePlan {
+  version: typeof PROCPLANT_DAYLILY_STAGE_PLAN_VERSION;
+  foliageSeed: number;
+  organs: ProcPlantOrgan[];
+}
+
+export interface ProcPlantDaylilyReproductiveStagePlan {
+  version: typeof PROCPLANT_DAYLILY_STAGE_PLAN_VERSION;
+  reproductiveSeed: number;
+  stems: ProcPlantStemNode[];
+  segments: Array<[number, number]>;
+  organs: ProcPlantOrgan[];
+}
+
+const assertDaylilyClump = (genome: ProcPlantGenome) => {
+  const clump = genome.clump;
+  if (authoredProcPlantId(genome) !== "daylilyFlower" || !clump || clump.count <= 1) {
+    throw new Error("daylily stage planning requires the specialized daylily clump backend");
+  }
+  return clump;
+};
+
+const daylilyStageRng = (seed: number) => rngFromSeed(((seed >>> 0) ^ 0x9e3779b9) >>> 0);
+
+const daylilyLeafCount = (env: ProcPlantEnvironment, randomValue: number) =>
+  Math.max(8, Math.round(10 + env.moisture * 4 + randomValue * 4));
+
+/**
+ * Resolve Daylily crown architecture independently from strap-leaf and scape
+ * variation. The skipped draws retain the exact legacy phase alignment when
+ * all three stage seeds equal the canonical seed.
+ */
+export const createProcPlantDaylilyCrownStagePlan = (
   genome: ProcPlantGenome,
-  seed: number,
-  env: ProcPlantEnvironment,
-  clump: NonNullable<ProcPlantGenome["clump"]>,
-): ProcPlantInstancedParts => {
+  architectureSeed: number,
+  env: ProcPlantEnvironment = defaultPlantEnvironment(),
+): ProcPlantDaylilyCrownStagePlan => {
+  const clump = assertDaylilyClump(genome);
   const crownCount = Math.max(1, Math.min(36, Math.round(clump.count)));
   const radius = Math.max(0.02, clump.radius);
   const jitter = THREE.MathUtils.clamp(clump.jitter ?? 0.55, 0, 1);
-  const scaleVar = THREE.MathUtils.clamp(clump.scaleVar ?? 0.24, 0, 1);
-  const lean = THREE.MathUtils.clamp(clump.lean ?? 0.42, 0, 1.4);
-  const flowerDensity = THREE.MathUtils.clamp(clump.flowerDensity ?? 0.32, 0, 1.5);
-  const rng = rngFromSeed((seed ^ 0x9e3779b9) >>> 0);
-  const shade = 1 - THREE.MathUtils.clamp(env.light, 0, 1);
-  const instances: ProcPlantInstance[] = [];
-  const stemBuilder = new TemplateBuilder();
-  const stemColor = new THREE.Color(0x6d5135);
-
-  const crownPositions: THREE.Vector3[] = [];
+  const rng = daylilyStageRng(architectureSeed);
+  const crowns: ProcPlantDaylilyCrown[] = [];
   for (let c = 0; c < crownCount; c++) {
     const ringT = crownCount > 1 ? c / (crownCount - 1) : 0;
     const angle = c * GOLDEN_ANGLE + (rng() - 0.5) * jitter * 1.2;
     const spread = c === 0 ? 0 : radius * (0.25 + Math.sqrt(ringT) * 0.75) * (1 + (rng() - 0.5) * jitter * 0.45);
     const crown = new THREE.Vector3(Math.cos(angle) * spread, 0, Math.sin(angle) * spread);
-    crownPositions.push(crown);
+    crowns.push({ ordinal: c, ringT, angle, position: crown });
+    rng(); // foliage crown-scale draw
+    const leafCount = daylilyLeafCount(env, rng());
+    for (let i = 0; i < leafCount * 4; i++) rng();
+  }
+  return { version: PROCPLANT_DAYLILY_STAGE_PLAN_VERSION, architectureSeed: architectureSeed >>> 0, crowns };
+};
+
+/** Build branch-relative strap-leaf organs from an independently seeded stream. */
+export const createProcPlantDaylilyFoliageStagePlan = (
+  genome: ProcPlantGenome,
+  crowns: ProcPlantDaylilyCrownStagePlan,
+  foliageSeed: number,
+  env: ProcPlantEnvironment = defaultPlantEnvironment(),
+): ProcPlantDaylilyFoliageStagePlan => {
+  const clump = assertDaylilyClump(genome);
+  if (crowns.version !== PROCPLANT_DAYLILY_STAGE_PLAN_VERSION) throw new Error("unsupported daylily crown stage plan version");
+  const scaleVar = THREE.MathUtils.clamp(clump.scaleVar ?? 0.24, 0, 1);
+  const lean = THREE.MathUtils.clamp(clump.lean ?? 0.42, 0, 1.4);
+  const shade = 1 - THREE.MathUtils.clamp(env.light, 0, 1);
+  const rng = daylilyStageRng(foliageSeed);
+  const organs: ProcPlantOrgan[] = [];
+  for (const crownRecord of crowns.crowns) {
+    rng(); // architecture angle draw
+    if (crownRecord.ordinal > 0) rng(); // architecture spread draw
     const crownScale = 1 + (rng() - 0.5) * scaleVar;
-    const leafCount = Math.max(8, Math.round(10 + env.moisture * 4 + rng() * 4));
+    const leafCount = daylilyLeafCount(env, rng());
     for (let i = 0; i < leafCount; i++) {
       const t = i / Math.max(1, leafCount - 1);
-      const yaw = resolveProcPlantPhyllotaxy(genome, i).azimuth + angle * 0.37 + (rng() - 0.5) * 0.35;
+      const yaw = resolveProcPlantPhyllotaxy(genome, i).azimuth + crownRecord.angle * 0.37 + (rng() - 0.5) * 0.35;
       const radial = new THREE.Vector3(Math.cos(yaw), 0, Math.sin(yaw));
-      const outward = crown.lengthSq() > 0.0001 ? crown.clone().normalize() : radial;
+      const outward = crownRecord.position.lengthSq() > 0.0001 ? crownRecord.position.clone().normalize() : radial;
       const dir = UP.clone()
         .add(radial.clone().multiplyScalar(0.34 + rng() * 0.24))
-        .add(outward.multiplyScalar(lean * (0.22 + ringT * 0.32)))
+        .add(outward.multiplyScalar(lean * (0.22 + crownRecord.ringT * 0.32)))
         .normalize();
       const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw)).normalize();
-      const organ: Organ = {
+      organs.push({
         kind: "grassBlade",
-        position: crown.clone().add(radial.clone().multiplyScalar((rng() - 0.5) * 0.05)),
+        position: crownRecord.position.clone().add(radial.clone().multiplyScalar((rng() - 0.5) * 0.05)),
         direction: dir,
         right,
         scale:
@@ -6041,14 +6104,36 @@ const buildDaylilyClumpParts = (
           (1 + shade * genome.lightResponse.leafBoostInShade * 0.28) *
           (0.76 + rng() * 0.24),
         t,
-      };
-      instances.push(grassBladeInstance(genome, organ));
+      });
     }
   }
+  return { version: PROCPLANT_DAYLILY_STAGE_PLAN_VERSION, foliageSeed: foliageSeed >>> 0, organs };
+};
 
-  const scapeCount = Math.max(1, Math.min(18, Math.round(crownCount * flowerDensity)));
+/** Build independently seeded scape topology and terminal flower organs. */
+export const createProcPlantDaylilyReproductiveStagePlan = (
+  genome: ProcPlantGenome,
+  crowns: ProcPlantDaylilyCrownStagePlan,
+  reproductiveSeed: number,
+  env: ProcPlantEnvironment = defaultPlantEnvironment(),
+): ProcPlantDaylilyReproductiveStagePlan => {
+  const clump = assertDaylilyClump(genome);
+  if (crowns.version !== PROCPLANT_DAYLILY_STAGE_PLAN_VERSION) throw new Error("unsupported daylily crown stage plan version");
+  const rng = daylilyStageRng(reproductiveSeed);
+  for (const crown of crowns.crowns) {
+    rng();
+    if (crown.ordinal > 0) rng();
+    rng();
+    const leafCount = daylilyLeafCount(env, rng());
+    for (let i = 0; i < leafCount * 4; i++) rng();
+  }
+  const flowerDensity = THREE.MathUtils.clamp(clump.flowerDensity ?? 0.32, 0, 1.5);
+  const scapeCount = Math.max(1, Math.min(18, Math.round(crowns.crowns.length * flowerDensity)));
+  const stems: ProcPlantStemNode[] = [];
+  const segments: Array<[number, number]> = [];
+  const organs: ProcPlantOrgan[] = [];
   for (let s = 0; s < scapeCount; s++) {
-    const crown = crownPositions[Math.floor(rng() * crownPositions.length)]?.clone() ?? new THREE.Vector3();
+    const crown = crowns.crowns[Math.floor(rng() * crowns.crowns.length)]?.position.clone() ?? new THREE.Vector3();
     const heightScale = 0.78 + rng() * 0.38;
     const bend = new THREE.Vector3((rng() - 0.5) * 0.08, 0, (rng() - 0.5) * 0.08);
     const nodes = Math.max(4, Math.round(genome.nodeCount * (0.72 + rng() * 0.22)));
@@ -6058,8 +6143,9 @@ const buildDaylilyClumpParts = (
       radius: 0.018 * heightScale,
       depth: 0,
       t: 0,
-      index: 0,
+      index: stems.length,
     };
+    stems.push(previous);
     for (let i = 1; i <= nodes; i++) {
       const t = i / nodes;
       const direction = UP.clone()
@@ -6072,37 +6158,88 @@ const buildDaylilyClumpParts = (
         radius: previous.radius * THREE.MathUtils.lerp(0.92, 0.72, t),
         depth: 0,
         t,
-        index: i,
+        index: stems.length,
       };
-      addStemSegment(stemBuilder, previous, node, stemColor);
+      stems.push(node);
+      segments.push([previous.index, node.index]);
       previous = node;
     }
     const basis = tangentBasis(previous.direction);
-    const flowerOrgan: Organ = {
+    organs.push({
       kind: "flower",
       position: previous.position.clone().add(previous.direction.clone().multiplyScalar(0.04)),
       direction: previous.direction.clone(),
       right: basis.right,
       scale: 0.86 + rng() * 0.26,
       t: 1,
-    };
-    instances.push(...flowerInstances(genome, flowerOrgan));
+    });
   }
+  return {
+    version: PROCPLANT_DAYLILY_STAGE_PLAN_VERSION,
+    reproductiveSeed: reproductiveSeed >>> 0,
+    stems,
+    segments,
+    organs,
+  };
+};
 
+/** Materialize the three independently seeded Daylily stage plans. */
+export const buildProcPlantDaylilyStageParts = (
+  genome: ProcPlantGenome,
+  crowns: ProcPlantDaylilyCrownStagePlan,
+  foliage: ProcPlantDaylilyFoliageStagePlan,
+  reproductive: ProcPlantDaylilyReproductiveStagePlan,
+): ProcPlantInstancedParts => {
+  assertDaylilyClump(genome);
+  if (foliage.version !== PROCPLANT_DAYLILY_STAGE_PLAN_VERSION || reproductive.version !== PROCPLANT_DAYLILY_STAGE_PLAN_VERSION) {
+    throw new Error("unsupported daylily stage plan version");
+  }
+  const stemBuilder = new TemplateBuilder();
+  const stemColor = new THREE.Color(0x6d5135);
+  for (const [start, end] of reproductive.segments) {
+    addStemSegment(stemBuilder, reproductive.stems[start]!, reproductive.stems[end]!, stemColor);
+  }
   const stems = stemBuilder.build();
+  const instances: ProcPlantInstance[] = foliage.organs.map((organ) => grassBladeInstance(genome, organ));
+  for (const organ of reproductive.organs) instances.push(...flowerInstances(genome, organ));
+  const graph = buildProcPlantGraphIr(
+    reproductive.stems.map((stem) => ({ ...stem, position: stem.position.clone(), direction: stem.direction.clone() })),
+    reproductive.segments.map(([start, end]) => [start, end]),
+    [...foliage.organs, ...reproductive.organs].map((organ) => ({
+      ...organ,
+      position: organ.position.clone(),
+      direction: organ.direction.clone(),
+      right: organ.right.clone(),
+    })),
+  );
   return {
     stems,
     instances,
-    graph: { stems: [], segments: [], organs: [], segmentRecords: [], attachments: [] },
+    graph,
     stats: {
-      stems: scapeCount * Math.max(1, genome.nodeCount - 1),
-      leaves: instances.filter((inst) => inst.kind === "grassBlade").length,
-      flowers: scapeCount,
+      stems: graph.segments.length,
+      leaves: foliage.organs.length,
+      flowers: reproductive.organs.length,
       stemTriangles: stems.idx.length / 3,
       instances: instances.length,
       triangles: stems.idx.length / 3 + instances.length,
     },
   };
+};
+
+const buildDaylilyClumpParts = (
+  genome: ProcPlantGenome,
+  seed: number,
+  env: ProcPlantEnvironment,
+  _clump: NonNullable<ProcPlantGenome["clump"]>,
+): ProcPlantInstancedParts => {
+  const crowns = createProcPlantDaylilyCrownStagePlan(genome, seed, env);
+  return buildProcPlantDaylilyStageParts(
+    genome,
+    crowns,
+    createProcPlantDaylilyFoliageStagePlan(genome, crowns, seed, env),
+    createProcPlantDaylilyReproductiveStagePlan(genome, crowns, seed, env),
+  );
 };
 
 export const PROCPLANT_CLUMP_STAGE_PLAN_VERSION = 1 as const;
@@ -8610,6 +8747,61 @@ export const compileProcPlantClumpStageLods = (
     [1, "clustered", 18 * treeScale, clustered],
     [2, "billboard-cross", 42 * treeScale, billboard],
     [3, "impostor", 86 * treeScale, impostor],
+  ];
+  return rows
+    .filter(([level]) => selected.includes(level))
+    .map(([level, label, distance, template]) => ({
+      level,
+      label,
+      distance,
+      template,
+      triangles: template.idx.length / 3,
+      vertices: template.pos.length / 3,
+    }));
+};
+
+/** Compile Daylily LODs while preserving independent crown, foliage, and reproductive streams. */
+export const compileProcPlantDaylilyStageLods = (
+  genome: ProcPlantGenome,
+  architectureSeed: number,
+  foliageSeed: number,
+  reproductiveSeed: number,
+  env: ProcPlantEnvironment = defaultPlantEnvironment(),
+  levels: readonly (0 | 1 | 2 | 3)[] = [0, 1, 2, 3],
+): ProcPlantCompiledLod[] => {
+  assertDaylilyClump(genome);
+  const selected = [...new Set(levels)].sort((left, right) => left - right);
+  if (selected.length < 1 || selected.some((level) => !Number.isInteger(level) || level < 0 || level > 3)) {
+    throw new Error("ProcPlant daylily LOD levels must contain unique indices 0..3");
+  }
+  const materialize = (source: ProcPlantGenome) => {
+    const crowns = createProcPlantDaylilyCrownStagePlan(source, architectureSeed, env);
+    return materializeProcPlantInstancedParts(source, buildProcPlantDaylilyStageParts(
+      source,
+      crowns,
+      createProcPlantDaylilyFoliageStagePlan(source, crowns, foliageSeed, env),
+      createProcPlantDaylilyReproductiveStagePlan(source, crowns, reproductiveSeed, env),
+    ));
+  };
+  const full = materialize(genome);
+  const fullTriangles = full.idx.length / 3;
+  if (fullTriangles <= 6) throw new Error(`ProcPlant LOD compilation requires more than 6 source triangles; received ${fullTriangles}`);
+  const reducedGenome = reducedLodGenome(genome);
+  const reduced = reducedGenome.clump && reducedGenome.clump.count > 1
+    ? materialize(reducedGenome)
+    : materializeProcPlantInstancedParts(reducedGenome, buildProcPlantInstancedParts(reducedGenome, foliageSeed, env));
+  const reducedTriangles = reduced.idx.length / 3;
+  const clustered = reducedTriangles > 4 && reducedTriangles < fullTriangles
+    ? reduced
+    : createPlantClusterTemplate(full);
+  const cardOrientation = plantCardOrientation(genome, full);
+  const billboard = createPlantCardTemplate(full, true, cardOrientation);
+  const impostor = createPlantCardTemplate(full, false, cardOrientation);
+  const rows: Array<[ProcPlantCompiledLod["level"], ProcPlantCompiledLod["label"], number, ProcPlantTemplate]> = [
+    [0, "full", 0, full],
+    [1, "clustered", 13.5, clustered],
+    [2, "billboard-cross", 31.5, billboard],
+    [3, "impostor", 64.5, impostor],
   ];
   return rows
     .filter(([level]) => selected.includes(level))
