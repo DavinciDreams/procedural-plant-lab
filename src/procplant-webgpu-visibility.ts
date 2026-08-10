@@ -5,7 +5,7 @@ import {
 } from "./procplant-visibility-clusters";
 
 export const PROCPLANT_WEBGPU_VISIBILITY_CONTRACT = "procplants.webgpu-visibility" as const;
-export const PROCPLANT_WEBGPU_VISIBILITY_VERSION = 1 as const;
+export const PROCPLANT_WEBGPU_VISIBILITY_VERSION = 2 as const;
 export const PROCPLANT_WEBGPU_VISIBILITY_WORKGROUP_SIZE = 64 as const;
 
 export interface ProcPlantWebGpuLodDraw {
@@ -32,6 +32,13 @@ export interface ProcPlantWebGpuVisibilityOptions {
   maxTotalBytes?: number;
   visibilityMask?: ArrayLike<number>;
   limits?: ProcPlantWebGpuLimits;
+  /**
+   * Opt into non-zero `firstInstance` values in indirect commands. This
+   * requires the WebGPU `indirect-first-instance` feature at runtime.
+   * The portable default keeps every command at firstInstance=0 and lets the
+   * draw encoder expose the LOD lane offset separately.
+   */
+  indirectFirstInstance?: boolean;
 }
 
 export interface ProcPlantWebGpuDispatch {
@@ -53,6 +60,7 @@ export interface ProcPlantWebGpuVisibilityPlan {
   readonly instanceCount: number;
   readonly clusterCount: number;
   readonly lodCount: number;
+  readonly indirectFirstInstance: boolean;
   readonly workgroupSize: typeof PROCPLANT_WEBGPU_VISIBILITY_WORKGROUP_SIZE;
   readonly dispatch: {
     readonly reset: ProcPlantWebGpuDispatch;
@@ -297,12 +305,12 @@ fn finalize(@builtin(local_invocation_id) local: vec3<u32>) {
   let lod = local.x;
   if (lod >= params.counts.z) { return; }
   let source = params.input1.y + lod * 4u;
-  let target = lod * 5u;
-  indirect[target] = inputData[source];
-  indirect[target + 1u] = atomicLoad(&lodCounts[lod]);
-  indirect[target + 2u] = inputData[source + 1u];
-  indirect[target + 3u] = inputData[source + 2u];
-  indirect[target + 4u] = lod * params.counts.w;
+  let commandOffset = lod * 5u;
+  indirect[commandOffset] = inputData[source];
+  indirect[commandOffset + 1u] = atomicLoad(&lodCounts[lod]);
+  indirect[commandOffset + 2u] = inputData[source + 1u];
+  indirect[commandOffset + 3u] = inputData[source + 2u];
+  indirect[commandOffset + 4u] = select(0u, lod * params.counts.w, params.reserved.x != 0u);
 }`;
 
 export const createProcPlantWebGpuVisibilityPlan = (
@@ -391,6 +399,9 @@ export const createProcPlantWebGpuVisibilityPlan = (
   parameters.set([inputOffsets.clusterBounds, inputOffsets.clusterOffsets, inputOffsets.clusterInstanceIndices, inputOffsets.instanceBounds], 8);
   parameters.set([inputOffsets.lodDistances, inputOffsets.drawTemplates, 0, 0], 12);
   parameters.set([outputOffsets.visibilityFlags, outputOffsets.instanceLods, outputOffsets.lodInstanceIndices, 0], 16);
+  const indirectFirstInstance = options.indirectFirstInstance ?? false;
+  if (typeof indirectFirstInstance !== "boolean") throw new Error("WebGPU indirectFirstInstance must be boolean");
+  parameters[20] = indirectFirstInstance ? 1 : 0;
   const indirect = new Uint32Array(lodCount * 5);
   const view = createViewUniform();
   const buffers = Object.freeze({
@@ -413,6 +424,7 @@ export const createProcPlantWebGpuVisibilityPlan = (
     instanceCount: clusters.instanceCount,
     clusterCount: clusters.clusterCount,
     lodCount,
+    indirectFirstInstance,
     workgroupSize: PROCPLANT_WEBGPU_VISIBILITY_WORKGROUP_SIZE,
     dispatch: Object.freeze({ reset: resetDispatch, classify: classifyDispatch, finalize: Object.freeze({ x: 1, y: 1, z: 1 as const }) }),
     offsets: Object.freeze({ input: Object.freeze(inputOffsets), output: Object.freeze(outputOffsets) }),
@@ -430,6 +442,7 @@ export const referenceProcPlantWebGpuVisibility = (
   draws: readonly ProcPlantWebGpuLodDraw[],
   view: ProcPlantVisibilityView,
   visibilityMask?: ArrayLike<number> | null,
+  options: Pick<ProcPlantWebGpuVisibilityOptions, "indirectFirstInstance"> = {},
 ): ProcPlantWebGpuVisibilityReference => {
   if (draws.length !== lodDistances.length) throw new Error("WebGPU reference draws must match LOD count");
   const selected = new ProcPlantVisibilitySelector(clusters, lodDistances).select(view, visibilityMask);
@@ -455,7 +468,7 @@ export const referenceProcPlantWebGpuVisibility = (
     indirectCommands[target + 1] = lodCounts[lod]!;
     indirectCommands[target + 2] = integer(draw.firstIndex ?? 0, `WebGPU reference draw ${lod} firstIndex`, 0, U32_MAX);
     indirectCommands[target + 3] = integer(draw.baseVertex ?? 0, `WebGPU reference draw ${lod} baseVertex`, -0x80000000, 0x7fffffff) >>> 0;
-    indirectCommands[target + 4] = lod * clusters.instanceCount;
+    indirectCommands[target + 4] = options.indirectFirstInstance ? lod * clusters.instanceCount : 0;
   }
   return Object.freeze({ visibilityFlags, instanceLods, lodCounts, lodInstanceIndices, indirectCommands });
 };

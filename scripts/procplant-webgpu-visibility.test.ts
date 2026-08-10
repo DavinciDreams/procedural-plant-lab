@@ -18,6 +18,7 @@ import {
   type ProcPlantGpuComputePipelineLike,
   type ProcPlantGpuDeviceLike,
 } from "../src/procplant-webgpu-visibility-runtime";
+import { createProcPlantWebGpuIndexedIndirectDrawEncoder } from "../src/procplant-webgpu-indirect-draw";
 
 const centers = new Float32Array([0, 0, 0, 5, 0, 0, 20, 0, 0]);
 const radii = new Float32Array([0.1, 0.1, 0.1]);
@@ -59,9 +60,17 @@ assert.deepEqual(Array.from(reference.instanceLods), [0, 1, -1]);
 assert.deepEqual(Array.from(reference.lodCounts), [1, 1, 0]);
 assert.deepEqual(Array.from(reference.indirectCommands), [
   120, 1, 0, 0, 0,
-  48, 1, 120, 4, 3,
-  12, 0, 168, 0xfffffffe, 6,
+  48, 1, 120, 4, 0,
+  12, 0, 168, 0xfffffffe, 0,
 ]);
+const firstInstancePlan = createProcPlantWebGpuVisibilityPlan(clusters, lodDistances, draws, { indirectFirstInstance: true });
+const firstInstanceReference = referenceProcPlantWebGpuVisibility(
+  clusters, lodDistances, draws, view, undefined, { indirectFirstInstance: true },
+);
+assert.equal(first.indirectFirstInstance, false);
+assert.equal(firstInstancePlan.indirectFirstInstance, true);
+assert.notEqual(first.contentHash, firstInstancePlan.contentHash);
+assert.deepEqual(Array.from(firstInstanceReference.indirectCommands.filter((_, word) => word % 5 === 4)), [0, 3, 6]);
 const masked = referenceProcPlantWebGpuVisibility(clusters, lodDistances, draws, view, [1, 0, 1]);
 assert.deepEqual(Array.from(masked.visibilityFlags), [1, 0, 0]);
 
@@ -156,7 +165,7 @@ const fullLimits = {
 class FakeDevice implements ProcPlantGpuDeviceLike {
   readonly buffers: FakeBuffer[] = [];
   readonly calls: string[] = [];
-  readonly features = { has: (feature: string) => feature === "timestamp-query" };
+  readonly features: { has(feature: string): boolean };
   readonly queue = {
     writeBuffer: (buffer: ProcPlantGpuBufferLike, bufferOffset: number, data: ArrayBufferView) => {
       const target = buffer as FakeBuffer;
@@ -171,7 +180,10 @@ class FakeDevice implements ProcPlantGpuDeviceLike {
     },
   };
 
-  constructor(readonly limits = fullLimits) {}
+  constructor(readonly limits = fullLimits, featureNames: readonly string[] = ["timestamp-query"]) {
+    const features = new Set(featureNames);
+    this.features = { has: (feature: string) => features.has(feature) };
+  }
   createBuffer(descriptor: { label?: string; size: number; usage: number }) {
     const buffer = new FakeBuffer(descriptor.size, descriptor.usage, descriptor.label);
     this.buffers.push(buffer);
@@ -220,6 +232,51 @@ assert.throws(() => runtime.dispatch(view, [1, Number.NaN, 1]), /must be finite/
 assert.equal(device.calls.filter((call) => call.startsWith("write:")).length, writesBeforeInvalidDispatch,
   "invalid dispatch input must fail before mutating GPU buffers");
 
+const submitCountBeforeEncode = device.calls.filter((call) => call.startsWith("submit:")).length;
+const sharedEncoder = device.createCommandEncoder();
+runtime.encode(sharedEncoder, view, [1, 1, 1]);
+assert.equal(runtime.diagnostics.dispatchCount, 2);
+assert.equal(device.calls.filter((call) => call.startsWith("submit:")).length, submitCountBeforeEncode,
+  "caller-owned encoding must not submit work");
+device.queue.submit([sharedEncoder.finish()]);
+
+const drawEncoder = createProcPlantWebGpuIndexedIndirectDrawEncoder(runtime);
+const indirectCalls: string[] = [];
+const drawPass = {
+  drawIndexedIndirect: (buffer: ProcPlantGpuBufferLike, offset: number) => {
+    assert.strictEqual(buffer, runtime.buffers.indirect);
+    indirectCalls.push(`draw:${offset}`);
+  },
+};
+const preparedBindings: Array<{ lod: number; wordOffset: number; firstInstance: number }> = [];
+const bufferCountBeforeDrawEncoding = device.buffers.length;
+drawEncoder.encode(drawPass, (binding) => {
+  assert.strictEqual(binding.compactedInstanceIndexBuffer, runtime.buffers.output);
+  preparedBindings.push({
+    lod: binding.lod,
+    wordOffset: binding.compactedInstanceIndexWordOffset,
+    firstInstance: binding.firstInstance,
+  });
+});
+assert.equal(device.buffers.length, bufferCountBeforeDrawEncoding, "steady-state indirect encoding must not allocate GPU buffers");
+assert.deepEqual(indirectCalls, ["draw:0", "draw:20", "draw:40"]);
+assert.deepEqual(preparedBindings, [
+  { lod: 0, wordOffset: first.offsets.output.lodInstanceIndices, firstInstance: 0 },
+  { lod: 1, wordOffset: first.offsets.output.lodInstanceIndices + first.instanceCount, firstInstance: 0 },
+  { lod: 2, wordOffset: first.offsets.output.lodInstanceIndices + first.instanceCount * 2, firstInstance: 0 },
+]);
+assert.deepEqual(drawEncoder.diagnostics, {
+  state: "ready",
+  planHash: first.contentHash,
+  lodCount: 3,
+  encodedPassCount: 1,
+  encodedDrawCount: 3,
+  ownsGpuResources: false,
+  indirectFirstInstance: false,
+});
+assert.throws(() => drawEncoder.encode(drawPass, () => { throw new Error("prepare failed"); }), /prepare failed/);
+assert.equal(indirectCalls.length, 3, "a failed LOD preparation must not encode its indirect draw");
+
 const outputWords = new Uint32Array(first.buffers.output.byteLength / 4);
 outputWords.set(reference.visibilityFlags, first.offsets.output.visibilityFlags);
 new Int32Array(outputWords.buffer, first.offsets.output.instanceLods * 4, first.instanceCount).set(reference.instanceLods);
@@ -249,6 +306,12 @@ const growthClusters = buildProcPlantVisibilityClusters(
 const growthPlan = createProcPlantWebGpuVisibilityPlan(growthClusters, lodDistances, draws);
 const oldOutput = runtime.buffers.output as FakeBuffer;
 runtime.setPlan(growthPlan);
+assert.throws(() => drawEncoder.encode(drawPass, () => {}), /plan changed/);
+const bufferDestroyCountBeforeBorrowedDispose = device.buffers.reduce((sum, buffer) => sum + buffer.destroyed, 0);
+drawEncoder.dispose();
+assert.equal(device.buffers.reduce((sum, buffer) => sum + buffer.destroyed, 0), bufferDestroyCountBeforeBorrowedDispose,
+  "draw encoder disposal must not destroy runtime-owned buffers");
+assert.throws(() => drawEncoder.encode(drawPass, () => {}), /disposed/);
 assert.ok(device.buffers.length > bufferCountBeforeReuse, "larger plans must allocate replacement capacity");
 assert.equal(oldOutput.destroyed, 1, "replaced buffers must be destroyed exactly once");
 assert.equal(runtime.diagnostics.bufferRebuildCount, 1);
@@ -262,6 +325,26 @@ await assert.rejects(
   createProcPlantWebGpuVisibilityRuntime(new FakeDevice({ ...fullLimits, maxStorageBuffersPerShaderStage: 3 }), first),
   /cannot support/,
 );
+await assert.rejects(
+  createProcPlantWebGpuVisibilityRuntime(new FakeDevice(), firstInstancePlan),
+  /requires the indirect-first-instance feature/,
+);
+const firstInstanceRuntime = await createProcPlantWebGpuVisibilityRuntime(
+  new FakeDevice(fullLimits, ["indirect-first-instance"]),
+  firstInstancePlan,
+);
+const firstInstanceDrawEncoder = createProcPlantWebGpuIndexedIndirectDrawEncoder(firstInstanceRuntime);
+const firstInstanceBindings: Array<{ wordOffset: number; firstInstance: number }> = [];
+firstInstanceDrawEncoder.encode({ drawIndexedIndirect: () => {} }, (binding) => {
+  firstInstanceBindings.push({ wordOffset: binding.compactedInstanceIndexWordOffset, firstInstance: binding.firstInstance });
+});
+assert.deepEqual(firstInstanceBindings, [
+  { wordOffset: first.offsets.output.lodInstanceIndices, firstInstance: 0 },
+  { wordOffset: first.offsets.output.lodInstanceIndices, firstInstance: 3 },
+  { wordOffset: first.offsets.output.lodInstanceIndices, firstInstance: 6 },
+]);
+firstInstanceDrawEncoder.dispose();
+firstInstanceRuntime.dispose();
 await assert.rejects(
   createProcPlantWebGpuVisibilityRuntime(new FakeDevice(), first, { requiredFeatures: ["shader-f16"] }),
   /missing required feature/,
@@ -283,11 +366,14 @@ const lost = new Promise<{ reason?: string; message?: string }>((resolve) => { r
 const lostDevice = new FakeDevice() as FakeDevice & { lost: Promise<{ reason?: string; message?: string }> };
 lostDevice.lost = lost;
 const lostRuntime = await createProcPlantWebGpuVisibilityRuntime(lostDevice, first);
+const lostDrawEncoder = createProcPlantWebGpuIndexedIndirectDrawEncoder(lostRuntime);
 resolveLost({ reason: "destroyed", message: "test loss" });
 await Promise.resolve();
 assert.equal(lostRuntime.diagnostics.state, "lost");
 assert.match(lostRuntime.diagnostics.lostReason ?? "", /test loss/);
 assert.throws(() => lostRuntime.dispatch(view), /device is lost/);
+assert.throws(() => lostDrawEncoder.encode({ drawIndexedIndirect: () => {} }, () => {}), /runtime is lost/);
+lostDrawEncoder.dispose();
 lostRuntime.dispose();
 
 console.log("procplant WebGPU visibility plan and injected runtime tests passed");

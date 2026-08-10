@@ -4,3 +4,4 @@
  */
 export * from "./procplant-webgpu-visibility";
 export * from "./procplant-webgpu-visibility-runtime";
+export * from "./procplant-webgpu-indirect-draw";

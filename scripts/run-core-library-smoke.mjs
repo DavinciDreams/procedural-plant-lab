@@ -81,10 +81,15 @@ assert.equal(typeof full.exportProcPlantGlb, "function");
 assert.equal(typeof full.createProcPlantCutout, "function");
 assert.equal(typeof webgpu.createProcPlantWebGpuVisibilityPlan, "function");
 assert.equal(typeof webgpu.createProcPlantWebGpuVisibilityRuntime, "function");
+assert.equal(typeof webgpu.createProcPlantWebGpuIndexedIndirectDrawEncoder, "function");
 assert.equal("createProcPlantWebGpuVisibilityRuntime" in core, false,
   "the injected-device runtime must remain outside the core/Tellus entry");
 assert.equal("createProcPlantWebGpuVisibilityRuntime" in full, false,
   "the injected-device runtime must remain outside the default full entry");
+assert.equal("createProcPlantWebGpuIndexedIndirectDrawEncoder" in core, false,
+  "the indexed-indirect draw encoder must remain outside the core/Tellus entry");
+assert.equal("createProcPlantWebGpuIndexedIndirectDrawEncoder" in full, false,
+  "the indexed-indirect draw encoder must remain outside the default full entry");
 assert.equal(core.TELLUS_PROCPLANT_PACKAGE_CONTRACT, "tellus.procplants.package.v1");
 assert.equal(core.PROCPLANT_GENERATOR_CONTRACT_REVISION, 3);
 assert.equal(new Set(core.PROCPLANT_SUPPORTED_INSTANCE_KINDS).size, core.PROCPLANT_SUPPORTED_INSTANCE_KINDS.length);
