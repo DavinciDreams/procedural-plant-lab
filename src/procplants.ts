@@ -5366,14 +5366,33 @@ const templateFromSweptTubeGeometry = (
   return { pos, nrm, uv0, col, tintable, sway, idx };
 };
 
-/** Compile an opt-in volumetric crown into swept branch tubes and leaf instances. */
-const buildSpaceColonizedProcPlantParts = (
+export interface ProcPlantSpaceColonizationStageSeeds {
+  /** Controls attractor sampling, skeleton growth, and swept-tube irregularity. */
+  growth: number;
+  /** Controls only foliage scale variation on the completed skeleton. */
+  foliage: number;
+}
+
+export interface ProcPlantSpaceColonizationStageOptions {
+  /** Omit foliage while retaining the exact structure and swept stem template. */
+  includeFoliage?: boolean;
+}
+
+/**
+ * Compile the space-colonization backend with explicit, independently seeded
+ * structure and foliage stages. Passing the same seed for both stages is the
+ * canonical legacy path and remains byte-identical.
+ */
+export const buildSpaceColonizedProcPlantStageParts = (
   genome: ProcPlantGenome,
-  seed: number,
-  env: ProcPlantEnvironment,
+  seeds: ProcPlantSpaceColonizationStageSeeds,
+  env: ProcPlantEnvironment = defaultPlantEnvironment(),
+  options: ProcPlantSpaceColonizationStageOptions = {},
 ): ProcPlantInstancedParts => {
   const gene = genome.spaceColonization;
   if (!gene) throw new Error("space-colonization genome options are required");
+  const growthSeed = seeds.growth >>> 0;
+  const foliageSeed = seeds.foliage >>> 0;
   const center = new THREE.Vector3(...gene.volume.center);
   const dimensions = new THREE.Vector3(...gene.volume.dimensions);
   const shade = 1 - THREE.MathUtils.clamp(env.light, 0, 1);
@@ -5402,7 +5421,7 @@ const buildSpaceColonizedProcPlantParts = (
   } satisfies ProcPlantFreeformCrown : volume;
   const tropism = gene.tropism ? new THREE.Vector3(...gene.tropism) : UP.clone();
   const growth = growProcPlantSpaceColonization({
-    seed,
+    seed: growthSeed,
     volume: crownDomain,
     attractorCount: gene.attractorCount,
     root: new THREE.Vector3(center.x, 0, center.z),
@@ -5441,9 +5460,9 @@ const buildSpaceColonizedProcPlantParts = (
   const foliageSpacing = Math.max(1, Math.round(gene.foliageSpacing ?? 4));
   const terminalLeafCount = Math.max(1, Math.min(6, Math.round(gene.terminalLeafCount ?? 3)));
   const leafScale = Math.max(0.05, gene.leafScale ?? 1);
-  const rng = rngFromSeed((seed ^ 0x51ed270b) >>> 0);
+  const rng = rngFromSeed((foliageSeed ^ 0x51ed270b) >>> 0);
   const organs: Organ[] = [];
-  for (const node of growth.nodes) {
+  for (const node of options.includeFoliage === false ? [] : growth.nodes) {
     const t = node.depth / maxDepth;
     if (t < foliageStart) continue;
     const terminal = node.childCount === 0;
@@ -5498,7 +5517,7 @@ const buildSpaceColonizedProcPlantParts = (
       })),
       {
         radialSegments,
-        seed: (seed + growth.nodes.indexOf(chain[0]!) * 2654435761 + branchOrder * 2246822519) >>> 0,
+        seed: (growthSeed + growth.nodes.indexOf(chain[0]!) * 2654435761 + branchOrder * 2246822519) >>> 0,
         irregularity: gene.barkIrregularity ?? 0.05,
         irregularityFrequency: 1.6 + branchOrder * 0.17,
         collarStrength: gene.collarStrength === undefined
@@ -5535,6 +5554,17 @@ const buildSpaceColonizedProcPlantParts = (
     },
   };
 };
+
+/** Compile an opt-in volumetric crown through the exact canonical seed path. */
+const buildSpaceColonizedProcPlantParts = (
+  genome: ProcPlantGenome,
+  seed: number,
+  env: ProcPlantEnvironment,
+): ProcPlantInstancedParts => buildSpaceColonizedProcPlantStageParts(
+  genome,
+  { growth: seed, foliage: seed },
+  env,
+);
 
 export const buildProcPlantInstancedParts = (
   genome: ProcPlantGenome,
@@ -7564,7 +7594,7 @@ const geometryForCompiledInstance = (
   return createProcPlantFlowerCenterGeometry();
 };
 
-const materializeProcPlantParts = (
+export const materializeProcPlantParts = (
   genome: ProcPlantGenome,
   parts: ProcPlantInstancedParts,
 ): ProcPlantTemplate => {

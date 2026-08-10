@@ -36,8 +36,10 @@ export const createProcPlantAuthoringGraph = (
   };
   const branchCount = genome.weberPenn?.maxStems
     ?? genome.branchModules?.moduleBudget
+    ?? genome.spaceColonization?.maxNodes
     ?? Math.max(1, Math.round(genome.nodeCount * curveMean(genome.branchChance)));
   const foliageCount = genome.weberPenn?.maxLeaves
+    ?? genome.spaceColonization?.terminalLeafCount
     ?? Math.max(1, Math.round(genome.nodeCount * curveMean(genome.leaf.density)));
   const reproductiveCount = (genome.flower?.petals ?? 0)
     + (genome.accessoryOrgans ?? []).reduce((sum, organ) => sum + organ.count, 0);
@@ -45,6 +47,8 @@ export const createProcPlantAuthoringGraph = (
     ? "weber-penn"
     : genome.branchModules
       ? "branch-module-graph"
+      : genome.spaceColonization
+        ? "space-colonization"
       : genome.vine
         ? "guided-vine"
         : "procplant-graph";
@@ -66,7 +70,7 @@ export const createProcPlantAuthoringGraph = (
       stage: "architecture",
       enabled: true,
       dependsOn: [ids.source],
-      count: genome.nodeCount,
+      count: genome.spaceColonization?.attractorCount ?? genome.nodeCount,
       placement: { mode: "nodes", spacing: curveMean(genome.internode) },
       parentScope: { mode: "root" },
       curve: { ...genome.internode },
@@ -86,7 +90,11 @@ export const createProcPlantAuthoringGraph = (
       dependsOn: [ids.architecture],
       count: branchCount,
       placement: { mode: "nodes", density: curveMean(genome.branchChance) },
-      parentScope: { mode: "stages", stages: ["architecture", "branching"], maxDepth: genome.weberPenn?.maxBranchDepth ?? genome.branchModules?.levels },
+      parentScope: {
+        mode: "stages",
+        stages: ["architecture", "branching"],
+        maxDepth: genome.weberPenn?.maxBranchDepth ?? genome.branchModules?.levels,
+      },
       curve: { ...genome.branchChance },
       parameters: { angle: { ...genome.branchAngle }, backend },
     },

@@ -211,6 +211,105 @@ const tooMuchWork = Array.from({ length: 11 }, (_, index) => ({
 }));
 assert.throws(() => createProcPlantGeneratorGraph(tooMuchWork, seed), /operation cap/);
 
+const colonizedGenome = structuredClone(procPlantPresets.colonizedHazelShrub!);
+const colonizedSeed = 0x807026;
+const colonizedCanonical = createProcPlantAuthoringGraph(colonizedGenome, colonizedSeed);
+const colonizedLegacy = buildProcPlantTemplate(colonizedGenome, colonizedSeed, environment);
+const colonizedCanonicalResult = compileProcPlantProductionDag(
+  colonizedGenome, colonizedCanonical, environment, { canonicalSeed: colonizedSeed },
+);
+assert.equal(colonizedCanonicalResult.path, "legacy-canonical");
+assert.equal(templateHash(colonizedCanonicalResult.build.template), templateHash(colonizedLegacy.template),
+  "the canonical space-colonization graph must retain exact legacy bytes");
+
+const colonizedStages = new Map(colonizedCanonical.nodes.map((node) => [node.stage, node]));
+const colonizedBranching = colonizedStages.get("branching")!;
+const colonizedFoliage = colonizedStages.get("foliage")!;
+const colonizedMaterial = colonizedStages.get("material")!;
+assert.equal(colonizedStages.get("source")!.parameters?.backend, "space-colonization");
+assert.equal(colonizedStages.get("architecture")!.count, colonizedGenome.spaceColonization!.attractorCount);
+assert.equal(colonizedBranching.count, colonizedGenome.spaceColonization!.maxNodes);
+assert.equal(colonizedFoliage.count, colonizedGenome.spaceColonization!.terminalLeafCount);
+
+const colonizedEdited = applyProcPlantGeneratorGraphOperations(colonizedCanonical, [
+  { op: "set-seed", nodeId: colonizedBranching.id, value: 9101 },
+  { op: "set-seed", nodeId: colonizedFoliage.id, value: 9202 },
+]);
+const colonizedA = compileProcPlantProductionDag(
+  colonizedGenome, colonizedEdited, environment, { canonicalSeed: colonizedSeed },
+);
+const colonizedB = compileProcPlantProductionDag(
+  colonizedGenome, colonizedEdited, environment, { canonicalSeed: colonizedSeed },
+);
+assert.equal(colonizedA.path, "typed-artifacts");
+assert.equal(templateHash(colonizedA.build.template), templateHash(colonizedB.build.template));
+assert.deepEqual(colonizedA.records, colonizedB.records);
+assert.equal(colonizedA.artifacts[colonizedStages.get("architecture")!.id]?.kind, "space-colonization-plan");
+assert.equal(colonizedA.artifacts[colonizedBranching.id]?.kind, "space-colonization-parts");
+assert.equal(colonizedA.artifacts[colonizedFoliage.id]?.kind, "space-colonization-parts");
+assert.equal(colonizedA.records.find((record) => record.stage === "reproductive")?.status, "disabled");
+
+const colonizedFoliageChangedGraph = applyProcPlantGeneratorGraphOperations(colonizedEdited, [
+  { op: "set-seed", nodeId: colonizedFoliage.id, value: 9203 },
+]);
+const colonizedFoliageChanged = compileProcPlantProductionDag(
+  colonizedGenome, colonizedFoliageChangedGraph, environment, { canonicalSeed: colonizedSeed },
+);
+assert.deepEqual(structure(colonizedFoliageChanged.build.graph), structure(colonizedA.build.graph),
+  "space-colonization foliage seeds must preserve the independently seeded skeleton");
+assert.notDeepEqual(
+  colonizedFoliageChanged.build.graph.organs.map((organ) => organ.scale),
+  colonizedA.build.graph.organs.map((organ) => organ.scale),
+  "space-colonization foliage seeds must drive leaf scale variation",
+);
+const colonizedBranchArtifact = colonizedA.artifacts[colonizedBranching.id];
+const colonizedFoliageArtifact = colonizedA.artifacts[colonizedFoliage.id];
+assert.equal(colonizedBranchArtifact?.kind, "space-colonization-parts");
+assert.equal(colonizedFoliageArtifact?.kind, "space-colonization-parts");
+if (colonizedBranchArtifact?.kind === "space-colonization-parts" && colonizedFoliageArtifact?.kind === "space-colonization-parts") {
+  assert.equal(templateHash(colonizedBranchArtifact.parts.stems), templateHash(colonizedFoliageArtifact.parts.stems),
+    "foliage materialization must retain the exact swept-tube structure artifact");
+  assert.equal(colonizedBranchArtifact.parts.graph.organs.length, 0);
+  assert.ok(colonizedFoliageArtifact.parts.graph.organs.length > 0);
+}
+
+const colonizedBranchChangedGraph = applyProcPlantGeneratorGraphOperations(colonizedEdited, [
+  { op: "set-seed", nodeId: colonizedBranching.id, value: 9102 },
+]);
+const colonizedBranchChanged = compileProcPlantProductionDag(
+  colonizedGenome, colonizedBranchChangedGraph, environment, { canonicalSeed: colonizedSeed },
+);
+assert.notDeepEqual(structure(colonizedBranchChanged.build.graph), structure(colonizedA.build.graph),
+  "space-colonization branch seeds must drive actual skeleton growth");
+
+const colonizedMaterialChangedGraph = applyProcPlantGeneratorGraphOperations(colonizedEdited, [{
+  op: "set-parameters", nodeId: colonizedMaterial.id,
+  value: { leafColorA: 0x224466, leafColorB: 0x335577 },
+}]);
+const colonizedMaterialChanged = compileProcPlantProductionDag(
+  colonizedGenome, colonizedMaterialChangedGraph, environment, { canonicalSeed: colonizedSeed },
+);
+assert.deepEqual(structure(colonizedMaterialChanged.build.graph), structure(colonizedA.build.graph));
+assert.notEqual(templateHash(colonizedMaterialChanged.build.template), templateHash(colonizedA.build.template),
+  "material edits must rebuild real specialized leaf instance colors");
+
+const colonizedRewired = applyProcPlantGeneratorGraphOperations(colonizedEdited, [
+  { op: "remove-dependency", nodeId: colonizedFoliage.id, dependencyId: colonizedBranching.id },
+  { op: "add-dependency", nodeId: colonizedFoliage.id, dependencyId: colonizedStages.get("architecture")!.id },
+]);
+assert.throws(
+  () => compileProcPlantProductionDag(colonizedGenome, colonizedRewired, environment, { canonicalSeed: colonizedSeed }),
+  /requires exactly one terminal space-colonization parts artifact/,
+  "a rewire to an incompatible typed artifact must fail closed",
+);
+
+const colonizedUnsupportedPlacement = structuredClone(colonizedEdited);
+colonizedUnsupportedPlacement.nodes.find((node) => node.id === colonizedFoliage.id)!.placement = { mode: "tips" };
+assert.throws(
+  () => compileProcPlantProductionDag(colonizedGenome, colonizedUnsupportedPlacement, environment, { canonicalSeed: colonizedSeed }),
+  /placement cannot be projected/,
+);
+
 const unsupportedGenome = procPlantPresets.phiFern!;
 const unsupportedGraph = applyProcPlantGeneratorGraphOperations(
   createProcPlantAuthoringGraph(unsupportedGenome, seed),
