@@ -127,6 +127,8 @@ import type {
 import type { ProcPlantMeshSpine } from "./procplant-mesh-helper";
 import type { ProcPlantLabHeroPreview } from "./procplant-lab-authoring-imports";
 import type { ProcPlantMaterialGraphEditorState } from "./procplant-material-graph-editor";
+import type { ProcPlantSpatialForceEditorState } from "./procplant-spatial-force-editor-ui";
+import type { ProcPlantSpatialForceAudit } from "./procplant-spatial-force";
 
 type SpeciesId = string;
 
@@ -163,6 +165,7 @@ interface LabState {
   crownDepth: number;
   crownDensity: number;
   crownField: ProcPlantFreeformCrown | null;
+  spatialForces: ProcPlantSpatialForceEditorState | null;
   chainTubeOverrides: ProcPlantChainTubeOverridePackage | null;
   tubeResolution: number;
   collarStrength: number;
@@ -204,6 +207,7 @@ const state: LabState = {
   crownDepth: 1,
   crownDensity: 1,
   crownField: null,
+  spatialForces: null,
   chainTubeOverrides: null,
   tubeResolution: 1,
   collarStrength: 1,
@@ -446,6 +450,7 @@ app.innerHTML = `
         <button id="importCutout" type="button">Import Cutout</button>
         <button id="editCutoutContour" type="button" disabled>Edit Contour</button>
         <button id="inspectGraph" type="button" aria-expanded="false">Graph Preview</button>
+        <button id="editSpatialForces" type="button" aria-expanded="false" aria-controls="spatialForceEditor">Force Fields</button>
         <input id="cutoutFile" type="file" accept="image/png,image/webp,image/jpeg" hidden />
       </div>
       <div class="button-row">
@@ -486,6 +491,7 @@ app.innerHTML = `
         <button id="applyCutoutMetadata" type="button" disabled>Rebuild Active Cutout</button>
       </details>
       <section id="graphPreview" class="graph-preview" aria-live="polite" hidden></section>
+      <section id="spatialForceEditor" class="graph-preview spatial-force-editor" aria-live="polite" hidden></section>
       <output id="impostorStatus" class="save-status" aria-live="polite"></output>
       <output id="readinessStatus" class="save-status" aria-live="polite"></output>
       <output id="growthStatus" class="growth-status" aria-live="polite" hidden>
@@ -897,6 +903,8 @@ const cutoutFileInput = document.querySelector<HTMLInputElement>("#cutoutFile")!
 const applyCutoutMetadataButton = document.querySelector<HTMLButtonElement>("#applyCutoutMetadata")!;
 const inspectGraphButton = document.querySelector<HTMLButtonElement>("#inspectGraph")!;
 const graphPreview = document.querySelector<HTMLElement>("#graphPreview")!;
+const editSpatialForcesButton = document.querySelector<HTMLButtonElement>("#editSpatialForces")!;
+const spatialForceEditor = document.querySelector<HTMLElement>("#spatialForceEditor")!;
 const pruneModeButton = document.querySelector<HTMLButtonElement>("#pruneMode")!;
 const pruneSelectedButton = document.querySelector<HTMLButtonElement>("#pruneSelected")!;
 const undoPruneButton = document.querySelector<HTMLButtonElement>("#undoPrune")!;
@@ -1021,6 +1029,17 @@ const restoreStateFromUrl = () => {
       app.dataset.chainTubeRestoreError = error instanceof Error ? error.message : String(error);
     }
   }
+  const spatialForces = params.get("ff");
+  if (spatialForces) {
+    try {
+      if (spatialForces.length > 65_536) throw new Error("spatial force editor state exceeds the 64 KiB URL limit");
+      state.spatialForces = JSON.parse(spatialForces) as ProcPlantSpatialForceEditorState;
+      app.dataset.spatialForceRestored = "pending-validation";
+    } catch (error) {
+      state.spatialForces = null;
+      app.dataset.spatialForceRestoreError = error instanceof Error ? error.message : String(error);
+    }
+  }
 };
 
 installSavedProcPlantPresets();
@@ -1128,6 +1147,9 @@ const stateParams = (includeCamera = false) => {
   if (state.chainTubeOverrides?.overrides.length) {
     params.set("ct", serializeProcPlantChainTubeOverridePackage(state.chainTubeOverrides));
   }
+  if (Array.isArray(state.spatialForces?.fields) && state.spatialForces.fields.length > 0) {
+    params.set("ff", JSON.stringify(state.spatialForces));
+  }
   if (includeCamera) {
     params.set("cx", camera.position.x.toFixed(3));
     params.set("cy", camera.position.y.toFixed(3));
@@ -1184,6 +1206,7 @@ const macroRulesActive = () => state.windExposure > 0.001 || state.wetness > 0.0
   state.pruning > 0.001 || state.stylization > 0.001 || state.biomeAdaptation > 0.001;
 type ProcPlantRulesModule = typeof import("./procplant-rules");
 type ProcPlantGraphEditorUiModule = typeof import("./procplant-graph-editor-ui");
+type ProcPlantSpatialForceEditorUiModule = typeof import("./procplant-spatial-force-editor-ui");
 type ProcPlantMaterialGraphEditorUiModule = typeof import("./procplant-material-graph-editor-ui");
 type ProcPlantAuthoringToolsModule = typeof import("./procplant-authoring-tools");
 type ProcPlantCrownVolumeToolModule = typeof import("./procplant-crown-volume-tool");
@@ -1194,6 +1217,8 @@ let procPlantRulesPromise: Promise<ProcPlantRulesModule> | null = null;
 let procPlantRulesFailed = false;
 let procPlantGraphEditorUiModule: ProcPlantGraphEditorUiModule | null = null;
 let procPlantGraphEditorUiPromise: Promise<ProcPlantGraphEditorUiModule> | null = null;
+let procPlantSpatialForceEditorUiModule: ProcPlantSpatialForceEditorUiModule | null = null;
+let procPlantSpatialForceEditorUiPromise: Promise<ProcPlantSpatialForceEditorUiModule> | null = null;
 let procPlantMaterialGraphEditorUiModule: ProcPlantMaterialGraphEditorUiModule | null = null;
 let procPlantMaterialGraphEditorUiPromise: Promise<ProcPlantMaterialGraphEditorUiModule> | null = null;
 let procPlantAuthoringToolsModule: ProcPlantAuthoringToolsModule | null = null;
@@ -1214,6 +1239,19 @@ const loadProcPlantGraphEditorUi = () => {
     procPlantGraphEditorUiPromise = null;
   });
   return procPlantGraphEditorUiPromise;
+};
+
+const loadProcPlantSpatialForceEditorUi = () => {
+  if (procPlantSpatialForceEditorUiModule) return Promise.resolve(procPlantSpatialForceEditorUiModule);
+  if (procPlantSpatialForceEditorUiPromise) return procPlantSpatialForceEditorUiPromise;
+  procPlantSpatialForceEditorUiPromise = import("./procplant-spatial-force-editor-ui").then((module) => {
+    procPlantSpatialForceEditorUiModule = module;
+    app.dataset.spatialForceEditorLoaded = "true";
+    return module;
+  }).finally(() => {
+    procPlantSpatialForceEditorUiPromise = null;
+  });
+  return procPlantSpatialForceEditorUiPromise;
 };
 const loadProcPlantMaterialGraphEditorUi = () => {
   if (procPlantMaterialGraphEditorUiModule) return Promise.resolve(procPlantMaterialGraphEditorUiModule);
@@ -1876,6 +1914,97 @@ const refreshCrownVolumeTool = async () => {
 };
 
 let graphPreviewRequest = 0;
+let spatialForceEditorRequest = 0;
+let spatialForceAudit: ProcPlantSpatialForceAudit | null = null;
+let spatialForceDiagnostic = "No fields have been applied.";
+let spatialForceVisualization: THREE.Group | null = null;
+
+const spatialForceBackend = (genome: ProcPlantGenome) => genome.weberPenn
+  ? { supported: false, reason: "Weber-Penn geometry is baked outside the public graph compiler." }
+  : genome.branchModules
+    ? { supported: false, reason: "Branch-module geometry is baked outside the public graph compiler." }
+    : genome.spaceColonization
+      ? { supported: false, reason: "Space-colonized geometry cannot yet round-trip through the public graph compiler." }
+      : { supported: true, reason: "Native Procplants graph backend." };
+
+const disposeSpatialForceVisualization = () => {
+  if (!spatialForceVisualization) return;
+  scene.remove(spatialForceVisualization);
+  procPlantSpatialForceEditorUiModule?.disposeProcPlantSpatialForceVisualization(spatialForceVisualization);
+  spatialForceVisualization = null;
+  delete app.dataset.spatialForceVisuals;
+};
+
+const refreshSpatialForceVisualization = async () => {
+  disposeSpatialForceVisualization();
+  if (spatialForceEditor.hidden || !state.spatialForces?.fields.length) return;
+  try {
+    const module = await loadProcPlantSpatialForceEditorUi();
+    const validated = module.parseProcPlantSpatialForceEditorState(state.spatialForces);
+    if (spatialForceEditor.hidden || validated.fields.length === 0) return;
+    const root = module.createProcPlantSpatialForceVisualization(validated);
+    if (heroLodState) {
+      root.position.copy(heroLodState.mesh.position);
+      root.quaternion.copy(heroLodState.impostorFacing ? heroLodState.impostorBaseQuaternion : heroLodState.mesh.quaternion);
+      root.scale.copy(heroLodState.mesh.scale);
+    }
+    spatialForceVisualization = root;
+    scene.add(root);
+    app.dataset.spatialForceVisuals = String(validated.fields.length);
+  } catch (error) {
+    spatialForceDiagnostic = error instanceof Error ? error.message : String(error);
+  }
+};
+
+const renderSpatialForceEditor = async () => {
+  if (spatialForceEditor.hidden) return;
+  const request = ++spatialForceEditorRequest;
+  spatialForceEditor.replaceChildren();
+  spatialForceEditor.textContent = "Loading bounded force-field controls...";
+  const module = await loadProcPlantSpatialForceEditorUi();
+  if (request !== spatialForceEditorRequest || spatialForceEditor.hidden) return;
+  const genome = selectedGenome();
+  const backend = spatialForceBackend(genome);
+  const context = {
+    ...backend,
+    reason: backend.supported ? spatialForceDiagnostic : backend.reason,
+    nodeCount: heroLodState?.graph?.stems.length ?? 0,
+    segmentCount: heroLodState?.graph?.segments.length ?? 0,
+    audit: spatialForceAudit,
+  };
+  try {
+    module.renderProcPlantSpatialForceEditor({
+      container: spatialForceEditor,
+      state: state.spatialForces,
+      context,
+      onStateChanged: (nextState) => {
+        state.spatialForces = nextState;
+        spatialForceAudit = null;
+        regenerate(80);
+        void renderSpatialForceEditor();
+        void refreshSpatialForceVisualization();
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const status = document.createElement("output");
+    status.className = "spatial-force-status";
+    status.setAttribute("role", "alert");
+    status.textContent = `Force-field state rejected: ${message}`;
+    const reset = document.createElement("button");
+    reset.type = "button";
+    reset.textContent = "Reset invalid state";
+    reset.addEventListener("click", () => {
+      state.spatialForces = null;
+      spatialForceDiagnostic = "Invalid authored state was removed.";
+      regenerate(0);
+      void renderSpatialForceEditor();
+    });
+    spatialForceEditor.replaceChildren(status, reset);
+    spatialForceEditor.dataset.supported = "false";
+  }
+};
+
 const renderGraphPreview = async () => {
   if (graphPreview.hidden) return;
   const request = ++graphPreviewRequest;
@@ -3087,6 +3216,33 @@ const performRegeneration = async (request: number) => {
   let genome = selectedGenome();
   const generatorSeed = selectedGeneratorSeed();
   const env = envFromState();
+  let validatedSpatialForces: ProcPlantSpatialForceEditorState | null = null;
+  let spatialForceModule: ProcPlantSpatialForceEditorUiModule | null = null;
+  spatialForceAudit = null;
+  spatialForceDiagnostic = "No fields have been applied.";
+  const hasAuthoredSpatialForceState = state.spatialForces !== null;
+  if (state.spatialForces) {
+    try {
+      spatialForceModule = await loadProcPlantSpatialForceEditorUi();
+      validatedSpatialForces = spatialForceModule.parseProcPlantSpatialForceEditorState(state.spatialForces);
+      state.spatialForces = validatedSpatialForces.fields.length > 0 ? validatedSpatialForces : null;
+      app.dataset.spatialForceRestored = "validated";
+      delete app.dataset.spatialForceError;
+    } catch (error) {
+      spatialForceDiagnostic = error instanceof Error ? error.message : String(error);
+      app.dataset.spatialForceError = spatialForceDiagnostic;
+    }
+  }
+  const spatialBackend = spatialForceBackend(genome);
+  const spatialForcesActive = Boolean(validatedSpatialForces?.fields.length && spatialBackend.supported);
+  if (validatedSpatialForces?.fields.length && !spatialBackend.supported) {
+    spatialForceDiagnostic = spatialBackend.reason;
+    app.dataset.spatialForceStatus = "unsupported-backend";
+  } else if (spatialForcesActive) {
+    app.dataset.spatialForceStatus = "pending";
+  } else {
+    app.dataset.spatialForceStatus = hasAuthoredSpatialForceState ? "rejected" : "canonical";
+  }
   genome = reconcileChainTubeOverrides(genome, generatorSeed, env);
   const materialSourceKey = bakedMaterialSourceKey(genome, generatorSeed);
   if (materialGraphEditorSourceKey !== null && materialGraphEditorSourceKey !== materialSourceKey) {
@@ -3145,7 +3301,7 @@ const performRegeneration = async (request: number) => {
   const authoredPlacements = currentPlacementPackage();
   const authoringToolsPromise = authoredPrunes.length > 0 ? loadProcPlantAuthoringTools() : null;
   const placementModulePromise = authoredPlacements?.operations.length ? loadProcPlantOrganPlacement() : null;
-  const shouldCompileHeroLods = authoredPrunes.length === 0 && !authoredPlacements?.operations.length && !productionDag;
+  const shouldCompileHeroLods = authoredPrunes.length === 0 && !authoredPlacements?.operations.length && !productionDag && !spatialForcesActive;
   const lodResultPromise = shouldCompileHeroLods
     ? heroLodCompiler.compile(genome, generatorSeed, env).then(
         (lods) => ({ lods, error: null }),
@@ -3163,7 +3319,7 @@ const performRegeneration = async (request: number) => {
 
   // Finish both replacements before removing the visible scene. This keeps a
   // failed or superseded build from leaving a partially-empty preview.
-  let heroBuild = productionDag?.build ?? (biome.heroTemplate && !weberPennTrimOverrides
+  let heroBuild = productionDag?.build ?? (biome.heroTemplate && !weberPennTrimOverrides && !spatialForcesActive
     ? null
     : buildProcPlantTemplate(genome, generatorSeed, env, { trimOverrides: weberPennTrimOverrides }));
   if (heroBuild && authoredPrunes.length > 0 && !genome.weberPenn && !genome.branchModules) {
@@ -3195,8 +3351,40 @@ const performRegeneration = async (request: number) => {
     delete app.dataset.organPlacementApplied;
     delete app.dataset.organPlacementUnsupported;
   }
-  const template = productionDag?.build.template ?? heroBuild?.template ?? biome.heroTemplate!;
-  const heroLods: ProcPlantCompiledLod[] = productionDag && authoredPrunes.length === 0 && !authoredPlacements?.operations.length
+  if (heroBuild && spatialForcesActive && validatedSpatialForces && spatialForceModule) {
+    try {
+      const applied = spatialForceModule.applyProcPlantSpatialForceFields(
+        heroBuild.graph,
+        validatedSpatialForces.fields,
+        {
+          iterations: validatedSpatialForces.iterations,
+          maximumDisplacement: validatedSpatialForces.maximumDisplacement,
+        },
+      );
+      spatialForceAudit = applied.audit;
+      heroBuild = buildProcPlantTemplateFromGraph(genome, applied.graph, env);
+      spatialForceDiagnostic = applied.audit.unmatchedFieldIds.length > 0
+        ? `${applied.audit.unmatchedFieldIds.length} fields did not intersect this graph.`
+        : "All fields intersected the generated graph.";
+      app.dataset.spatialForceStatus = applied.audit.sourceGraphReused ? "no-op" : "applied";
+      app.dataset.spatialForceSignature = applied.audit.targetSignature;
+      app.dataset.spatialForceAffectedNodes = String(applied.audit.affectedNodes);
+      app.dataset.spatialForceAffectedSegments = String(applied.audit.affectedSegments);
+      app.dataset.spatialForceWorkItems = String(applied.audit.workItems);
+    } catch (error) {
+      spatialForceDiagnostic = error instanceof Error ? error.message : String(error);
+      app.dataset.spatialForceStatus = "rejected";
+      app.dataset.spatialForceError = spatialForceDiagnostic;
+      console.warn("[procplants] Spatial force fields rejected; rendering canonical geometry.", error);
+    }
+  } else {
+    delete app.dataset.spatialForceSignature;
+    delete app.dataset.spatialForceAffectedNodes;
+    delete app.dataset.spatialForceAffectedSegments;
+    delete app.dataset.spatialForceWorkItems;
+  }
+  const template = (spatialForcesActive ? heroBuild?.template : productionDag?.build.template) ?? heroBuild?.template ?? biome.heroTemplate!;
+  const heroLods: ProcPlantCompiledLod[] = productionDag && authoredPrunes.length === 0 && !authoredPlacements?.operations.length && !spatialForcesActive
     ? productionDag.lods
     : [{
         level: 0,
@@ -3344,6 +3532,10 @@ const performRegeneration = async (request: number) => {
   }
   if (!graphPreview.hidden) void renderGraphPreview();
   if (!materialGraphEditor.hidden) void renderMaterialGraphEditor();
+  if (!spatialForceEditor.hidden) {
+    void renderSpatialForceEditor();
+    void refreshSpatialForceVisualization();
+  }
 };
 
 let regenerationTimer: number | null = null;
@@ -3370,6 +3562,7 @@ const setRegenerationBusy = (busy: boolean) => {
   editCutoutContourButton.disabled = busy || activeCutout === null || activeCutoutSource === null;
   applyCutoutMetadataButton.disabled = busy || activeCutoutSource === null;
   inspectGraphButton.disabled = busy;
+  editSpatialForcesButton.disabled = busy;
   for (const button of seasonButtons) button.disabled = busy;
   pruneModeButton.disabled = busy;
   syncPlacementButtons();
@@ -3480,6 +3673,19 @@ inspectGraphButton.addEventListener("click", () => {
   inspectGraphButton.setAttribute("aria-expanded", String(!graphPreview.hidden));
   inspectGraphButton.textContent = graphPreview.hidden ? "Graph Preview" : "Hide Graph";
   if (!graphPreview.hidden) void renderGraphPreview();
+});
+
+editSpatialForcesButton.addEventListener("click", () => {
+  spatialForceEditor.hidden = !spatialForceEditor.hidden;
+  editSpatialForcesButton.setAttribute("aria-expanded", String(!spatialForceEditor.hidden));
+  editSpatialForcesButton.textContent = spatialForceEditor.hidden ? "Force Fields" : "Hide Force Fields";
+  if (spatialForceEditor.hidden) {
+    spatialForceEditorRequest++;
+    disposeSpatialForceVisualization();
+  } else {
+    void renderSpatialForceEditor();
+    void refreshSpatialForceVisualization();
+  }
 });
 
 editMaterialGraphButton.addEventListener("click", () => {
@@ -4983,6 +5189,14 @@ document.querySelector<HTMLButtonElement>("#exportJson")!.addEventListener("clic
       activeLeafCutout: cutoutLeafId,
       heroImport: heroImportAudit,
       materialBake: materialBakeAudit,
+      spatialForces: state.spatialForces
+        ? {
+            state: state.spatialForces,
+            status: app.dataset.spatialForceStatus ?? "canonical",
+            diagnostic: spatialForceDiagnostic,
+            audit: spatialForceAudit,
+          }
+        : null,
       freeformCrown: state.crownField ? cloneProcPlantFreeformCrown(state.crownField) : genome.spaceColonization?.freeform ?? null,
       impostor: heroLodState?.impostor
         ? {
