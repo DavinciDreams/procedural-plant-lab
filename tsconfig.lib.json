@@ -9,6 +9,7 @@
   },
   "include": [
     "src/index.ts",
-    "src/core.ts"
+    "src/core.ts",
+    "src/procplant-watertight-junction.ts"
   ]
 }

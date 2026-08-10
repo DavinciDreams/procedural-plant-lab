@@ -229,6 +229,7 @@ npm run test:tellus-contract
 - `src/procplant-mesh-helper.ts` auto-fits/binds imported meshes to spines and emits bark/wind/anchor attributes.
 - `src/procplant-hero-spine-authoring.ts` selects imported GLB primitives by stable provenance and emits capped, audited spine-bound geometry packages.
 - `src/procplant-junction-collar.ts` computes audited compact-support collar blending around imported-mesh branch anchors.
+- `procplants/junction-research` is a separate opt-in package entry backed by `src/procplant-watertight-junction.ts`: it samples one straight parent plus one to three straight children as an implicit union, emits stable bark/branch attributes, and releases geometry only after closed-manifold and bounded self-intersection audits pass. Unsupported or failed candidates return the caller's exact collar geometry. It is not the production swept-tree union path: the frozen three-way fixture costs 7,388 triangles versus 45 for independent low-resolution tubes, and 3 of 9 angle/radius sweep cases currently fail closed.
 - `src/procplant-foliage-relaxation.ts` relaxes public attachment/organ cards with bounded deterministic collision handling.
 - `src/procplant-scatter.ts` creates deterministic density-map ecosystem placement plans.
 - `src/procplant-lsystem.ts` provides parametric stochastic expansion and a 3D plant turtle.
