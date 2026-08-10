@@ -129,6 +129,7 @@ try {
           let sum = 0;
           let sumSquares = 0;
           let opaque = 0;
+          let foliagePixels = 0;
           const bins = new Set();
           for (let offset = 0; offset < pixels.length; offset += 4) {
             const r = pixels[offset], g = pixels[offset + 1], b = pixels[offset + 2], a = pixels[offset + 3];
@@ -139,6 +140,7 @@ try {
             const luminance = r * 0.2126 + g * 0.7152 + b * 0.0722;
             sum += luminance; sumSquares += luminance * luminance;
             if (a > 0) opaque++;
+            if (g > r * 1.035 && g > b * 1.035 && g - Math.min(r, b) > 8) foliagePixels++;
             bins.add((r >> 4) << 8 | (g >> 4) << 4 | (b >> 4));
           }
           const count = pixels.length / 4;
@@ -148,8 +150,10 @@ try {
             width: canvas.width,
             height: canvas.height,
             opaque,
+            foliagePixels,
             colorBins: bins.size,
             luminanceVariance: sumSquares / count - mean * mean,
+            webglError: gl.getError(),
           };
         };
         const ids = ['blueSpruce', 'alpineFir', 'redwoodSpire', 'tundraSmallPine', 'shorePineCones'];
@@ -160,7 +164,14 @@ try {
           await waitForIdle();
           const first = await capture();
           const second = await capture();
-          results.push({ id, first, second, triangles: Number(document.querySelector('#triangles').textContent.replaceAll(',', '')) });
+          results.push({
+            id,
+            first,
+            second,
+            triangles: Number(document.querySelector('#triangles').textContent.replaceAll(',', '')),
+            draws: Number(app?.dataset.previewDraws ?? '0'),
+            heroTriangles: Number(app?.dataset.heroTemplateTriangles ?? '0'),
+          });
         }
         return results;
       })()
@@ -174,9 +185,13 @@ try {
   for (const result of results) {
     assert.equal(result.first.hash, result.second.hash, `${result.id} fixed-camera WebGL pixels must be stable`);
     assert.ok(result.first.opaque > 0, `${result.id} must render pixels`);
+    assert.ok(result.first.foliagePixels > 0, `${result.id} must retain visible green foliage coverage`);
     assert.ok(result.first.colorBins >= 24, `${result.id} must retain a nontrivial shaded silhouette`);
     assert.ok(result.first.luminanceVariance > 40, `${result.id} must retain visual contrast`);
+    assert.equal(result.first.webglError, 0, `${result.id} must render without a WebGL error`);
     assert.ok(result.triangles > 0, `${result.id} must render authored geometry`);
+    assert.ok(result.draws > 0, `${result.id} must report real scene draws`);
+    assert.ok(result.heroTriangles > 0, `${result.id} must report hero LOD geometry`);
   }
   assert.equal(new Set(results.map((result) => result.first.hash)).size, results.length,
     "each audited conifer must retain a distinct fixed-camera silhouette");

@@ -4773,6 +4773,49 @@ class TemplateBuilder {
     this.idx.push(base, base + 1, base + 2);
   }
 
+  /**
+   * Append an authored indexed prototype without expanding every triangle into
+   * three independent vertices. This is intentionally strict: callers must
+   * provide normals and UV0 so sharing a vertex cannot silently change either
+   * lighting or texture semantics.
+   */
+  addTransformedIndexedGeometry(
+    geometry: THREE.BufferGeometry,
+    matrix: THREE.Matrix4,
+    color: THREE.Color,
+    tint = true,
+    sway = 1,
+  ) {
+    const index = geometry.getIndex();
+    const position = geometry.getAttribute("position");
+    const normal = geometry.getAttribute("normal");
+    const uv0 = geometry.getAttribute("uv");
+    if (!index || !position || position.itemSize !== 3 || position.count === 0) {
+      throw new Error("Indexed ProcPlant geometry requires a non-empty position attribute and index");
+    }
+    if (!normal || normal.itemSize !== 3 || normal.count !== position.count) {
+      throw new Error("Indexed ProcPlant geometry requires one xyz normal per position vertex");
+    }
+    if (!uv0 || uv0.itemSize !== 2 || uv0.count !== position.count) {
+      throw new Error("Indexed ProcPlant geometry requires one UV0 pair per position vertex");
+    }
+    const base = this.pos.length / 3;
+    const transformedPosition = new THREE.Vector3();
+    const transformedNormal = new THREE.Vector3();
+    const normalMatrix = new THREE.Matrix3().getNormalMatrix(matrix);
+    for (let vertex = 0; vertex < position.count; vertex++) {
+      transformedPosition.fromBufferAttribute(position, vertex).applyMatrix4(matrix);
+      transformedNormal.fromBufferAttribute(normal, vertex).applyNormalMatrix(normalMatrix);
+      this.pos.push(transformedPosition.x, transformedPosition.y, transformedPosition.z);
+      this.nrm.push(transformedNormal.x, transformedNormal.y, transformedNormal.z);
+      this.uv0.push(uv0.getX(vertex), uv0.getY(vertex));
+      this.col.push(color.r, color.g, color.b);
+      this.tintable.push(tint ? 1 : 0);
+      this.sway.push(sway);
+    }
+    for (let offset = 0; offset < index.count; offset++) this.idx.push(base + index.getX(offset));
+  }
+
   build(): ProcPlantTemplate {
     return {
       pos: new Float32Array(this.pos),
@@ -6576,6 +6619,7 @@ export const createProcPlantAerialRootGeometry = (): THREE.BufferGeometry =>
 export const createProcPlantConiferSprayGeometry = (detail: "full" | "light" = "full"): THREE.BufferGeometry => {
   const positions: number[] = [];
   const normals: number[] = [];
+  const uvs: number[] = [];
   const indices: number[] = [];
   const addQuad = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3) => {
     const base = positions.length / 3;
@@ -6584,6 +6628,9 @@ export const createProcPlantConiferSprayGeometry = (detail: "full" | "light" = "
       positions.push(p.x, p.y, p.z);
       normals.push(normal.x, normal.y, normal.z);
     }
+    // Each folded half-ribbon owns a coherent UV island. Adjacent halves keep
+    // separate ridge vertices because their flat normals intentionally differ.
+    uvs.push(0, 0, 0, 1, 1, 1, 1, 0);
     indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
   };
 
@@ -6629,7 +6676,9 @@ export const createProcPlantConiferSprayGeometry = (detail: "full" | "light" = "
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
   geometry.setIndex(indices);
+  declareProcPlantGeometryUv0(geometry);
   geometry.computeBoundingSphere();
   return geometry;
 };
@@ -6757,6 +6806,14 @@ const addTransformedGeometry = (
   }
   if (source !== geometry) source.dispose();
 };
+
+const addTransformedIndexedGeometry = (
+  builder: TemplateBuilder,
+  geometry: THREE.BufferGeometry,
+  matrix: THREE.Matrix4,
+  color: THREE.Color,
+  sway = 1,
+) => builder.addTransformedIndexedGeometry(geometry, matrix, color, true, sway);
 
 const combineTemplates = (base: ProcPlantTemplate, extra: ProcPlantTemplate): ProcPlantTemplate => {
   if (extra.idx.length === 0) return base;
@@ -7072,7 +7129,11 @@ const addWeberPennFoliageMass = (
     // fill remains byte-stable; removed owner anchors simply suppress their
     // already-determined organ instead of redistributing it elsewhere.
     if (anchor && retainedAnchorIds && !retainedAnchorIds.has(anchor.id)) continue;
-    addTransformedGeometry(builder, sprayGeometry, matrix, color, 0.38 + t * 0.58);
+    if (sourceMode === "conifer-spray") {
+      addTransformedIndexedGeometry(builder, sprayGeometry, matrix, color, 0.38 + t * 0.58);
+    } else {
+      addTransformedGeometry(builder, sprayGeometry, matrix, color, 0.38 + t * 0.58);
+    }
     added++;
   }
   sprayGeometry.dispose();
@@ -7528,7 +7589,11 @@ const buildWeberPennProcPlantTemplateInternal = (
   const baseY = normalizationBake.min.y;
   const branchVerts = baked.branches.positions.length / 3;
   const leafVerts = baked.leaves.positions.length / 3;
-  const totalVerts = branchVerts + leafVerts;
+  // Leaf-site data still drives branch-relative authored crown fill below, but
+  // native leaf vertices are not renderable when nativeLeaves=false. Omitting
+  // those unindexed attribute rows avoids uploading dead Weber-Penn geometry.
+  const renderedLeafVerts = nativeLeaves ? leafVerts : 0;
+  const totalVerts = branchVerts + renderedLeafVerts;
   const totalIdx = baked.branches.indices.length + (nativeLeaves ? baked.leaves.indices.length : 0);
   const pos = new Float32Array(totalVerts * 3);
   const nrm = new Float32Array(totalVerts * 3);
@@ -7692,7 +7757,7 @@ const buildWeberPennProcPlantTemplateInternal = (
     sway[i] = w * w * realism.windFlex * 0.62;
   }
 
-  for (let i = 0; i < leafVerts; i++) {
+  for (let i = 0; i < renderedLeafVerts; i++) {
     const src = i * 3;
     const dst = (branchVerts + i) * 3;
     const di = branchVerts + i;
@@ -8295,7 +8360,7 @@ export const buildProcPlantTemplateFromGraph = (
     } else if (organ.kind === "coniferSpray") {
       const inst = coniferSprayInstance(genome, organ);
       const geo = createProcPlantConiferSprayGeometry();
-      addTransformedGeometry(builder, geo, inst.matrix, inst.color, inst.sway);
+      addTransformedIndexedGeometry(builder, geo, inst.matrix, inst.color, inst.sway);
       geo.dispose();
       leafCount++;
     } else if (organ.kind === "fernFrond") {
@@ -8449,7 +8514,11 @@ export const buildProcPlantInstancePrototype = (
   const geometry = geometryForCompiledInstance(kind, genome);
   const builder = new TemplateBuilder();
   try {
-    addTransformedGeometry(builder, geometry, new THREE.Matrix4(), new THREE.Color(0xffffff), 1);
+    if (kind === "coniferSpray") {
+      addTransformedIndexedGeometry(builder, geometry, new THREE.Matrix4(), new THREE.Color(0xffffff), 1);
+    } else {
+      addTransformedGeometry(builder, geometry, new THREE.Matrix4(), new THREE.Color(0xffffff), 1);
+    }
     return builder.build();
   } finally {
     geometry.dispose();
@@ -8469,7 +8538,11 @@ export const materializeProcPlantParts = (
       geometry = geometryForCompiledInstance(instance.kind, genome);
       geometries.set(instance.kind, geometry);
     }
-    addTransformedGeometry(builder, geometry, instance.matrix, instance.color, instance.sway);
+    if (instance.kind === "coniferSpray") {
+      addTransformedIndexedGeometry(builder, geometry, instance.matrix, instance.color, instance.sway);
+    } else {
+      addTransformedGeometry(builder, geometry, instance.matrix, instance.color, instance.sway);
+    }
   }
   for (const geometry of geometries.values()) geometry.dispose();
   return combineTemplates(parts.stems, builder.build());

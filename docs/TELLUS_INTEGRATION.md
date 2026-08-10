@@ -48,13 +48,15 @@ At canonical seed `612072`, current Procplants budgets are:
 | Preset | LOD triangles | LOD vertices | Notes |
 | --- | ---: | ---: | --- |
 | Phi Fern | 352 / 264 / 4 / 2 | 1,056 / 792 / 8 / 4 | 8 `fernFrond` instances; about 1.23 by 1.61 ground coverage |
-| Blue Spruce | 3,934 / 2,494 / 4 / 2 | 7,324 / 3,942 / 8 / 4 | Branch-relative conifer sprays |
-| Alpine Fir | 5,190 / 3,174 / 4 / 2 | 8,388 / 4,509 / 8 / 4 | Branch-relative conifer sprays |
-| Redwood Spire | 3,896 / 2,540 / 4 / 2 | 6,765 / 3,710 / 8 / 4 | Narrow conifer crown |
-| Tundra Small Pine | 3,678 / 2,354 / 4 / 2 | 7,148 / 3,826 / 8 / 4 | Compact pine |
-| Shore Pine | 1,596 / 1,080 / 4 / 2 | 4,692 / 3,168 / 8 / 4 | Includes package cone instances |
+| Blue Spruce | 3,934 / 2,494 / 4 / 2 | 4,420 / 2,436 / 8 / 4 | Branch-relative conifer sprays; 39.65% fewer LOD0 vertices |
+| Alpine Fir | 5,190 / 3,174 / 4 / 2 | 5,208 / 2,856 / 8 / 4 | Branch-relative conifer sprays; 37.91% fewer LOD0 vertices |
+| Redwood Spire | 3,896 / 2,540 / 4 / 2 | 4,023 / 2,279 / 8 / 4 | Narrow conifer crown; 40.53% fewer LOD0 vertices |
+| Tundra Small Pine | 3,678 / 2,354 / 4 / 2 | 4,352 / 2,392 / 8 / 4 | Compact pine; 39.12% fewer LOD0 vertices |
+| Shore Pine | 1,596 / 1,080 / 4 / 2 | 3,372 / 2,328 / 8 / 4 | Includes package cone instances; 28.13% fewer LOD0 vertices |
 
 The Procplants `test:conifer-fern-budget` gate freezes these current vertex/triangle budgets and hashes. The frozen v2 Phi Fern was 1,872/624/4/2 triangles and 5,616/1,872/8/4 vertices, so revision 3 reduces its close tier by 81.2% while broadening the dedicated fern crown.
+
+The conifer packing revision preserves preset IDs, ecology profiles, automatic Tellus mappings, spray counts, expanded triangle positions, and all triangle budgets. It changes core template bytes and hashes because unused Weber-Penn native-leaf rows are removed and authored conifer quads stay indexed. Tellus remains WebGL-first and owns chunking, LOD, shadows, and render pressure; adoption therefore requires pinning the eventual immutable Procplants merge SHA and rerunning its installed-package/contract/vegetation/render-budget gates. Procplants Chrome WebGL proof is correctness evidence only, not Tellus FPS or capacity evidence.
 
 Tellus #178 validates eleven ground-cover cohorts through package detail, clustered, crossed-card, and omission tiers. Its deterministic field evidence is:
 
