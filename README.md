@@ -49,8 +49,9 @@ Good starting experiments:
 - Bounded deterministic prototype generation with instanced stems and organs, so dense previews do not regenerate every placement.
 - Exact export-readiness accounting for instanced triangles, vertices, draw calls, material slots, GPU bytes, and LOD budgets.
 - Stable segment/attachment IR with parent IDs, axial positions, right-handed branch frames, and sway weights.
-- Four deterministic geometry LODs (full, coherently reduced, crossed card, and single card).
-- A versioned renderer-independent four-tier runtime LOD contract combines normalized distance, projected height, hysteresis, and culling; runtime/Tellus packages and multi-LOD GLB extras carry the same stable tier IDs without claiming a Khronos extension.
+- Four deterministic default geometry LODs (full, coherently reduced, crossed card, and single card).
+- A versioned renderer-independent four-tier runtime LOD contract combines normalized distance, projected height, hysteresis, and culling; default runtime/Tellus packages and multi-LOD GLB extras carry the same stable tier IDs without claiming a Khronos extension.
+- An explicit version-2 five-tier contract adds separate atlas-backed crossed-tree-impostor LOD3 and baked billboard/hemisphere LOD4 tiers. It source-hash-binds a real atlas, fails closed instead of synthesizing a fake bake, preserves every default version-1 byte, and exports deterministic GLB extras plus an embedded PNG without inventing a Khronos extension.
 - Worker-backed hero LOD switching with hysteresis and cached compiled geometry.
 - Debug, pruning/trim, and GLB authoring tools load as one cold interaction chunk; default rendering does not execute or preload them.
 - GPU vertex wind for visible and shadow passes without per-frame instance-matrix updates.
@@ -59,7 +60,7 @@ Good starting experiments:
 - Deterministic non-mutating graph pruning with repaired ancestry and an audit result.
 - Interactive segment picking, reversible graph-backed trimming, and recompilation of the edited hero plant.
 - Screen-space pruning strokes and Shift-drag lassos with stable multi-selection and grouped undo.
-- Opt-in viewport placement adds regeneration-safe branch-relative leaves, compatible flowers, or fruit to graph-backed heroes with target-bound overrides, spacing/cap audits, and undo-last.
+- Opt-in viewport Place Part authoring adds regeneration-safe branch-relative leaves, reproductive/accessory organs, low-poly foliage clusters, moss tufts, bounded one-segment child branches, and bark-covered knot stubs to graph-backed heroes with target-bound overrides, spacing/cap audits, JSON metadata, and undo-last. The V2 record also defines exact UV0/material/texture-bound decal patches, but the lab keeps Decal disabled until a real renderer-owned binding is active.
 - Browser-native alpha cutout tracing, deterministic multi-island/hole triangulation, direct point editing and freehand island/hole creation, atlas packing, edge-dilated mip padding, UV/pivot/attachment/bend metadata, and mesh helpers.
 - Low-poly fruit, berry, cone, thorn, and aerial-root organs with branch-relative placement.
 - A reusable instanced placement LOD pool with hysteresis, culling, explicit allocation-free updates, and migration statistics.
@@ -72,12 +73,15 @@ Good starting experiments:
 - Typed generator-DAG, macro-rule, space-colonization, and parallel-transport swept-tube foundations for higher-level authoring tools. Edited graph-native, space-colonized, branch-module, guided-vine, bounded herbaceous/clump/bespoke-patch, and Weber-Penn plants execute through honest typed artifacts. Weber exposes real branch-soup/native-foliage artifacts and only vendor-representable controls; unsupported specialized rewires fail closed.
 - A production `colonizedHazelShrub` backend using deterministic space colonization, swept tubes, real reduced LOD, and branch-relative foliage.
 - Versioned freeform crowns use deterministic weighted constructive fields of up to 24 oriented ellipsoid/box lobes with positive union and subtractive cutouts, viewport add/select/center-drag/remove, per-lobe dimension/yaw/density controls, URL/JSON/genome/graph persistence, strict sampling/work caps, and exact default-geometry compatibility; global axis handles still scale the whole field.
+- A bounded renderer-independent 2D crown-mask fitter converts one filled frontal silhouette into deterministic freeform ellipsoid constraints. Callers must provide world scale and depth explicitly; disconnected/holed masks fail closed, and the result is not presented as photogrammetry, metric reconstruction, or species calibration.
+- A separate bounded renderer-independent 3D voxel-mask fitter converts explicit X/Y/Z byte occupancy plus authored voxel world size and center into deterministic constructive ellipsoid lobes or a stricter single-spline crown. Empty, disconnected, enclosed-cavity, over-contoured, and spline-ambiguous inputs fail closed; this is rough occupancy fitting, not photogrammetry, mesh reconstruction, metric capture, or species inference.
 - A deterministic target-bound nine-stage authoring-graph adapter included in JSON exports, with real typed backends, execution records, a lazy editor for mapped seeds/enabled/count/curve/parameter controls, cycle-safe wiring, and explicit unsupported audits.
 - Bounded clump production adapters preserve legacy bytes and specialized LOD policy: generic clumps separate whole-shoot generation from placement, while Daylily independently seeds crown architecture, branch-relative strap foliage, and real scape/flower topology with graph attachment IR.
 - Deterministic sphere/capsule/plane/box scene-guide queries provide signed clearance, attraction, repulsion, tip steering, and penetration resolution without a renderer dependency.
-- Versioned spatial direction, attract/magnet, repel/avoid, and curl fields deform public plant graphs deterministically while preserving connectivity and rebuilding branch-relative frames/attachments.
+- Versioned spatial direction, attract/magnet, repel/avoid, and curl fields deform public plant graphs deterministically while preserving connectivity and rebuilding branch-relative frames/attachments. The lazy accessible Force Fields editor authors, orders, visualizes, persists, undoes, and resets those bounded fields; unsupported baked backends preserve state and fail closed to canonical rendering.
 - Versioned source/sink growth turns deterministic crown-occlusion probes or caller-supplied directional light into stable vigor, growth-scale, branch-activation, and de-duplicated self-prune recommendations. A graph-bound multi-step state persists reserves/growth, confirms activation and pruning with hysteresis, and serializes deterministic audits.
 - Opt-in growth-topology plans bind confirmed recommendations to an exact graph/step, apply self-prunes through the existing descendant/attachment repair path, and materialize confirmed terminal `branch-tip` dormant buds as bounded deterministic child shoots with stable IDs and replacement tip anchors.
+- The explicit full-entry `buildProcPlantTemplateWithCrownLightPruning` path integrates opt-in pruning into native graph generation: one bounded geometric visibility pass feeds capped repeated resource evidence, stable ancestor-cut selection, existing topology/attachment repair, and audited before/after template triangle cost. The canonical/core builder remains byte-identical and does not load this machinery; incompatible native graphs and non-native backends fail closed. This is a procedural visibility/resource heuristic, not species physiology or spectral radiative transfer.
 - Versioned Weber-Penn trim overrides can deterministically filter stable leaf-site/branch-tip attachment identities with target-bound serialization and explicit unsupported audits for baked branch ancestry or native-leaf geometry.
 - Extended asset QA for overdraw, texture memory, UV/tangent requirements, collisions, and named engine/mobile/hero profiles.
 - Deterministic 16-view RGBA hero impostor capture with padded gutters, live camera-relative LOD3 UV selection, and embedded-atlas GLB export.
@@ -85,6 +89,7 @@ Good starting experiments:
 - A reusable dense impostor pool buckets static placements by plant-local atlas view with shared resources, stable buffers, visibility/culling/view hysteresis, and at most one draw per occupied view. After an explicit hero bake, a matching same-preset/seed biome cohort uses it for live LOD3 placements without duplicating LOD0-2 geometry.
 - Auto/manual imported-mesh spine fitting with bark UVs, wind weights, nearest-spine attributes, and stable anchors.
 - A bounded self-contained hero-GLB importer inspects scene/mesh/material references, emits stable node/mesh provenance and world matrices, optionally bakes static matrix/TRS hierarchies into isolated positions and inverse-transpose normals, and extracts embedded PNG/JPEG/WebP/KTX2 texture bytes without a renderer dependency. The lab can import a supported GLB, auto-fit a spine, opt into lazy viewport handles to move/add/remove spine points and rebuild the authored mesh atomically, assign bark UV/wind/anchors/collars, preview procedural leaves, and export the authored hero.
+- A renderer-independent hero-bark authoring contract selects one capped imported UV region or matching fitted-spine band, derives byte-tileable base/height/normal PNG resources from explicitly decoded imported PNG pixels, audits coverage/seams/work/provenance, and exposes owned base/normal pixel sources to the material baker. With no decoded pixels it emits an explicitly labeled procedural surrogate, never a scan-quality claim.
 - Spine-bound imported meshes can emit stable, spaced leaf/branch/accessory attachment transforms with surface-envelope clearance and right-handed frames.
 - Imported spine-bound attachment frames can drive bounded, order-independent junction-collar displacement/weight attributes or nonmutating baked surface swell.
 - Deterministic indexed/non-indexed triangle-mesh queries use a bounded static BVH for exact closest points, optional signed clearance on closed meshes, and growth-obstacle projection; affine transforms and stable ties are supported.
@@ -152,6 +157,8 @@ After a production build, run the dependency-free headless Chrome UI smoke (grap
 ```bash
 npm run test:browser-smoke
 npm run test:impostor-three-webgl
+npm run test:lod5
+npm run test:lod5-browser
 ```
 
 Use the headless compiler for repeatable asset-pack work:
@@ -195,6 +202,7 @@ npm run test:tellus-contract
 - `src/procplant-impostor-channels.ts` composes aligned color/normal/depth and seasonal impostor view arrays.
 - `src/procplant-impostor-image.ts` encodes deterministic channel PNGs and embeds seasonal channel sets in GLB.
 - `src/procplant-impostor-three.ts` captures live Three.js views, installs textured billboards, and exports embedded-atlas GLB.
+- `src/procplant-five-tier-lod.ts` compiles and exports the opt-in, source-bound five-tier LOD contract.
 - `src/procplant-dense-impostor-pool.ts` batches dense static billboard placements into deterministic atlas-view buckets.
 - `src/procplant-generator-graph.ts` defines deterministic typed generator DAGs and serializable manual operations.
 - `src/procplant-authoring-graph.ts` derives a live nine-stage graph and preview from any authored genome.
@@ -206,6 +214,7 @@ npm run test:tellus-contract
 - `src/procplant-meshopt-compression.ts` applies bounded deterministic lossless `EXT_meshopt_compression` to eligible GLB geometry views.
 - `src/procplant-glb-validation.ts` strictly validates emitted GLB structure, accessors, Procplants metadata, variant manifests, and decoded meshopt payloads/fallbacks.
 - `src/procplant-hero-glb-import.ts` inspects and extracts bounded self-contained hero mesh/texture data.
+- `src/procplant-hero-bark-extraction.ts` derives bounded, audited tileable bark resources from imported UV regions or fitted-spine bands.
 - `src/procplant-hero-spine-editor.ts` provides immutable, undoable manual-spine state plus lazy Three.js viewport handles.
 - `src/procplant-material-graph.ts` compiles renderer-independent typed surface graphs into portable binding and bake plans.
 - `src/procplant-material-gltf-plan.ts` converts direct compiled bindings into standards-honest glTF PBR plans and diagnostics.
@@ -223,15 +232,18 @@ npm run test:tellus-contract
 - `src/procplant-webgpu-indirect-draw.ts` exposes allocation-stable per-LOD compacted-index bindings and records one indexed-indirect draw per LOD without taking ownership of runtime buffers.
 
 The injected-device runtime is available from the explicit `procplants/webgpu` package entry. It is excluded from both the default browser startup graph and `procplants/core`; importing the existing plan API from the root/core entries remains supported. Tellus currently defaults to its faster WebGL renderer and does not exercise this path.
-- `src/procplant-organ-placement-overrides.ts` serializes and applies target-bound branch-relative leaf/flower/fruit placements.
+- `src/procplant-organ-placement-overrides.ts` serializes and applies target-bound branch-relative organ, cluster, moss-tuft, bounded child-branch/knot placements, plus separately materialized two-triangle UV0 decal draws that fail closed without an exact external texture binding.
 - `src/procplant-resource-growth.ts` allocates maintenance, reserves, and growth from directional light resources.
 - `src/procplant-crown-light.ts` samples bounded deterministic stem/organ occlusion and adapts it directly to resource growth.
+- `src/procplant-crown-light-pruning.ts` integrates capped visibility-confirmed self-pruning into native graph template generation.
 - `src/procplant-graph-resource-growth.ts` adapts public segment IR to vigor and self-prune recommendations.
 - `src/procplant-growth-simulation.ts` persists deterministic multi-step reserve, activation, growth, and prune evidence.
 - `src/procplant-growth-topology.ts` applies graph-bound confirmed self-prune and terminal dormant-bud shoot plans with exact audits.
 - `src/procplant-damage-topology.ts` applies opt-in target-bound missing-organ and broken-branch topology with repaired ancestry, capped scar records, and exact healthy/no-op reuse.
 - `src/procplant-weber-penn-trim.ts` serializes and audits stable attachment-level Weber-Penn trim overrides.
 - `src/procplant-space-colonization.ts` supplies deterministic attraction-volume growth foundations.
+- `src/procplant-crown-mask-fit.ts` fits bounded filled 2D crown silhouettes into the existing freeform crown contract.
+- `src/procplant-crown-voxel-mask-fit.ts` fits bounded explicit 3D occupancy into capped freeform lobe or spline constraints.
 - `src/procplant-spatial-force.ts` applies bounded localized force fields to public graph topology and rederives frames/attachments.
 - `src/procplant-tube.ts` builds twist-stable parallel-transport swept tubes.
 - `src/procplant-asset-qa.ts` adds engine/profile-specific texture, overdraw, attribute, and intersection QA.

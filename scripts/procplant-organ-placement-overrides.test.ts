@@ -1,9 +1,16 @@
 import assert from "node:assert/strict";
 import * as THREE from "three";
-import type { ProcPlantGraph } from "../src/procplants";
+import {
+  buildProcPlantTemplateFromGraph,
+  procPlantPresets,
+  type ProcPlantGraph,
+} from "../src/procplants";
 import {
   PROCPLANT_ORGAN_PLACEMENT_CONTRACT,
+  PROCPLANT_ORGAN_PLACEMENT_LEGACY_VERSION,
   PROCPLANT_ORGAN_PLACEMENT_VERSION,
+  PROCPLANT_PLACEMENT_DECAL_BINDING_CONTRACT,
+  PROCPLANT_PLACEMENT_DECAL_BINDING_VERSION,
   appendProcPlantOrganPlacement,
   applyProcPlantOrganPlacementOverrides,
   createProcPlantOrganPlacementPackage,
@@ -87,6 +94,7 @@ const serializedA = serializeProcPlantOrganPlacementPackage({ ...placementPackag
 const serializedB = serializeProcPlantOrganPlacementPackage(placementPackage);
 assert.equal(serializedA, serializedB, "serialization order must be deterministic");
 assert.deepEqual(JSON.parse(serializedA).operations.map((operation: { ordinal: number }) => operation.ordinal), [0, 1]);
+assert.equal(JSON.parse(serializedA).operations.some((operation: { decal?: unknown }) => "decal" in operation), false, "existing V2 records keep their prior bytes");
 
 const sourceOrganArray = graph.organs;
 const sourceAttachmentArray = graph.attachments;
@@ -106,6 +114,120 @@ for (const attachment of applied.graph.attachments.slice(graph.attachments.lengt
   assert(Math.abs(attachment.tangent.dot(attachment.right)) < 1e-6);
   assert(attachment.tangent.clone().cross(attachment.right).dot(attachment.up) > 0.9999);
 }
+
+let expandedPackage = createProcPlantOrganPlacementPackage(target);
+for (const input of [
+  { kind: "coniferSpray" as const, segmentId: "trunk:0", axialT: 0.24, azimuth: 0.3, scale: 0.72 },
+  { kind: "branch" as const, segmentId: "trunk:0", axialT: 0.72, azimuth: 1.2, scale: 0.48 },
+  { kind: "knot" as const, segmentId: "trunk:0", axialT: 0.48, azimuth: 2.1, scale: 0.18 },
+]) {
+  const result = appendProcPlantOrganPlacement(expandedPackage, input);
+  assert(result.operation);
+  expandedPackage = result.package;
+}
+const expandedApplied = applyProcPlantOrganPlacementOverrides(graph, target, expandedPackage);
+assert.equal(expandedApplied.appliedOperationIds.length, 3);
+assert.equal(expandedApplied.graph.organs.at(-1)?.kind, "coniferSpray");
+assert.equal(expandedApplied.graph.stems.length, graph.stems.length + 4);
+assert.equal(expandedApplied.graph.segments.length, graph.segments.length + 2);
+const branchRecord = expandedApplied.graph.segmentRecords.find((entry) => entry.id.startsWith("placed-branch:"))!;
+const knotRecord = expandedApplied.graph.segmentRecords.find((entry) => entry.id.startsWith("placed-knot:"))!;
+assert.equal(branchRecord.parentSegmentId, "trunk:0");
+assert.equal(knotRecord.parentSegmentId, "trunk:0");
+const trunkStart = graph.stems[0]!.position;
+const trunkEnd = graph.stems[1]!.position;
+const branchCenter = trunkStart.clone().lerp(trunkEnd, 0.72);
+const branchRadius = THREE.MathUtils.lerp(graph.stems[0]!.radius, graph.stems[1]!.radius, 0.72);
+assert(Math.abs(expandedApplied.graph.stems[branchRecord.startNodeIndex]!.position.distanceTo(branchCenter) - branchRadius * 1.08) < 1e-6, "existing V2 child-branch offset must remain byte-compatible");
+const knotCenter = trunkStart.clone().lerp(trunkEnd, 0.48);
+const knotRadius = THREE.MathUtils.lerp(graph.stems[0]!.radius, graph.stems[1]!.radius, 0.48);
+assert(Math.abs(expandedApplied.graph.stems[knotRecord.startNodeIndex]!.position.distanceTo(knotCenter) - knotRadius * 1.02) < 1e-6);
+const branchTip = expandedApplied.graph.attachments.find((entry) => entry.parentSegmentId === branchRecord.id)!;
+assert.equal(branchTip.kind, "branch-tip");
+assert.equal(branchTip.parentSegmentId, branchRecord.id);
+assert(Math.abs(branchTip.tangent.dot(branchTip.right)) < 1e-6);
+assert(Math.abs(branchTip.tangent.dot(branchTip.up)) < 1e-6);
+assert(branchTip.tangent.clone().cross(branchTip.right).dot(branchTip.up) > 0.9999);
+assert.equal(
+  expandedApplied.graph.attachments.some((entry) => entry.parentSegmentId === knotRecord.id),
+  false,
+  "a bark knot must not invent a dormant branch-tip attachment",
+);
+assert.equal(
+  procPlantOrganPlacementGraphSignature(expandedApplied.graph),
+  target.graphSignature,
+  "authored output branches must not invalidate their source topology binding",
+);
+const sourceTemplate = buildProcPlantTemplateFromGraph(procPlantPresets.understoryShrub!, graph).template;
+const expandedTemplate = buildProcPlantTemplateFromGraph(procPlantPresets.understoryShrub!, expandedApplied.graph).template;
+assert(expandedTemplate.idx.length > sourceTemplate.idx.length, "placed branches and clusters must materialize real geometry");
+const knotOnlyPackage = { ...createProcPlantOrganPlacementPackage(target), operations: [expandedPackage.operations[2]!] };
+const knotOnlyApplied = applyProcPlantOrganPlacementOverrides(graph, target, knotOnlyPackage);
+const knotOnlyTemplate = buildProcPlantTemplateFromGraph(procPlantPresets.understoryShrub!, knotOnlyApplied.graph).template;
+const knotTriangles = (knotOnlyTemplate.idx.length - sourceTemplate.idx.length) / 3;
+assert(knotTriangles > 0 && knotTriangles <= 16, `placed bark knot must remain low-poly, received ${knotTriangles} triangles`);
+
+const placedBranchAppend = appendProcPlantOrganPlacement(expandedPackage, {
+  kind: "leaf",
+  segmentId: branchRecord.id,
+  axialT: 0.5,
+  azimuth: 0,
+  scale: 0.2,
+});
+assert.equal(placedBranchAppend.reason, "invalid", "V2 output branches are not stable nested authoring targets");
+
+const decalBinding = {
+  contract: PROCPLANT_PLACEMENT_DECAL_BINDING_CONTRACT,
+  version: PROCPLANT_PLACEMENT_DECAL_BINDING_VERSION,
+  materialId: "bark-scar-material",
+  textureId: "bark-scar-albedo",
+  uvSet: 0,
+  uvRect: [0.125, 0.25, 0.375, 0.75],
+} as const;
+assert.equal(appendProcPlantOrganPlacement(createProcPlantOrganPlacementPackage(target), {
+  kind: "decal", segmentId: "branch:0", axialT: 0.55, azimuth: 0.2, scale: 0.12,
+}).reason, "invalid", "unbound decals must fail at authoring time");
+const decalAppend = appendProcPlantOrganPlacement(createProcPlantOrganPlacementPackage(target), {
+  kind: "decal",
+  segmentId: "branch:0",
+  axialT: 0.55,
+  azimuth: 0.2,
+  scale: 0.12,
+  decal: decalBinding,
+});
+assert(decalAppend.operation);
+const unboundDecal = applyProcPlantOrganPlacementOverrides(graph, target, decalAppend.package);
+assert.strictEqual(unboundDecal.graph, graph);
+assert.equal(unboundDecal.changed, false);
+assert.equal(unboundDecal.unsupported[0]?.reason, "missing-decal-binding");
+assert.equal(unboundDecal.decals.length, 0);
+const boundDecal = applyProcPlantOrganPlacementOverrides(graph, target, decalAppend.package, { decalBindings: [decalBinding] });
+assert.equal(boundDecal.changed, true);
+assert.deepEqual(boundDecal.appliedOperationIds, [decalAppend.operation.id]);
+assert.equal(boundDecal.decals.length, 1);
+assert.equal(boundDecal.decals[0]?.materialId, decalBinding.materialId);
+assert.equal(boundDecal.decals[0]?.textureId, decalBinding.textureId);
+assert.equal(boundDecal.decals[0]?.template.pos.length / 3, 4);
+assert.equal(boundDecal.decals[0]?.template.idx.length / 3, 2);
+assert.deepEqual([...boundDecal.decals[0]!.template.uv0], [0.125, 0.75, 0.375, 0.75, 0.375, 0.25, 0.125, 0.25]);
+assert(boundDecal.decals[0]!.template.nrm.every(Number.isFinite));
+const decalJson = JSON.parse(serializeProcPlantOrganPlacementPackage(decalAppend.package));
+assert.deepEqual(decalJson.operations[0].decal, decalBinding);
+
+const legacyPackage: ProcPlantOrganPlacementPackage = {
+  ...createProcPlantOrganPlacementPackage(target),
+  version: PROCPLANT_ORGAN_PLACEMENT_LEGACY_VERSION,
+  operations: [expandedPackage.operations[0]!],
+};
+const legacyExpanded = applyProcPlantOrganPlacementOverrides(graph, target, legacyPackage);
+assert.strictEqual(legacyExpanded.graph, graph);
+assert.equal(legacyExpanded.unsupported[0]?.reason, "unsupported-kind");
+const legacyLeaf = applyProcPlantOrganPlacementOverrides(graph, target, {
+  ...legacyPackage,
+  operations: [first.operation],
+});
+assert.equal(legacyLeaf.changed, true);
+assert.equal(legacyLeaf.graph.organs.at(-1)?.kind, "leaf");
 
 const moved = graphFixture();
 moved.stems[1]!.position.set(2, 2, 1);

@@ -53,6 +53,7 @@ assert.ok(interactive.gzipBytes <= 280_000, `interactive static closure grew bey
 const forbiddenStaticEntries = [
   "node_modules/@dgreenheck/ez-tree/build/ez-tree.es.js",
   "src/procplant-graph-editor-ui.ts",
+  "src/procplant-spatial-force-editor-ui.ts",
   "src/procplant-material-graph-editor-ui.ts",
   "src/procplant-authoring-tools.ts",
   "src/procplant-crown-volume-tool.ts",
