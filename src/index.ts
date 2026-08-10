@@ -2,6 +2,7 @@ export * from "./procplant-contract";
 export * from "./procplant-crown-light";
 export * from "./procplant-crown-mask-fit";
 export * from "./procplant-crown-voxel-mask-fit";
+export * from "./procplant-crown-light-pruning";
 export * from "./procplant-chain-tube-overrides";
 export * from "./procplant-cutout";
 export * from "./procplants";
