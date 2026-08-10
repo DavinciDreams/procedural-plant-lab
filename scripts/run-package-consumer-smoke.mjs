@@ -92,6 +92,7 @@ import {
 } from "procplants/core";
 import {
   buildProcPlantGraph as buildProcPlantGraphFromFullEntry,
+  fitProcPlantCrownMask,
   type ProcPlantGraph,
 } from "procplants";
 
@@ -100,11 +101,16 @@ const kind: ProcPlantSupportedInstanceKind = "fernFrond";
 const graph: ProcPlantGraph = buildProcPlantGraph(genome, 612072, defaultPlantEnvironment());
 const fullGraph: ProcPlantGraph = buildProcPlantGraphFromFullEntry(genome, 612072, defaultPlantEnvironment());
 const prototype: ProcPlantTemplate = buildProcPlantInstancePrototype(kind, genome);
+const maskFit = fitProcPlantCrownMask({ width: 2, height: 2, alpha: Uint8Array.of(0, 255, 255, 255) }, {
+  bands: 2,
+  bounds: { center: [0, 1, 0], dimensions: [2, 2, 1] },
+});
 
 if (PROCPLANT_GENERATOR_CONTRACT_REVISION !== 3) throw new Error("unexpected contract revision");
 if (PROCPLANT_SUPPORTED_INSTANCE_KINDS.length !== 20) throw new Error("unexpected kind registry");
 if (graph.organs.length !== fullGraph.organs.length) throw new Error("entrypoint graph drift");
 if (prototype.uv0.length !== prototype.pos.length / 3 * 2) throw new Error("UV0 contract drift");
+if (maskFit.crown.volumes.length !== 2) throw new Error("crown-mask fit export drift");
 console.log(JSON.stringify({ revision: PROCPLANT_GENERATOR_CONTRACT_REVISION, kind, triangles: prototype.idx.length / 3 }));
 `);
   await writeFile(join(consumerRoot, "src", "runtime.mjs"), `
