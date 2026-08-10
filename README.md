@@ -182,7 +182,7 @@ npm run test:tellus-contract
 - `src/procplants.ts` is the generator core.
 - `src/main.ts` is the standalone Three.js demo.
 - `src/plant-readiness.ts` provides exact structural export QA.
-- `src/procplant-wind.ts` installs the shared GPU wind deformation and attributes.
+- `src/procplant-wind.ts` installs the exact-compatible V1 GPU wind path and the lab's opt-in hierarchical V2 trunk/branch/leaf deformation for visible and shadow materials.
 - `src/procplant-lod.ts` compiles/caches hero LODs off-thread and selects them with hysteresis.
 - `src/procplant-contract.ts` defines and validates the shared runtime/Tellus/GLB LOD selection contract.
 - `src/procplant-debug.ts` builds disposable, allocation-free authoring overlays.
@@ -197,9 +197,9 @@ npm run test:tellus-contract
 - `src/procplant-impostor-three.ts` captures live Three.js views, installs textured billboards, and exports embedded-atlas GLB.
 - `src/procplant-dense-impostor-pool.ts` batches dense static billboard placements into deterministic atlas-view buckets.
 - `src/procplant-generator-graph.ts` defines deterministic typed generator DAGs and serializable manual operations.
-- `src/procplant-production-dag.ts` executes typed artifacts for the standard graph backend and a fail-closed Weber-Penn specialization without claiming arbitrary topology recompilation.
 - `src/procplant-authoring-graph.ts` derives a live nine-stage graph and preview from any authored genome.
-- `src/procplant-production-dag.ts` executes typed graph-native, space-colonization, branch-module, guided-vine, and bounded non-clumped grass/generic-groundcover/standalone-fern/non-vine-moss artifacts while retaining exact canonical legacy output and rejecting unsupported specialized forms.
+- `src/procplant-production-dag.ts` executes typed graph-native, space-colonization, branch-module, guided-vine, bounded herbaceous, Weber-Penn, clump, Daylily, and bespoke broad-patch artifacts while retaining exact canonical legacy output and rejecting non-representable edits.
+- `src/procplant-graph-editor-controls.ts` validates canonical stage activation/removal, same-stage settings copy/paste, and supported placement/scope controls without inventing extra-node topology.
 - `src/procplant-rules.ts` applies safe environmental and authoring macro rules to allow-listed genome fields.
 - `src/procplant-guide-query.ts` samples primitive scene guides, obstacle clearance, and deterministic growth-tip steering.
 - `src/procplant-mesh-query.ts` builds bounded deterministic triangle BVHs for imported-mesh clearance and obstacle queries.
@@ -222,13 +222,14 @@ npm run test:tellus-contract
 - `src/procplant-webgpu-visibility-runtime.ts` executes that plan on an injected WebGPU device while owning/reusing buffers and exposing opt-in readback validation.
 - `src/procplant-webgpu-indirect-draw.ts` exposes allocation-stable per-LOD compacted-index bindings and records one indexed-indirect draw per LOD without taking ownership of runtime buffers.
 
-The injected-device runtime is available from the explicit `procplants/webgpu` package entry. It is excluded from both the default browser startup graph and `procplants/core`; importing the existing plan API from the root/core entries remains supported.
+The injected-device runtime is available from the explicit `procplants/webgpu` package entry. It is excluded from both the default browser startup graph and `procplants/core`; importing the existing plan API from the root/core entries remains supported. Tellus currently defaults to its faster WebGL renderer and does not exercise this path.
 - `src/procplant-organ-placement-overrides.ts` serializes and applies target-bound branch-relative leaf/flower/fruit placements.
 - `src/procplant-resource-growth.ts` allocates maintenance, reserves, and growth from directional light resources.
 - `src/procplant-crown-light.ts` samples bounded deterministic stem/organ occlusion and adapts it directly to resource growth.
 - `src/procplant-graph-resource-growth.ts` adapts public segment IR to vigor and self-prune recommendations.
 - `src/procplant-growth-simulation.ts` persists deterministic multi-step reserve, activation, growth, and prune evidence.
 - `src/procplant-growth-topology.ts` applies graph-bound confirmed self-prune and terminal dormant-bud shoot plans with exact audits.
+- `src/procplant-damage-topology.ts` applies opt-in target-bound missing-organ and broken-branch topology with repaired ancestry, capped scar records, and exact healthy/no-op reuse.
 - `src/procplant-weber-penn-trim.ts` serializes and audits stable attachment-level Weber-Penn trim overrides.
 - `src/procplant-space-colonization.ts` supplies deterministic attraction-volume growth foundations.
 - `src/procplant-spatial-force.ts` applies bounded localized force fields to public graph topology and rederives frames/attachments.

@@ -68,7 +68,7 @@ These are deterministic scene-structure and cost checks. They do not instantiate
 
 ## Delivery sequence
 
-1. Land the linear Procplants package/fern/declaration stack so exact SHA `e3a69da...` is reachable from `main`.
+1. Completed: Procplants PR #10 landed the linear package/fern/declaration foundation on `main` as merge commit `31a16bd1b21d5236a93a97af34c5ad196482968a`; exact SHA `e3a69da...` is now reachable.
 2. Publish and merge the validated cumulative Procplants integration rather than sequentially merging its many mutually conflicting draft siblings.
 3. Merge Tellus #177 into `master`.
 4. Retarget #178 to `master`, rerun CI, and merge it.

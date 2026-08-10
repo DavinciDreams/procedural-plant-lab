@@ -11,51 +11,56 @@ This report separates deterministic geometry/build evidence from live standalone
 | Resource | Raw | Gzip | Load policy |
 | --- | ---: | ---: | --- |
 | Bootstrap entry | 0.95 kB | 0.53 kB | Initial; paints explicit loading/error state and starts the lab import |
-| Lab application | 106.20 kB | 32.75 kB | Dynamic bootstrap dependency |
-| Shared generator/presets | 798.83 kB | 208.61 kB | Dynamic bootstrap dependency; fetched with the lab and includes required generated UV0 |
-| Styles | 5.76 kB | 1.95 kB | Initial |
+| Dynamic preload helper | 1.82 kB | 0.93 kB | Initial bootstrap dependency |
+| Lab application | 141.35 kB | 42.36 kB | Dynamic bootstrap dependency; includes the opt-in hierarchical-wind installation seam |
+| Shared generator/presets | 852.04 kB | 224.06 kB | Dynamic bootstrap dependency; fetched with the lab and includes required generated UV0 |
+| Styles | 8.40 kB | 2.47 kB | Initial |
+| Enforced interactive static closure | 1,004.56 kB | 269.32 kB | Entry, helper, styles, lab, and shared presets; capped at 1.05 MB raw / 280 kB gzip by `test:startup-load` |
 | Three.js visibility/LOD adapter | 6.75 kB | 2.05 kB | Lazy after worker-backed LOD installation; live frustum-mask integration |
 | Visibility cluster selector | 6.90 kB | 2.58 kB | Lazy with the visibility adapter |
 | `procplants/webgpu` package entry | 48.17 kB | 13.26 kB | Explicit downstream import only; includes planning, injected-device execution, and indexed-indirect encoding while remaining absent from browser startup/root/core entry graphs |
 | Instance LOD pool | 8.69 kB | 2.77 kB | Lazy after worker-backed LOD installation |
-| Generator graph editor + authoring adapter | 46.51 kB | 13.62 kB | Lazy |
+| Generator graph editor + authoring adapter | 117.55 kB | 30.62 kB | Lazy; includes validated stage activation, same-stage copy/paste, placement/scope controls, and diagnostics |
 | Macro rules | 10.06 kB | 3.04 kB | Lazy; loaded only for non-zero macros |
-| Cutout tracing/topology | 15.57 kB | 5.89 kB | Lazy |
+| Cutout tracing/topology | 16.31 kB | 6.15 kB | Lazy; includes authored card-normal orientation |
 | Cutout point/freehand editor | 9.49 kB | 3.71 kB | Lazy after opening the editor |
 | Three.js impostor capture/runtime | 25.37 kB | 8.69 kB | Lazy after explicit bake; includes live normal/depth/season adoption and channel export |
 | Grouped UV/tangent Three geometry | 4.95 kB | 2.02 kB | Lazy after explicit PBR bake or GLB authoring; default preview uploads no tangent/secondary-UV buffers |
 | Live baked Three PBR adapter | 11.86 kB | 4.18 kB | Lazy after explicit PBR bake; owns color-space-correct base/ORM/normal textures |
 | Impostor atlas compiler | 11.25 kB | 4.27 kB | Shared lazy chunk |
 | Dense impostor placement pool | 7.66 kB | 2.75 kB | Lazy after explicit bake with a matching cohort |
-| Debug, pruning, trim, and GLB authoring facade | 33.55 kB | 11.62 kB | Lazy on first authoring interaction |
-| Crown-volume viewport handles | 14.74 kB | 4.35 kB | Lazy after enabling Crown Handles; includes transformed positive/subtractive lobe state/tools |
+| Debug, pruning, trim, and GLB authoring facade | 21.22 kB | 6.73 kB | Lazy on first authoring interaction |
+| Crown-volume viewport handles | 16.24 kB | 4.64 kB | Lazy after enabling Crown Handles; includes transformed positive/subtractive lobe and spline state/tools |
 | Branch-relative organ placement overrides | 6.56 kB | 2.43 kB | Lazy after entering Place mode |
-| Hero GLB spine authoring + material baking | 46.85 kB | 15.14 kB | Lazy after explicit import or material bake; loader code remains split |
+| Hero GLB spine authoring + material baking | 60.77 kB | 19.65 kB | Lazy after explicit import or material bake; loader code remains split |
 | Hero manual-spine viewport editor | 10.12 kB | 3.32 kB | Lazy after enabling Spine Handles on an imported hero |
 | Three GLTFLoader | 44.72 kB | 13.50 kB | Lazy with GLB import/validation |
 | Three KTX2Loader | 59.47 kB | 24.24 kB | Lazy with KTX2-bearing imported GLBs; loader support is not texture encoding |
 | Per-organ seasonal/material masks | 3.22 kB | 1.53 kB | Lazy on JSON export; also available from the runtime library |
-| Asset QA | 6.50 kB | 2.50 kB | Lazy |
+| Asset QA | 8.79 kB | 2.90 kB | Lazy; every named profile carries explicit texture/LOD/wind/billboard/collision/metadata policy |
 | Procplant GLB facade | 12.38 kB | 4.91 kB | Lazy |
 | Three GLB exporter | 36.34 kB | 10.76 kB | Lazy |
 | Meshopt encoder | 20.60 kB | 8.24 kB | Lazy and opt-in during compressed GLB export |
 | EZ-tree vendor backend | 3,998.39 kB | 2,986.72 kB | Separate optional worker/backend chunk |
 
-The complete reusable ESM entry is 915.48 kB raw / 232.54 kB gzip transitively after adding the public grouped-surface, tangent-ready Three geometry, live baked-material, grouped GLB-binding, growth/topology, crown-light, mesh/BVH, PNG, handler-backed graph-authoring, collar, attachment-relaxation, dense/multi-channel impostor, spatial-force, organ-placement/variants, Weber-Penn trim, runtime LOD, USDA, multi-scene and instanced export, meshopt, GLB validation/hero import and spine authoring/editor, clustered visibility, WebGPU visibility planning, and constructive-crown APIs. The `procplants/core` runtime/Tellus entry is 359.14 kB raw / 83.97 kB gzip transitively: 60.8% less raw and 63.9% less gzip than the full entry, with no GLTFExporter, Three PBR/tangent adapter, meshopt encoder/decoder, GLB importer/validator, hero-spine authoring, material authoring/baking/binding graph, LOD-worker dependency, or injected-device WebGPU runtime. It does include generated UV0, renderer-independent surface-partition and CPU/WebGPU visibility contracts, and compiler/runtime contracts for downstream dense vegetation. The explicit `procplants/webgpu` entry is 48.17 kB raw / 13.26 kB gzip transitively, including the shared plan/oracle chunk; it is not in either default entry graph. Reproducibility checks cover every emitted file. The expensive EZ-tree backend is not folded into these library entries. Three.js is a peer (`>=0.183.2 <0.184.0`) tested at the same 0.183.2 runtime/0.183.1 types used by Tellus; Vite tooling is development-only and `prepare` rebuilds packed or Git installs. The final dry-run package is 443,104 bytes packed / 1,760,770 bytes unpacked across 177 entries.
+The complete reusable ESM entry is 1,149,741 bytes raw / 288,432 bytes gzip transitively after adding the public grouped-surface, tangent-ready Three geometry, live baked-material, grouped GLB-binding, damage/growth/topology, crown-light, mesh/BVH, PNG, validated graph authoring, specialized typed DAG adapters, collar, attachment-relaxation, dense/multi-channel impostor, spatial-force, organ-placement/variants, Weber-Penn trim, runtime LOD, USDA, multi-scene and instanced export, meshopt, GLB validation/hero import and spine authoring/editor, clustered visibility, WebGPU visibility planning, and constructive-crown APIs. The `procplants/core` runtime/Tellus entry is 551,301 bytes raw / 129,227 bytes gzip transitively: 52.1% less raw and 55.2% less gzip than the full entry, with no GLTFExporter, Three PBR/tangent adapter, meshopt encoder/decoder, GLB importer/validator, hero-spine authoring, material authoring/baking/binding graph, LOD-worker dependency, full-entry damaged-topology module, or injected-device WebGPU runtime. It includes generated UV0, renderer-independent surface-partition and CPU/WebGPU visibility plans, the generator/contract surface, and typed compiler/runtime contracts needed by downstream dense vegetation. The explicit `procplants/webgpu` entry is 48,174 bytes raw / 13,256 bytes gzip transitively, including the shared plan/oracle chunk; it is absent from both default browser startup and `procplants/core`. Reproducibility checks cover every emitted file. The expensive EZ-tree backend is not folded into these library entries. Three.js is a peer (`>=0.183.2 <0.184.0`) tested at the same 0.183.2 runtime/0.183.1 types used by Tellus; Vite tooling is development-only and `prepare` rebuilds packed or Git installs. The final dry-run package is 538,438 bytes packed / 2,165,052 bytes unpacked across 207 entries.
 
-After the new authoring controls were present, the explicit bootstrap makes the parser-discovered JavaScript entry 0.95 kB raw / 0.53 kB gzip instead of the previous 103.60 / 31.96 kB lab entry. It paints a real loading/error state, then Vite's dynamic-preload helper fetches the 106.20/32.75 kB lab and 798.83/208.61 kB shared generator dependency together. This improves first-paint and initial parse work; it does not claim lower total bytes before the first plant is interactive. The 4.95/2.03 kB tangent geometry adapter, 11.86/4.18 kB live PBR adapter, and 10.12/3.32 kB manual-spine editor remain lazy. A browser resource-timing assertion proves graph, material/import, tangent, macro, contour, and crown authoring chunks are absent before their first interaction.
+After the new authoring controls were present, the explicit bootstrap keeps the parser-discovered JavaScript entry at 0.95 kB raw / 0.53 kB gzip. It paints a real loading/error state, then Vite's dynamic-preload helper fetches the 141.35/42.36 kB lab and 852.04/224.06 kB shared generator dependency together. This improves first-paint and initial parse work; it does not claim lower total bytes before the first plant is interactive. The complete parser-discovered interactive static closure is now regression-capped and measures 1,004,561 raw / 269,324 gzip bytes. The 4.95/2.03 kB tangent geometry adapter, 11.91/4.19 kB live PBR adapter, 10.12/3.32 kB manual-spine editor, and 117.55/30.62 kB graph editor remain lazy. A browser resource-timing assertion proves graph, material/import, tangent, macro, contour, crown, vendor-tree, and WebGPU implementation chunks are absent before their first interaction.
 
 ## Geometry reductions
 
-Close-range deterministic compiler measurements:
+Canonical seed `612072` is frozen by `test:conifer-fern-budget` with exact geometry hashes:
 
-| Preset | Before | After | Reduction |
-| --- | ---: | ---: | ---: |
-| Phi Fern, full clump | 13,424 tris | 1,872 tris | 86.1% |
-| Phi Fern, baked card component | 4,044 tris | 312 tris | 92.3% |
-| Blue Spruce | 11,780 tris | 4,230 tris | 64.1% |
-| Alpine Fir | 15,444 tris | 5,190 tris | 66.4% |
-| Redwood Spire | 10,776 tris | 3,888 tris | 63.9% |
+| Preset | Current LOD triangles | Current LOD vertices | Audited earlier close tier | Close-tier reduction |
+| --- | ---: | ---: | ---: | ---: |
+| Phi Fern | 352 / 264 / 4 / 2 | 1,056 / 792 / 8 / 4 | 1,872 frozen v2 | 81.2% |
+| Blue Spruce | 3,934 / 2,494 / 4 / 2 | 7,324 / 3,942 / 8 / 4 | 11,780 | 66.6% |
+| Alpine Fir | 5,190 / 3,174 / 4 / 2 | 8,388 / 4,509 / 8 / 4 | 15,444 | 66.4% |
+| Redwood Spire | 3,896 / 2,540 / 4 / 2 | 6,765 / 3,710 / 8 / 4 | 10,776 | 63.8% |
+| Tundra Small Pine | 3,678 / 2,354 / 4 / 2 | 7,148 / 3,826 / 8 / 4 | not frozen | not claimed |
+| Shore Pine | 1,596 / 1,080 / 4 / 2 | 4,692 / 3,168 / 8 / 4 | not frozen | not claimed |
+
+The older downstream Tellus Phi implementation materialized 6,384 close triangles, but that is a different consumer path rather than the producer's frozen v2 baseline. The converged producer emits one broad eight-frond crown at 352 close triangles and roughly 1.23 by 1.61 ground coverage.
 
 The new broad-area ground covers use cards/low-poly organs and are covered by regression budgets. Close LOD counts remain strictly decreasing and terminate at four-triangle crossed cards and two-triangle single cards.
 
@@ -80,6 +85,8 @@ Multi-channel impostors cost `width × height × 4` bytes per channel/view. At 1
 The real Chrome WebGL 2 smoke captured aligned 51x72 summer/winter color/normal/depth atlases through ANGLE Vulkan SwiftShader. Its alpha-tested checkerboard preserved 512 opaque and 512 transparent interior pixels; the enhanced hero, color-only hero, and dense path produced distinct stable hashes; two visible dense placements used one draw and shared the hero material; and target face/mip, viewport, scissor, clear, XR, and source-material state all restored exactly. This proves browser shader execution and standalone adoption, not Tellus material adoption or native-GPU performance.
 
 The production browser UI smoke also baked a mixed Clover plant into six 256x256 RGBA resources, installed two normal-mapped live materials over four exact source ranges with explicit tangents, and audited 1,572,864 owned texture bytes. Its real toolbar export emitted a deterministic material-bound GLB hash and mapped both active-LOD primitives to explicit baked slots. The default path still allocates no tangent/secondary-UV GPU buffers and fetches neither Three PBR adapter before the user selects Bake.
+
+The lab's opt-in hierarchical WebGL wind path derives two render-only attributes totaling 13 bytes per vertex. A SwiftShader WebGL2 material/shadow gate classified 77 tested vertices as leaves (1,001 attribute bytes), changed 19,779 framebuffer bytes after a wind update, changed 20,952 bytes when the shadow path was toggled, and reported no shader error. The historical V1 installer remains the default. Combined canonical templates without `branchOrder` separate stems from leaves but deliberately do not invent trunk-versus-branch bands; authored tubes with branch metadata receive the full hierarchy. This is shader correctness evidence, not representative-device FPS.
 
 A deterministic two-variant, four-real-LOD, bounds-collision sample with UV0 and explicit bark/organ primitives occupies 473,092 bytes as one multi-scene GLB versus 447,300 bytes as separate GLBs: 25,792 bytes (5.77%) of honest scene/root/runtime-LOD-metadata/collision-isolation overhead in exchange for one addressable asset.
 
@@ -111,31 +118,29 @@ The final headless Chrome check reproduced the Phi Fern values and reported no p
 - The hero LOD3 and matching live biome far placements use the baked atlas after an explicit 16-view bake. Other species/seeds and all sessions without a user bake keep geometric far cards; startup never captures atlases.
 - Ground-cover pool savings start after the worker result; initial fallback generation still occurs so failure cannot blank the scene.
 - Scattered instances only cast shadows for `tree`, `conifer`, and `palm` habits, and ground-cover LOD pools set `castShadow` false, so in shrub/vine/ground-cover scenes the hero is the only shadow caster. This reads as intentional render-pressure control but is an unannotated conditional; confirm it against the Tellus shadow budget before treating it as contract.
-- These measurements prove the standalone Procplants build. Tellus owns different chunking, render-pressure, shadow, asset-substitution, and deployment behavior; the integration handoff requires opt-in runtime validation there.
+- These measurements prove the standalone Procplants build. Tellus owns different chunking, render-pressure, shadow, asset-substitution, renderer choice, and deployment behavior. Tellus defaults to WebGL because it is currently faster there, so its required acceptance test is a controlled WebGL field run; Procplants' opt-in WebGPU evidence is not a substitute.
 
 ## Tellus parity worktree evidence
 
-The isolated Tellus `origin/master` worktree accepts the strengthened producer
-fixture and compiles a selective cost-only parity port without changing any
-automatic biome/default policy. At seed 612072, Tellus materialized Phi Fern at
-352 rather than 6,384 triangles, Clover at 1,226 rather than 1,574, Blue Spruce
-at 5,398 rather than 11,840, and Alpine Fir at 6,750 rather than 15,824. Phi
-retains an approximately 1.23 by 1.61 footprint and Clover 1.11 by 1.29. The
-Tellus typecheck, full 54-test vegetation suite, contract/cost tests, and
-production build pass. This proves local source/build compatibility only; no
-served world, GPU frame profile, default asset substitution, or deployment was
-changed.
+Draft Tellus PR #177 removes the 5,782-line vendored generator, exact-pins the
+Procplants package foundation, and uses a thin `procplants/core` contract-v3
+adapter with UV0 and exhaustive dispatch for all 20 instance kinds. Its frozen
+automatic-ecology allowlist contains the existing 13 presets, so new varieties
+remain opt-in. Installed-package fixture parity, 427 tests, strict typecheck,
+and the production build pass. The pin predates the cumulative authoring stack
+and must be refreshed to the final merged SHA or immutable release.
 
-The final companion worktree adds placement-only Maidenhair Fern and Woodland
-Violet templates at 2,112 and 2,276 close triangles (Clover remains 1,226),
-keeps all three out of automatic mappings, and passes 57 focused tests. Against
-the same baseline, the `tellus-procplant-biomes` chunk grows 2,198 raw bytes
-(1.43%) and 508 level-9 gzip bytes (1.21%); main and shared Three.js stay
-effectively byte-identical.
+Stacked draft #178 adopts package LOD0/LOD1/LOD2 geometry for eleven audited
+ground-cover cohorts. The deterministic 49-chunk reference places 180 plants
+as 114 renderer instances across 110.243 by 111.407 metres at 51,304 triangles
+and 184 non-empty draws, with no ground-cover shadow casters, receivers, or
+proxies. Its grass-coexistence case adds 1,712 grass instances at 75,016 total
+triangles and 9 draws without ground-cover shadows. Nine new ground covers are
+placement-only. The low-FPS queue test proves bounded scheduling, not frame
+rate.
 
-A byte-for-byte production-bundle comparison against a second clean
-`origin/master` worktree localizes the integration cost to the procplant-biomes
-chunk: 154,248 to 155,163 raw bytes (+915, 0.59%) and 42,042 to 42,322 gzip
-bytes (+280, 0.67%). The main bundle is byte-identical in raw size, vendor-three
-is identical, and the other compared route chunks differ by at most three gzip
-bytes.
+Against clean Tellus `origin/master`, #177's production JavaScript sum grew by
+104,006 raw bytes (+1.09%) and 30,839 level-9 gzip bytes (+1.06%). Both Tellus
+PRs are open drafts with green CI. Their tests construct deterministic Three.js
+scene state but do not exercise the default browser WebGL renderer, measure GPU
+time/FPS on a representative device, or prove served/deployed capacity.

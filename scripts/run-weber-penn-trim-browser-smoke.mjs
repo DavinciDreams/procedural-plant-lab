@@ -57,6 +57,7 @@ try {
   await waitForOk(`http://127.0.0.1:${appPort}/`);
   browser = spawn(chrome, [
     "--headless=new", "--disable-gpu", "--no-first-run", "--disable-extensions",
+    "--disable-breakpad", "--disable-crash-reporter",
     `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profile}`,
     `http://127.0.0.1:${appPort}/`,
   ], { stdio: "ignore", windowsHide: true });
@@ -260,5 +261,13 @@ try {
   };
   await stop(browser);
   await stop(preview);
-  await rm(profile, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  for (let attempt = 0; attempt < 10; attempt++) {
+    try {
+      await rm(profile, { recursive: true, force: true, maxRetries: 2, retryDelay: 100 });
+      break;
+    } catch (error) {
+      if (attempt === 9) console.warn(`browser profile cleanup deferred: ${String(error)}`);
+      await new Promise((resolveWait) => setTimeout(resolveWait, 250));
+    }
+  }
 }
