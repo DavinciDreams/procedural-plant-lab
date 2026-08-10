@@ -3,9 +3,11 @@ import { createHash } from "node:crypto";
 import * as THREE from "three";
 import {
   buildProcPlantInstancedParts,
+  buildProcPlantInstancePrototype,
   buildProcPlantTemplate,
   compileProcPlantLods,
   createProcPlantConiferSprayGeometry,
+  createProcPlantFernFrondGeometry,
   defaultPlantEnvironment,
   procPlantPresets,
   type ProcPlantTemplate,
@@ -15,9 +17,10 @@ const SEED = 612072;
 const EXPECTED = {
   phiFern: {
     triangles: [352, 264, 4, 2],
-    vertices: [1056, 792, 8, 4],
+    vertices: [704, 528, 8, 4],
     beforeVertices: [1056, 792, 8, 4],
     expandedPositionHash: "afc72b92ffd52e8d54bf1d214465a8e1e9ef227faa3f8f868fafa22bb85a431a",
+    frondCount: 8,
   },
   blueSpruce: {
     triangles: [3934, 2494, 4, 2],
@@ -126,6 +129,50 @@ for (const [detail, expectedVertices, expectedTriangles] of [
   geometry.dispose();
 }
 
+{
+  const geometry = createProcPlantFernFrondGeometry();
+  const position = geometry.getAttribute("position");
+  const normal = geometry.getAttribute("normal");
+  const uv0 = geometry.getAttribute("uv");
+  const index = geometry.getIndex();
+  assert.equal(position.count, 88, "fern frond must retain 22 indexed folded quads");
+  assert.equal(normal.count, position.count, "fern frond must retain one normal per shared vertex");
+  assert.equal(uv0.count, position.count, "fern frond must retain one UV0 pair per shared vertex");
+  assert.equal(index?.count, 132, "fern frond must retain 44 triangles");
+  assert.equal(new Set(Array.from(index!.array)).size, position.count, "every fern prototype vertex must be referenced");
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const c = new THREE.Vector3();
+  const face = new THREE.Vector3();
+  const edge = new THREE.Vector3();
+  const vertexNormal = new THREE.Vector3();
+  let minimumNormalAlignment = 1;
+  for (let vertex = 0; vertex < position.count; vertex++) {
+    vertexNormal.fromBufferAttribute(normal, vertex);
+    assert.ok(Math.abs(vertexNormal.length() - 1) < 1e-5, "fern frond normals must remain unit length");
+    assert.ok(uv0.getX(vertex) >= 0 && uv0.getX(vertex) <= 1, "fern frond U must stay normalized");
+    assert.equal(uv0.getY(vertex), position.getY(vertex), "fern frond V must follow axial position");
+  }
+  for (let offset = 0; offset < index!.count; offset += 3) {
+    const ia = index!.getX(offset);
+    const ib = index!.getX(offset + 1);
+    const ic = index!.getX(offset + 2);
+    a.fromBufferAttribute(position, ia);
+    b.fromBufferAttribute(position, ib);
+    c.fromBufferAttribute(position, ic);
+    face.subVectors(b, a).cross(edge.subVectors(c, a));
+    if (face.lengthSq() < 1e-12) continue;
+    face.normalize();
+    for (const vertex of [ia, ib, ic]) {
+      vertexNormal.fromBufferAttribute(normal, vertex).normalize();
+      minimumNormalAlignment = Math.min(minimumNormalAlignment, face.dot(vertexNormal));
+    }
+  }
+  assert.ok(minimumNormalAlignment > 0.8,
+    `fern frond normals must remain aligned with the folded surface; received ${minimumNormalAlignment}`);
+  geometry.dispose();
+}
+
 const summaries = [];
 for (const [id, expected] of Object.entries(EXPECTED)) {
   const genome = procPlantPresets[id];
@@ -155,7 +202,19 @@ for (const [id, expected] of Object.entries(EXPECTED)) {
   assert.ok(vertices[1]! < vertices[0]!, `${id} clustered LOD must reduce vertices`);
   assert.equal(triangles[2], 4, `${id} far cross must stay four triangles`);
   assert.equal(triangles[3], 2, `${id} far impostor must stay two triangles`);
-  if (id !== "phiFern") {
+  if (id === "phiFern") {
+    assert.ok("frondCount" in expected, "Phi Fern budget must declare its canonical frond count");
+    assert.ok(vertices[0]! <= expected.beforeVertices[0]! * 0.7,
+      "Phi Fern must retain at least a 30% LOD0 vertex reduction from the dedicated-frond baseline");
+    const parts = buildProcPlantInstancedParts(genome, SEED, environment);
+    assert.equal(parts.stems.idx.length, 0, "Phi Fern must remain an eight-frond crown without baked stems");
+    assert.equal(parts.instances.length, expected.frondCount, "Phi Fern frond count drifted");
+    assert.ok(parts.instances.every((instance) => instance.kind === "fernFrond"),
+      "Phi Fern must retain only dedicated fernFrond instances");
+    const prototype = buildProcPlantInstancePrototype("fernFrond", genome);
+    assert.equal(prototype.idx.length / 3, 44, "dedicated fern prototype triangle count drifted");
+    assert.equal(prototype.pos.length / 3, 88, "dedicated fern prototype indexed vertex count drifted");
+  } else {
     assert.ok(triangles[0]! <= 5_200, `${id} exceeds the audited close conifer budget`);
     assert.ok(vertices[0]! <= 8_400, `${id} exceeds the audited close conifer vertex budget`);
     assert.ok(vertices[0]! <= expected.beforeVertices[0]! * 0.85,
@@ -207,5 +266,5 @@ for (const [id, expected] of Object.entries(EXPECTED)) {
   });
 }
 
-console.log(JSON.stringify({ seed: SEED, revision: "indexed-spray-revision", summaries }, null, 2));
+console.log(JSON.stringify({ seed: SEED, revision: "indexed-organ-revision", summaries }, null, 2));
 console.log("procplant conifer/fern geometry budgets passed");

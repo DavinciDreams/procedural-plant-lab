@@ -6687,14 +6687,33 @@ export const createProcPlantConiferSprayGeometry = (detail: "full" | "light" = "
 export const createProcPlantFernFrondGeometry = (): THREE.BufferGeometry => {
   const positions: number[] = [];
   const normals: number[] = [];
+  const uvs: number[] = [];
   const indices: number[] = [];
-  const addQuad = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3) => {
+  const addQuad = (
+    a: THREE.Vector3,
+    b: THREE.Vector3,
+    c: THREE.Vector3,
+    d: THREE.Vector3,
+    uv0: readonly [number, number],
+    uv1: readonly [number, number],
+    uv2: readonly [number, number],
+    uv3: readonly [number, number],
+  ) => {
     const base = positions.length / 3;
-    const normal = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a)).normalize();
+    const normal = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a));
+    // The basal half-width is intentionally zero, so its first triangle is
+    // degenerate. Use the second triangle's plane for that quad instead of
+    // uploading a zero normal; rendered positions and triangle topology stay
+    // unchanged.
+    if (normal.lengthSq() < 1e-12) {
+      normal.subVectors(c, a).cross(new THREE.Vector3().subVectors(d, a));
+    }
+    normal.normalize();
     for (const point of [a, b, c, d]) {
       positions.push(point.x, point.y, point.z);
       normals.push(normal.x, normal.y, normal.z);
     }
+    for (const uv of [uv0, uv1, uv2, uv3]) uvs.push(uv[0], uv[1]);
     indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
   };
   const halfWidth = (y: number) => {
@@ -6718,18 +6737,28 @@ export const createProcPlantFernFrondGeometry = (): THREE.BufferGeometry => {
       new THREE.Vector3(-width0, y0, fold0 + sag0),
       new THREE.Vector3(-width1, y1, fold1 + sag1),
       new THREE.Vector3(0, y1, sag1),
+      [0.5, y0],
+      [0, y0],
+      [0, y1],
+      [0.5, y1],
     );
     addQuad(
       new THREE.Vector3(0, y0, sag0),
       new THREE.Vector3(0, y1, sag1),
       new THREE.Vector3(width1, y1, -fold1 + sag1),
       new THREE.Vector3(width0, y0, -fold0 + sag0),
+      [0.5, y0],
+      [0.5, y1],
+      [1, y1],
+      [1, y0],
     );
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
   geometry.setIndex(indices);
+  declareProcPlantGeometryUv0(geometry);
   geometry.computeBoundingSphere();
   return geometry;
 };
@@ -8366,7 +8395,7 @@ export const buildProcPlantTemplateFromGraph = (
     } else if (organ.kind === "fernFrond") {
       const inst = fernFrondInstance(genome, organ);
       const geo = createProcPlantFernFrondGeometry();
-      addTransformedGeometry(builder, geo, inst.matrix, inst.color, inst.sway);
+      addTransformedIndexedGeometry(builder, geo, inst.matrix, inst.color, inst.sway);
       geo.dispose();
       leafCount++;
     } else if (organ.kind === "palmFrond") {
@@ -8514,7 +8543,7 @@ export const buildProcPlantInstancePrototype = (
   const geometry = geometryForCompiledInstance(kind, genome);
   const builder = new TemplateBuilder();
   try {
-    if (kind === "coniferSpray") {
+    if (kind === "coniferSpray" || kind === "fernFrond") {
       addTransformedIndexedGeometry(builder, geometry, new THREE.Matrix4(), new THREE.Color(0xffffff), 1);
     } else {
       addTransformedGeometry(builder, geometry, new THREE.Matrix4(), new THREE.Color(0xffffff), 1);
@@ -8538,7 +8567,7 @@ export const materializeProcPlantParts = (
       geometry = geometryForCompiledInstance(instance.kind, genome);
       geometries.set(instance.kind, geometry);
     }
-    if (instance.kind === "coniferSpray") {
+    if (instance.kind === "coniferSpray" || instance.kind === "fernFrond") {
       addTransformedIndexedGeometry(builder, geometry, instance.matrix, instance.color, instance.sway);
     } else {
       addTransformedGeometry(builder, geometry, instance.matrix, instance.color, instance.sway);

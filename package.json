@@ -145,6 +145,7 @@
     "test:groundcover-varieties": "node scripts/run-groundcover-variety-tests.mjs",
     "test:tree-varieties": "node scripts/run-tree-variety-tests.mjs",
     "test:conifer-visual-browser": "node scripts/run-conifer-visual-browser-smoke.mjs",
+    "test:phi-fern-visual-browser": "node scripts/run-conifer-visual-browser-smoke.mjs phiFern",
     "test:tellus-contract": "node scripts/run-tellus-contract-fixture.mjs",
     "test:browser-smoke": "node scripts/run-browser-ui-smoke.mjs",
     "test:graph-editor-browser": "node scripts/run-graph-editor-controls-browser-smoke.mjs",

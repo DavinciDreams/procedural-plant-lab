@@ -12,10 +12,10 @@ This report separates deterministic geometry/build evidence from live standalone
 | --- | ---: | ---: | --- |
 | Bootstrap entry | 0.95 kB | 0.53 kB | Initial; paints explicit loading/error state and starts the lab import |
 | Dynamic preload helper | 1.82 kB | 0.93 kB | Initial bootstrap dependency |
-| Lab application | 168.33 kB | 50.25 kB | Dynamic bootstrap dependency; includes hierarchical wind plus decal evidence state, static vine-guide/support, and crown-mask controls; specialized adapters remain lazy |
-| Shared generator/presets | 856.15 kB | 225.35 kB | Dynamic bootstrap dependency; fetched with the lab and includes required generated UV0 plus indexed conifer prototype packing |
+| Lab application | 168.33 kB | 50.26 kB | Dynamic bootstrap dependency; includes hierarchical wind plus decal evidence state, static vine-guide/support, and crown-mask controls; specialized adapters remain lazy |
+| Shared generator/presets | 856.38 kB | 225.42 kB | Dynamic bootstrap dependency; fetched with the lab and includes required generated UV0 plus indexed conifer and fern prototype packing |
 | Styles | 8.40 kB | 2.47 kB | Initial |
-| Enforced interactive static closure | 1,035.65 kB | 278.47 kB | Entry, helper, styles, lab, and shared presets; exact current closure 1,035,646 raw / 278,469 gzip, capped at 1.05 MB raw / 280 kB gzip by `test:startup-load` |
+| Enforced interactive static closure | 1,035.89 kB | 278.54 kB | Entry, helper, styles, lab, and shared presets; exact current closure 1,035,885 raw / 278,544 gzip, capped at 1.05 MB raw / 280 kB gzip by `test:startup-load` |
 | Three.js visibility/LOD adapter | 6.75 kB | 2.05 kB | Lazy after worker-backed LOD installation; live frustum-mask integration |
 | Visibility cluster selector | 6.90 kB | 2.58 kB | Lazy with the visibility adapter |
 | `procplants/webgpu` package entry | 48.17 kB | 13.26 kB | Explicit downstream import only; includes planning, injected-device execution, and indexed-indirect encoding while remaining absent from browser startup/root/core entry graphs |
@@ -49,7 +49,7 @@ This report separates deterministic geometry/build evidence from live standalone
 
 The complete reusable ESM entry includes the public grouped-surface, tangent-ready Three geometry, live baked-material, grouped GLB binding, renderer-owned placement decals, evidence-bound decal PNG/GLB adoption, damage/growth/topology, crown-light pruning, mesh/BVH, validated graph authoring, specialized typed DAG adapters, static vine-guide/support authoring, constructive-crown tools, versioned five-tier WebGL atlas assets and catalog coordination, clustered visibility, and WebGPU planning. The `procplants/core` runtime/Tellus entry excludes the full-entry atlas/catalog/decal, vine-support, voxel-viewport, GLTFExporter, meshopt, material-authoring, KTX2 decoder, and injected-device WebGPU paths. The explicit `procplants/webgpu` entry is not used by the WebGL lab or Tellus. Exact cumulative full/core/package byte counts are refreshed after the combined build and package gates below.
 
-The explicit bootstrap remains 11,169 bytes raw / 3,930 bytes gzip. It then fetches the 168.33/50.25 kB lab and 856.15/225.35 kB shared generator dependency; the complete parser-discovered interactive closure is 1,035,646 raw / 278,469 gzip and remains below its 1.05 MB / 280 kB gates. The decal pixel/GLB adoption path, renderer-owned decal adapter, static vine support/BVH adapter, vine-guide package, crown-mask and voxel-mask viewports, tangent/PBR adapters, manual-spine editor, force editor, and graph editor remain lazy. The KTX2 adapter, loader, and Basis assets form a nested lazy path behind hero GLB import and are absent from the interactive closure until the selected source material requires them. Browser resource-timing assertions prove these specialized implementation chunks are absent before their first interaction. This improves first paint and initial parse work; it does not claim lower total bytes before the first plant is interactive.
+The explicit bootstrap remains 11,169 bytes raw / 3,929 bytes gzip. It then fetches the 168.33/50.26 kB lab and 856.38/225.42 kB shared generator dependency; the complete parser-discovered interactive closure is 1,035,885 raw / 278,544 gzip and remains below its 1.05 MB / 280 kB gates. The decal pixel/GLB adoption path, renderer-owned decal adapter, static vine support/BVH adapter, vine-guide package, crown-mask and voxel-mask viewports, tangent/PBR adapters, manual-spine editor, force editor, and graph editor remain lazy. The KTX2 adapter, loader, and Basis assets form a nested lazy path behind hero GLB import and are absent from the interactive closure until the selected source material requires them. Browser resource-timing assertions prove these specialized implementation chunks are absent before their first interaction. This improves first paint and initial parse work; it does not claim lower total bytes before the first plant is interactive.
 
 ## Geometry reductions
 
@@ -57,7 +57,7 @@ Canonical seed `612072` is frozen by `test:conifer-fern-budget` with exact geome
 
 | Preset | Current LOD triangles | Current LOD vertices | Audited earlier close tier | Close-tier reduction |
 | --- | ---: | ---: | ---: | ---: |
-| Phi Fern | 352 / 264 / 4 / 2 | 1,056 / 792 / 8 / 4 | 1,872 frozen v2 | 81.2% |
+| Phi Fern | 352 / 264 / 4 / 2 | 704 / 528 / 8 / 4 | 1,872 frozen v2 | 81.2% |
 | Blue Spruce | 3,934 / 2,494 / 4 / 2 | 4,420 / 2,436 / 8 / 4 | 11,780 | 66.6% |
 | Alpine Fir | 5,190 / 3,174 / 4 / 2 | 5,208 / 2,856 / 8 / 4 | 15,444 | 66.4% |
 | Redwood Spire | 3,896 / 2,540 / 4 / 2 | 4,023 / 2,279 / 8 / 4 | 10,776 | 63.8% |
@@ -65,6 +65,8 @@ Canonical seed `612072` is frozen by `test:conifer-fern-budget` with exact geome
 | Shore Pine | 1,596 / 1,080 / 4 / 2 | 3,372 / 2,328 / 8 / 4 | not frozen | not claimed |
 
 The older downstream Tellus Phi implementation materialized 6,384 close triangles, but that is a different consumer path rather than the producer's frozen v2 baseline. The converged producer emits one broad eight-frond crown at 352 close triangles and roughly 1.23 by 1.61 ground coverage.
+
+The dedicated Phi Fern now also keeps each 44-triangle folded frond indexed at 88 vertices rather than expanding it to 132 triangle corners. LOD0 falls from 1,056 to 704 uploaded vertices and LOD1 from 792 to 528, both 33.33%, without removing any of the eight close fronds or six clustered fronds. The budget gate freezes its revision-3 expanded triangle-position hash, exact bounds, branch-relative instance frames, normals, axial UV0, sway, and zero unreferenced vertices. A fixed 1280 by 900 Chrome WebGL comparison kept scene triangles at 6,042, draws at 9, hero triangles at 352, and measured 557,303 green-coverage pixels versus 557,308 before indexing; the five threshold-edge pixels are 0.0009% of the baseline while triangle positions and bounds remain byte-identical. This is render-path correctness evidence, not representative-device timing.
 
 The indexed-spray packing revision changes no conifer triangle, spray, attachment, or draw count. It gives each folded spray quad coherent authored UV0 and reuses its four position/normal/UV/sway vertices through indices instead of expanding two triangles to six vertices. Weber-Penn builds also omit native-leaf attribute rows when `nativeLeaves=false`; those rows still exist in vendor leaf-site data for branch-relative spray placement, but were never referenced by a render index. The canonical before/after close-tier audit is:
 

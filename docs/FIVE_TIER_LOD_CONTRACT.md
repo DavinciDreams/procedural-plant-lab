@@ -8,8 +8,8 @@ packages:
 
 | Tier | Representation | Phi Fern seed 612072 |
 | --- | --- | ---: |
-| LOD0 | Full procedural geometry | 352 triangles / 1,056 vertices |
-| LOD1 | Independently rebuilt reduced geometry | 264 / 792 |
+| LOD0 | Full procedural geometry | 352 triangles / 704 vertices |
+| LOD1 | Independently rebuilt reduced geometry | 264 / 528 |
 | LOD2 | Procedural clumped/crossed cards | 4 / 8 |
 | LOD3 | Baked-atlas crossed tree impostor | 4 / 8 |
 | LOD4 | Baked-atlas camera-facing billboard | 2 / 4 |

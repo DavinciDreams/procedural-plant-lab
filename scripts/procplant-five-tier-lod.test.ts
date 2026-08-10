@@ -64,16 +64,19 @@ assert.deepEqual(packageA.lods.map((lod) => lod.representation), [
   "procedural-mesh", "procedural-mesh", "procedural-cross-card", "baked-atlas-cross", "baked-atlas-billboard",
 ]);
 assert.deepEqual(packageA.lods.map((lod) => lod.triangles), [352, 264, 4, 4, 2]);
-assert.deepEqual(packageA.lods.map((lod) => lod.vertices), [1056, 792, 8, 8, 4]);
+assert.deepEqual(packageA.lods.map((lod) => lod.vertices), [704, 528, 8, 8, 4]);
 assert.deepEqual(
   packageA.lods.map((lod) => lod.templateContentHash),
   packageB.lods.map((lod) => lod.templateContentHash),
   "all five template hashes must be deterministic",
 );
+// Indexed-frond revision. The previous expanded hashes were eea44b90,
+// 0484d1e5, and b74db5e0 for LOD0-2; triangle-position parity is frozen by
+// test:conifer-fern-budget while this fixture records the intentional packing.
 assert.deepEqual(packageA.lods.map((lod) => lod.templateContentHash), [
-  "fnv1a32-eea44b90",
-  "fnv1a32-0484d1e5",
-  "fnv1a32-b74db5e0",
+  "fnv1a32-add017a3",
+  "fnv1a32-eda0c53e",
+  "fnv1a32-d58ce000",
   "fnv1a32-c8f7b108",
   "fnv1a32-492999c5",
 ], "Phi Fern five-tier geometry hashes must remain fixture-stable");

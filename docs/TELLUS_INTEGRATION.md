@@ -47,7 +47,7 @@ At canonical seed `612072`, current Procplants budgets are:
 
 | Preset | LOD triangles | LOD vertices | Notes |
 | --- | ---: | ---: | --- |
-| Phi Fern | 352 / 264 / 4 / 2 | 1,056 / 792 / 8 / 4 | 8 `fernFrond` instances; about 1.23 by 1.61 ground coverage |
+| Phi Fern | 352 / 264 / 4 / 2 | 704 / 528 / 8 / 4 | 8 indexed `fernFrond` instances; about 1.23 by 1.61 ground coverage; 33.33% fewer LOD0/1 vertices |
 | Blue Spruce | 3,934 / 2,494 / 4 / 2 | 4,420 / 2,436 / 8 / 4 | Branch-relative conifer sprays; 39.65% fewer LOD0 vertices |
 | Alpine Fir | 5,190 / 3,174 / 4 / 2 | 5,208 / 2,856 / 8 / 4 | Branch-relative conifer sprays; 37.91% fewer LOD0 vertices |
 | Redwood Spire | 3,896 / 2,540 / 4 / 2 | 4,023 / 2,279 / 8 / 4 | Narrow conifer crown; 40.53% fewer LOD0 vertices |
@@ -55,6 +55,8 @@ At canonical seed `612072`, current Procplants budgets are:
 | Shore Pine | 1,596 / 1,080 / 4 / 2 | 3,372 / 2,328 / 8 / 4 | Includes package cone instances; 28.13% fewer LOD0 vertices |
 
 The Procplants `test:conifer-fern-budget` gate freezes these current vertex/triangle budgets and hashes. The frozen v2 Phi Fern was 1,872/624/4/2 triangles and 5,616/1,872/8/4 vertices, so revision 3 reduces its close tier by 81.2% while broadening the dedicated fern crown.
+
+The indexed-frond packing revision preserves all eight attachment frames, triangle positions, close/clustered triangle counts, bounds, sway, automatic Tellus mappings, and Tellus-owned render policy while adding explicit axial UV0 to the shared folded-frond prototype. The revision-3 fixture changes Phi Fern vertex counts and geometry/surface hashes; Tellus adoption therefore requires an immutable Procplants SHA repin and its installed-package, contract, vegetation, and WebGL render-budget gates. The producer's fixed Chrome WebGL comparison retained 9 draws and 352 hero triangles with only five green-threshold edge pixels of 557,308 changing after normal sharing; this is correctness evidence rather than a Tellus FPS claim.
 
 The conifer packing revision preserves preset IDs, ecology profiles, automatic Tellus mappings, spray counts, expanded triangle positions, and all triangle budgets. It changes core template bytes and hashes because unused Weber-Penn native-leaf rows are removed and authored conifer quads stay indexed. Tellus remains WebGL-first and owns chunking, LOD, shadows, and render pressure; adoption therefore requires pinning the eventual immutable Procplants merge SHA and rerunning its installed-package/contract/vegetation/render-budget gates. Procplants Chrome WebGL proof is correctness evidence only, not Tellus FPS or capacity evidence.
 

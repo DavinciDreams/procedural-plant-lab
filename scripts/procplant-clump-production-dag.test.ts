@@ -155,13 +155,17 @@ assert.ok(coverageX >= 0.75 && coverageZ >= 0.75, "furGrass clump must retain br
 assert.ok(canonicalLods[0]!.triangles <= 400, "furGrass LOD0 must remain bounded for dense placement");
 assert.ok(canonicalLods[1]!.triangles < canonicalLods[0]!.triangles);
 const stackPhiLods = compileProcPlantLods(procPlantPresets.phiFern!, seed, environment);
+// Indexed-frond revision; prior expanded-template hashes were cf7afaee,
+// 48544897, 465807d8, and 37d57f14. Expanded triangle-position parity is
+// frozen independently by test:conifer-fern-budget.
 assert.deepEqual(stackPhiLods.map((lod) => templateHash(lod.template)), [
-  "cf7afaee35c3287853fe88aef72c644ccf0008927c70924db648c697257a7341",
-  "48544897150467d33ba0cf6deea221b9b8b867182d1b52350af4248754093c87",
-  "465807d87ed8d875a15aafe73bee438beae8a549dffc070260ff2b2adb34f4ed",
-  "37d57f1406cd8df5d1140465b8f81dc9ed0c217c839ebea700c6230600722295",
-], "the approved converged Phi bytes must remain untouched by the clump seam");
+  "5602ddea3c9d40cb573a53b43e8d2ba521ee605f3122fa70ca9de09dc2c7d1ff",
+  "161332d966db1b31342d1b2c5f784d5dcec1593e12c9fd0f005a83a86a81fdda",
+  "5743f07b64d02a8f28126b1c0f4d5033fb411598131885f8c389bc3931720454",
+  "b43aadf6805c16be92787fb5c5a9af9b9e6c875f6d2c5f7e93893a3849b59e76",
+], "the approved indexed Phi bytes must remain untouched by the clump seam");
 assert.deepEqual(stackPhiLods.map((lod) => lod.triangles), [352, 264, 4, 2]);
+assert.deepEqual(stackPhiLods.map((lod) => lod.vertices), [704, 528, 8, 4]);
 const stackPhiParts = buildProcPlantInstancedParts(procPlantPresets.phiFern!, seed, environment);
 assert.equal(stackPhiParts.instances.length, 8);
 assert.ok(stackPhiParts.instances.every((instance) => instance.kind === "fernFrond"));
