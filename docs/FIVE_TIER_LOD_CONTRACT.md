@@ -47,6 +47,35 @@ path makes that bake reproducible and cacheable:
    `procplants lod5-glb ...` against the captured asset. Select tiers with
    `selectProcPlantFiveTierLod`.
 
+## Opt-in catalog batches
+
+`createProcPlantFiveTierAtlasCatalogPlan(...)` accepts an explicit list of
+preset/genome plus seed sources. It sorts canonical source slots and embeds the
+exact source manifest cache key for every entry, plus a deterministic aggregate
+catalog key and decoded-RGBA budget. A changed seed, LOD0 source hash, capture
+plan, material policy, or atlas limit therefore changes that entry's key.
+
+`runProcPlantFiveTierAtlasCatalog(...)` is an explicit standalone/library
+operation. It requires caller-provided cache, capture, and adoption adapters;
+reports bounded progress; supports `AbortSignal`; caps active work at eight and
+decoded atlas bytes in flight at 512 MiB hard maxima; and streams each validated
+v2 package through the adoption callback. Exact cache hits skip capture.
+Wrong-key, corrupt, oversized, source-stale, or otherwise invalid records are
+deleted before recapture; a failed delete or cache write is an entry failure
+rather than a silent adoption.
+
+`createProcPlantFiveTierAtlasWebGlCapturePool(...)` safely leases one of up to
+eight unique caller-owned Three `WebGLRenderer` instances. Each renderer has at
+most one active capture. The pool propagates cancellation between view
+readbacks and releases its own references on `dispose()`, but deliberately does
+not dispose caller renderers. `createProcPlantFiveTierAtlasMemoryCache(...)`
+provides bounded session storage with explicit `clear()`/`dispose()`;
+IndexedDB, filesystem, or service storage is still supplied by the caller.
+
+The catalog module is exported from the full package only. Importing core or
+starting the demo does not create a cache, renderer, capture job, or catalog
+plan.
+
 Compilation fails closed when the bake is absent, bound to another genome or
 seed, stale for the current LOD0 geometry hash, malformed, has more than 256
 views, or exceeds the caller's atlas-size ceiling. It never relabels a plain
@@ -84,6 +113,14 @@ GLB export pipeline, renders the restored crossed and billboard tiers in real
 Chrome WebGL 2 through SwiftShader, and re-imports the export through Three's
 GLTFLoader.
 This is shader/render-path correctness, not representative-device FPS.
+
+`npm run test:lod5-catalog` proves deterministic ordering, exact per-source
+keys, two-entry bounded concurrency, cache hits, source-stale regeneration,
+cancellation, and bounded cache eviction. `npm run test:lod5-catalog-browser`
+captures Phi Fern and Clover through real Chrome WebGL, reuses both cache
+entries, regenerates a changed fern, adopts and renders LOD3/LOD4, exports and
+re-imports five-scene GLBs, and checks capture/cache/pool cleanup. It is again a
+correctness and resource-lifecycle proof, not an FPS or capacity benchmark.
 
 Tellus has not adopted this opt-in version-2 stack. Tellus remains responsible
 for field placement, render pressure, shadows, camera-facing transforms, and

@@ -93,6 +93,8 @@ import {
 import {
   buildProcPlantGraph as buildProcPlantGraphFromFullEntry,
   createProcPlantFiveTierAtlasBuildManifest,
+  createProcPlantFiveTierAtlasCatalogPlan,
+  createProcPlantFiveTierAtlasMemoryCache,
   fitProcPlantCrownMask,
   fitProcPlantCrownVoxelMask,
   buildProcPlantTemplateWithCrownLightPruning,
@@ -140,6 +142,13 @@ const lod5AtlasPlan = createProcPlantFiveTierAtlasBuildManifest(genome, 612072, 
   elevations: [0],
   maxAtlasSize: 256,
 });
+const lod5CatalogPlan = createProcPlantFiveTierAtlasCatalogPlan([{
+  presetId: genome.id,
+  genome,
+  seed: 612072,
+  buildOptions: { width: 16, height: 16, azimuthCount: 2, elevations: [0], maxAtlasSize: 128 },
+}], { maxEntries: 2, maxTotalAtlasBytes: 1024 * 1024 });
+const lod5CatalogCache = createProcPlantFiveTierAtlasMemoryCache({ maxEntries: 2, maxDocumentBytes: 1024 * 1024 });
 
 if (PROCPLANT_GENERATOR_CONTRACT_REVISION !== 3) throw new Error("unexpected contract revision");
 if (PROCPLANT_SUPPORTED_INSTANCE_KINDS.length !== 20) throw new Error("unexpected kind registry");
@@ -152,6 +161,9 @@ if (decalExportSupport !== "metadata-only") throw new Error("placement decal ren
 if (PROCPLANT_PLACEMENT_DECAL_GLB_CONTRACT !== "procplants.placement-decal-glb") throw new Error("placement decal GLB export drift");
 if (authoredVine.status !== "applied" || authoredVine.genome.vine?.guide?.length !== 2) throw new Error("vine guide authoring export drift");
 if (!lod5AtlasPlan.cacheKey.startsWith("procplants-lod5-atlas-v1-")) throw new Error("five-tier atlas build export drift");
+if (!lod5CatalogPlan.cacheKey.startsWith("procplants-lod5-atlas-catalog-v1-")) throw new Error("five-tier atlas catalog export drift");
+if (lod5CatalogCache.stats().entries !== 0) throw new Error("five-tier atlas memory cache export drift");
+lod5CatalogCache.dispose();
 console.log(JSON.stringify({ revision: PROCPLANT_GENERATOR_CONTRACT_REVISION, kind, triangles: prototype.idx.length / 3 }));
 `);
   await writeFile(join(consumerRoot, "src", "runtime.mjs"), `

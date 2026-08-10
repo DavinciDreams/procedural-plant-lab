@@ -103,6 +103,7 @@ Good starting experiments:
 - Bounded `EXT_mesh_gpu_instancing` export writes one selected template/LOD plus renderer-neutral TRS placements, with a scatter-entry adapter and explicit meshopt/collision composition boundaries.
 - Native headless GLB output for one selected LOD or the complete LOD set, with deterministic bytes and optional bounds-box/trunk-capsule collision proxies.
 - Headless `lod5-atlas-plan` output for deterministic bounded WebGL build manifests, plus `lod5-glb` adoption of a captured, source-hash-validated atlas asset. Pixel capture remains an explicit caller-owned browser/WebGL step.
+- An opt-in standalone catalog coordinator plans exact preset/seed manifest keys, streams bounded cache lookup/capture/v2 adoption with progress and cancellation, invalidates stale or corrupt slots before recapture, and limits both concurrency and decoded RGBA bytes in flight. Its bounded memory cache is only a convenience; durable browser storage remains a caller adapter, and no capture runs during startup.
 - A typed deterministic material DAG validates bark/leaf PBR channels, texture roles/color spaces/transforms, procedural descriptors, constant folding, direct bindings, and explicit bake-required expressions. Its glTF planner maps lossless direct base/alpha/normal/ORM/AO/emissive bindings, while the CPU baker emits color-correct PNG and embedded glTF material bytes. Generated templates retain deterministic UV0 across every real LOD and are partitioned without index copies into explicit bark/stem and organ ranges. The lazy lab `Bake PBR Material` action downloads and installs deterministic bark/leaf base-color, packed ORM, and procedural normal resources on live wind-compatible MeshStandard materials; normal-mapped geometry gains an explicit normalized tangent frame only on this lazy path.
 - Optional deterministic lossless `EXT_meshopt_compression` for GLB geometry: required mode produces real transfer savings for decoder-aware consumers, while fallback mode retains ordinary core buffers for compatibility. Texture compression and triangle simplification are intentionally separate.
 - Deterministic ASCII USDA output for one real LOD or a standard four-choice `LOD` variant set, preserving topology, normals, display colors, sway/tintability primvars, typed metadata, and optional physics-enabled bounds-box/trunk-capsule collision proxies. An opt-in library path binds one explicit ready baked slot through `UsdPreviewSurface`, exports t-flipped `st`, color-correct `UsdUVTexture` base/ORM/normal/emissive inputs, and copied package-relative PNG assets. A companion deterministic USDZ writer stores the USDA default layer first and every dependency uncompressed on required 64-byte boundaries with path, entry, byte, and work caps.
@@ -161,6 +162,8 @@ npm run test:browser-smoke
 npm run test:impostor-three-webgl
 npm run test:lod5
 npm run test:lod5-browser
+npm run test:lod5-catalog
+npm run test:lod5-catalog-browser
 ```
 
 Use the headless compiler for repeatable asset-pack work:
@@ -204,7 +207,7 @@ npm run test:tellus-contract
 - `src/procplant-impostor-channels.ts` composes aligned color/normal/depth and seasonal impostor view arrays.
 - `src/procplant-impostor-image.ts` encodes deterministic channel PNGs and embeds seasonal channel sets in GLB.
 - `src/procplant-impostor-three.ts` captures live Three.js views, installs textured billboards, and exports embedded-atlas GLB.
-- `src/procplant-five-tier-lod.ts` compiles and exports the opt-in, source-bound five-tier LOD contract; `src/procplant-five-tier-atlas-build.ts` owns deterministic manifests, real caller-WebGL capture, portable assets, cache validation, and v2 adoption.
+- `src/procplant-five-tier-lod.ts` compiles and exports the opt-in, source-bound five-tier LOD contract; `src/procplant-five-tier-atlas-build.ts` owns deterministic manifests, real caller-WebGL capture, portable assets, cache validation, and v2 adoption; `src/procplant-five-tier-atlas-catalog.ts` coordinates explicit multi-preset planning, bounded cache/capture/adoption work, progress, and cancellation without entering the core or startup path.
 - `src/procplant-dense-impostor-pool.ts` batches dense static billboard placements into deterministic atlas-view buckets.
 - `src/procplant-generator-graph.ts` defines deterministic typed generator DAGs and serializable manual operations.
 - `src/procplant-authoring-graph.ts` derives a live nine-stage graph and preview from any authored genome.

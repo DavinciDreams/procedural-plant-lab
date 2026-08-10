@@ -47,7 +47,7 @@ This report separates deterministic geometry/build evidence from live standalone
 | Meshopt encoder | 20.60 kB | 8.24 kB | Lazy and opt-in during compressed GLB export |
 | EZ-tree vendor backend | 3,998.39 kB | 2,986.72 kB | Separate optional worker/backend chunk |
 
-The complete reusable ESM entry includes the public grouped-surface, tangent-ready Three geometry, live baked-material, grouped GLB binding, renderer-owned placement decals, evidence-bound decal PNG/GLB adoption, damage/growth/topology, crown-light pruning, mesh/BVH, validated graph authoring, specialized typed DAG adapters, static vine-guide/support authoring, constructive-crown tools, versioned five-tier WebGL atlas assets, clustered visibility, and WebGPU planning. The `procplants/core` runtime/Tellus entry excludes the full-entry atlas/decal, vine-support, voxel-viewport, GLTFExporter, meshopt, material-authoring, KTX2 decoder, and injected-device WebGPU paths. The explicit `procplants/webgpu` entry is not used by the WebGL lab or Tellus. Exact cumulative full/core/package byte counts are refreshed after the combined build and package gates below.
+The complete reusable ESM entry includes the public grouped-surface, tangent-ready Three geometry, live baked-material, grouped GLB binding, renderer-owned placement decals, evidence-bound decal PNG/GLB adoption, damage/growth/topology, crown-light pruning, mesh/BVH, validated graph authoring, specialized typed DAG adapters, static vine-guide/support authoring, constructive-crown tools, versioned five-tier WebGL atlas assets and catalog coordination, clustered visibility, and WebGPU planning. The `procplants/core` runtime/Tellus entry excludes the full-entry atlas/catalog/decal, vine-support, voxel-viewport, GLTFExporter, meshopt, material-authoring, KTX2 decoder, and injected-device WebGPU paths. The explicit `procplants/webgpu` entry is not used by the WebGL lab or Tellus. Exact cumulative full/core/package byte counts are refreshed after the combined build and package gates below.
 
 The explicit bootstrap remains 11,169 bytes raw / 3,930 bytes gzip. It then fetches the 168.33/50.25 kB lab and 856.15/225.35 kB shared generator dependency; the complete parser-discovered interactive closure is 1,035,646 raw / 278,469 gzip and remains below its 1.05 MB / 280 kB gates. The decal pixel/GLB adoption path, renderer-owned decal adapter, static vine support/BVH adapter, vine-guide package, crown-mask and voxel-mask viewports, tangent/PBR adapters, manual-spine editor, force editor, and graph editor remain lazy. The KTX2 adapter, loader, and Basis assets form a nested lazy path behind hero GLB import and are absent from the interactive closure until the selected source material requires them. Browser resource-timing assertions prove these specialized implementation chunks are absent before their first interaction. This improves first paint and initial parse work; it does not claim lower total bytes before the first plant is interactive.
 
@@ -89,7 +89,7 @@ portable asset, re-hashed/reloaded it, rendered both far tiers in two
 single-pass draws with 2,619 changed pixels, and re-imported a 251,416-byte
 five-scene GLB. The deterministic 8-view injected-raster fixture uses a 16 KiB
 atlas, a bounded JSON asset document, and a standards-valid five-scene GLB. The full library
-closure is 1,269,194 raw / 319,859 gzip bytes, while startup stays 11,169 /
+closure is 1,284,422 raw / 323,507 gzip bytes, while startup stays 11,169 /
 3,931 and the interactive closure stays 1,034,491 / 278,102. These are bounded
 cost and WebGL correctness results; atlas memory scales with bake
 dimensions/views, and no Tellus adoption or representative-device FPS is
@@ -150,6 +150,29 @@ The final headless Chrome check reproduced the Phi Fern values and reported no p
 - Ground-cover pool savings start after the worker result; initial fallback generation still occurs so failure cannot blank the scene.
 - Scattered instances only cast shadows for `tree`, `conifer`, and `palm` habits, and ground-cover LOD pools set `castShadow` false, so in shrub/vine/ground-cover scenes the hero is the only shadow caster. This reads as intentional render-pressure control but is an unannotated conditional; confirm it against the Tellus shadow budget before treating it as contract.
 - These measurements prove the standalone Procplants build. Tellus owns different chunking, render-pressure, shadow, asset-substitution, renderer choice, and deployment behavior. Tellus defaults to WebGL because it is currently faster there, so its required acceptance test is a controlled WebGL field run; Procplants' opt-in WebGPU evidence is not a substitute.
+
+## Five-tier catalog resource bounds
+
+The opt-in full-entry catalog coordinator accepts at most 128 explicit
+preset/seed entries, runs at most eight active tasks, rejects a single entry
+larger than its configured decoded-RGBA in-flight limit, and hard-caps that
+limit at 512 MiB. Its deterministic plan also caps aggregate expected atlas
+bytes at 1 GiB. These are allocation gates for atlas payloads, not whole-process
+memory or GPU-capacity claims.
+
+The focused two-source reference reached two active tasks and exactly 16,384
+decoded RGBA bytes in flight, then served both entries from cache. A changed Phi
+Fern source invalidated its exact old manifest key and recaptured; cancellation
+prevented all adoption. The real Chrome WebGL proof captured Phi Fern and Clover
+with a one-renderer pool, rendered four LOD3/LOD4 meshes, exported/re-imported
+two ordinary five-scene GLBs, and returned the capture renderer to zero tracked
+geometries/textures. Pool disposal released all pool references and bounded
+memory-cache disposal returned its entries/document bytes to zero.
+
+The pool never disposes caller-owned WebGL renderers, and the adoption callback
+borrows its asset/package only for that invocation. Durable cache storage and
+any retained adopted assets are caller responsibilities. No catalog planning,
+cache lookup, or capture occurs on startup or through `procplants/core`.
 
 ## Tellus parity worktree evidence
 

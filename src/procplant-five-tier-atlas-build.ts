@@ -119,6 +119,10 @@ export interface ProcPlantFiveTierAtlasAssetReadOptions {
   maxAtlasSize?: number;
 }
 
+export interface ProcPlantFiveTierAtlasCaptureOptions {
+  signal?: AbortSignal;
+}
+
 const textEncoder = new TextEncoder();
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -362,6 +366,7 @@ export const captureProcPlantFiveTierAtlasAsset = async (
   manifestValue: ProcPlantFiveTierAtlasBuildManifest,
   genome: ProcPlantGenome,
   environment: ProcPlantEnvironment = defaultPlantEnvironment(),
+  options: ProcPlantFiveTierAtlasCaptureOptions = {},
 ): Promise<ProcPlantFiveTierAtlasAsset> => {
   const manifest = validateProcPlantFiveTierAtlasBuildManifest(manifestValue);
   const lod0 = assertManifestSource(manifest, genome, environment);
@@ -384,11 +389,12 @@ export const captureProcPlantFiveTierAtlasAsset = async (
   source.name = `procplant-${manifest.source.genomeId}-lod0-atlas-source`;
   let baked: Awaited<ReturnType<typeof bakeProcPlantThreeImpostor>> | null = null;
   try {
-    const options = planOptions(manifest.capture.plan);
+    const capturePlanOptions = planOptions(manifest.capture.plan);
     baked = await bakeProcPlantThreeImpostor(renderer, source, {
-      ...options,
+      ...capturePlanOptions,
       padding: manifest.atlas.padding,
       samples: manifest.capture.samples,
+      signal: options.signal,
     });
     validateAtlasForManifest(manifest, baked.atlas);
     return {
