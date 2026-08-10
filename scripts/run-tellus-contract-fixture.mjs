@@ -9,6 +9,7 @@ const fixturePath = join(projectRoot, "fixtures", "tellus-procplant-contract-v3.
 const tempDirectory = await mkdtemp(join(tmpdir(), "procplants-contract-fixture-"));
 const outputFile = join(tempDirectory, "tellus-contract-fixture.mjs");
 const mode = process.argv.includes("--write") ? "write" : process.argv.includes("--print") ? "print" : "check";
+const normalizeLineEndings = (value) => value.replaceAll("\r\n", "\n");
 
 try {
   await build({
@@ -33,7 +34,7 @@ try {
     const committedText = await readFile(fixturePath, "utf8");
     const committed = JSON.parse(committedText);
     const drift = fixtureModule.firstTellusFixtureDrift(committed, generated);
-    if (drift || committedText !== serialized) {
+    if (drift || normalizeLineEndings(committedText) !== normalizeLineEndings(serialized)) {
       throw new Error(`Tellus golden contract fixture drifted at ${drift ?? "serialized JSON"}. Run this script with --write after reviewing the contract change.`);
     }
     console.log(`ok - Tellus contract revision ${generated.generatorContractRevision} fixture matches (${Buffer.byteLength(serialized)} bytes)`);

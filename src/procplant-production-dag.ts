@@ -6,14 +6,19 @@ import {
   addGuidedVineProcPlantReproductiveOrgans,
   buildGuidedVineProcPlantArchitectureGraph,
   buildProcPlantGraphIr,
+  buildProcPlantClumpStageParts,
   buildProcPlantTemplate,
   buildProcPlantTemplateFromGraph,
   buildWeberPennProcPlantStageParts,
+  compileProcPlantClumpStageLods,
   compileProcPlantLods,
   compileProcPlantLodsFromTemplate,
+  createProcPlantClumpStagePlan,
   defaultPlantEnvironment,
   materializeProcPlantParts,
   materializeBranchModuleProcPlantParts,
+  materializeProcPlantInstancedParts,
+  type ProcPlantClumpStagePlan,
   type ProcPlantCompiledLod,
   type ProcPlantBranchModuleStageParts,
   type ProcPlantEnvironment,
@@ -147,6 +152,21 @@ export interface ProcPlantOutputStageArtifact extends ArtifactBase<"output", "ou
   runtime: { windFlex: number; phototropism: number };
 }
 
+export interface ProcPlantClumpTransformStageArtifact extends ArtifactBase<"clump-transforms", "architecture"> {
+  genome: ProcPlantGenome;
+  environment: ProcPlantEnvironment;
+  plan: ProcPlantClumpStagePlan;
+  runtime: { windFlex: number; phototropism: number };
+}
+
+export interface ProcPlantClumpPartsStageArtifact extends ArtifactBase<"clump-parts", "foliage"> {
+  genome: ProcPlantGenome;
+  environment: ProcPlantEnvironment;
+  plan: ProcPlantClumpStagePlan;
+  parts: ProcPlantInstancedParts;
+  runtime: { windFlex: number; phototropism: number };
+}
+
 export type ProcPlantProductionStageArtifact =
   | ProcPlantSourceStageArtifact
   | ProcPlantGraphStageArtifact
@@ -158,7 +178,9 @@ export type ProcPlantProductionStageArtifact =
   | ProcPlantWeberPennPartsStageArtifact
   | ProcPlantMaterialStageArtifact
   | ProcPlantLodStageArtifact
-  | ProcPlantOutputStageArtifact;
+  | ProcPlantOutputStageArtifact
+  | ProcPlantClumpTransformStageArtifact
+  | ProcPlantClumpPartsStageArtifact;
 
 type WithoutArtifactHash<T> = T extends { hash: string } ? Omit<T, "hash"> : never;
 type ProcPlantUnhashedStageArtifact = WithoutArtifactHash<ProcPlantProductionStageArtifact>;
@@ -1252,6 +1274,23 @@ const lineageFor = (node: ProcPlantGeneratorNode, dependencies: readonly ProcPla
 
 const artifactHashPayload = (artifact: ProcPlantUnhashedStageArtifact) => {
   if (artifact.kind === "source") return { kind: artifact.kind, stage: artifact.stage, nodeId: artifact.nodeId, seed: artifact.seed, lineage: artifact.lineage, genomeId: artifact.genome.id };
+  if (artifact.kind === "clump-transforms") return {
+    kind: artifact.kind, nodeId: artifact.nodeId, seed: artifact.seed, lineage: artifact.lineage,
+    shootSeed: artifact.plan.shootSeed, placementSeed: artifact.plan.placementSeed,
+    shootSeeds: artifact.plan.shootSeeds,
+    scales: artifact.plan.scales,
+    transforms: artifact.plan.transforms.map((matrix) => matrix.elements),
+  };
+  if (artifact.kind === "clump-parts") return {
+    kind: artifact.kind, nodeId: artifact.nodeId, seed: artifact.seed, lineage: artifact.lineage,
+    plan: {
+      shootSeed: artifact.plan.shootSeed, placementSeed: artifact.plan.placementSeed,
+      shootSeeds: artifact.plan.shootSeeds, scales: artifact.plan.scales,
+      transforms: artifact.plan.transforms.map((matrix) => matrix.elements),
+    },
+    graph: graphHash(artifact.parts.graph),
+    template: templateHash(materializeProcPlantInstancedParts(artifact.genome, artifact.parts)),
+  };
   if (artifact.kind === "graph") return { kind: artifact.kind, stage: artifact.stage, nodeId: artifact.nodeId, seed: artifact.seed, lineage: artifact.lineage, graph: graphHash(artifact.graph), runtime: artifact.runtime };
   if (artifact.kind === "space-colonization-plan") return {
     kind: artifact.kind, stage: artifact.stage, nodeId: artifact.nodeId, seed: artifact.seed,
@@ -1306,6 +1345,8 @@ const nodeWork = (node: ProcPlantGeneratorNode) => node.enabled ? node.count ?? 
 
 const artifactWork = (artifact: ProcPlantProductionStageArtifact) => {
   if (artifact.kind === "source") return 1;
+  if (artifact.kind === "clump-transforms") return artifact.plan.transforms.length;
+  if (artifact.kind === "clump-parts") return artifact.parts.graph.stems.length + artifact.parts.graph.segments.length + artifact.parts.instances.length;
   if (artifact.kind === "graph") return artifact.graph.stems.length + artifact.graph.segments.length + artifact.graph.organs.length;
   if (artifact.kind === "space-colonization-plan") return 1 + (artifact.genome.spaceColonization?.freeform?.volumes.length ?? 0);
   if (artifact.kind === "space-colonization-parts") return artifact.parts.graph.stems.length
@@ -1326,6 +1367,170 @@ const artifactWork = (artifact: ProcPlantProductionStageArtifact) => {
   if (artifact.kind === "material") return artifact.template.pos.length / 3 + artifact.template.idx.length;
   if (artifact.kind === "lod") return artifact.lods.reduce((sum, lod) => sum + lod.vertices + lod.triangles, 0);
   return artifact.build.template.pos.length / 3 + artifact.build.template.idx.length;
+};
+
+const clumpNodeMap = (graph: ProcPlantGeneratorGraph) => new Map(
+  graph.nodes.map((node) => [node.stage, node] as const),
+);
+
+const assertSupportedClumpGraph = (
+  genome: ProcPlantGenome,
+  graph: ProcPlantGeneratorGraph,
+  canonical: ProcPlantGeneratorGraph,
+) => {
+  if (!genome.clump || genome.clump.count <= 1) throw new ProcPlantProductionDagError("clump-specialized DAG requires clump.count > 1");
+  if (genome.id.split("@", 1)[0] === "daylilyFlower") {
+    throw new ProcPlantProductionDagError("typed clump DAG does not support the specialized daylily crown/scapes backend");
+  }
+  if (graph.nodes.length !== canonical.nodes.length) {
+    throw new ProcPlantProductionDagError("typed clump DAG does not support added or removed stages");
+  }
+  const canonicalById = new Map(canonical.nodes.map((node) => [node.id, node]));
+  const normalizeNode = (node: ProcPlantGeneratorNode, reference: ProcPlantGeneratorNode) => {
+    const normalized = structuredClone(node);
+    if (node.stage === "architecture" || node.stage === "foliage") delete normalized.seedOverride;
+    if (node.stage === "material" || node.stage === "lod") normalized.parameters = structuredClone(reference.parameters);
+    return normalized;
+  };
+  for (const node of graph.nodes) {
+    const reference = canonicalById.get(node.id);
+    if (!reference || stableJson(normalizeNode(node, reference)) !== stableJson(normalizeNode(reference, reference))) {
+      throw new ProcPlantProductionDagError(`typed clump DAG does not support edited ${node.stage} semantics at ${node.id}`);
+    }
+  }
+  const nodes = clumpNodeMap(graph);
+  if (nodes.size !== graph.nodes.length) throw new ProcPlantProductionDagError("typed clump DAG requires exactly one node per canonical stage");
+  const material = nodes.get("material")!;
+  const materialKeys = Object.keys(material.parameters ?? {}).sort();
+  if (stableJson(materialKeys) !== stableJson(["leafColorA", "leafColorB"])) {
+    throw new ProcPlantProductionDagError(`${material.id}.parameters supports leafColorA and leafColorB only`);
+  }
+  for (const key of ["leafColorA", "leafColorB"] as const) {
+    const value = material.parameters?.[key];
+    if (!Number.isInteger(value) || Number(value) < 0 || Number(value) > 0xffffff) {
+      throw new ProcPlantProductionDagError(`${material.id}.parameters.${key} must be a 24-bit integer color`);
+    }
+  }
+  const lod = nodes.get("lod")!;
+  const lodKeys = Object.keys(lod.parameters ?? {}).sort();
+  const levels = lod.parameters?.levels;
+  if (stableJson(lodKeys) !== stableJson(["levels"]) || !Array.isArray(levels) || levels.length < 1 ||
+    levels.some((level) => !Number.isInteger(level) || Number(level) < 0 || Number(level) > 3)) {
+    throw new ProcPlantProductionDagError(`${lod.id}.parameters.levels must contain LOD indices 0..3`);
+  }
+  return nodes;
+};
+
+const compileProcPlantClumpProductionDag = (
+  genome: ProcPlantGenome,
+  graph: ProcPlantGeneratorGraph,
+  canonical: ProcPlantGeneratorGraph,
+  order: readonly string[],
+  environment: ProcPlantEnvironment,
+  maximumWork: number,
+): ProcPlantProductionDagResult => {
+  const nodes = assertSupportedClumpGraph(genome, graph, canonical);
+  const source = nodes.get("source")!;
+  const architecture = nodes.get("architecture")!;
+  const foliage = nodes.get("foliage")!;
+  const material = nodes.get("material")!;
+  const lod = nodes.get("lod")!;
+  const output = nodes.get("output")!;
+  const shootSeed = (foliage.seedOverride ?? graph.seed) >>> 0;
+  const placementSeed = (architecture.seedOverride ?? graph.seed) >>> 0;
+  const materialGenome: ProcPlantGenome = {
+    ...genome,
+    leaf: {
+      ...genome.leaf,
+      colorA: Number(material.parameters?.leafColorA),
+      colorB: Number(material.parameters?.leafColorB),
+    },
+  };
+  const runtime = {
+    windFlex: genome.treeRealism?.windFlex ?? 0.35,
+    phototropism: genome.lightResponse.phototropism,
+  };
+  const plan = createProcPlantClumpStagePlan(materialGenome, shootSeed, placementSeed);
+  const parts = buildProcPlantClumpStageParts(materialGenome, plan, environment);
+  if (parts.graph.stems.length > PROCPLANT_PRODUCTION_DAG_MAX_GRAPH_STEMS ||
+    parts.graph.organs.length > PROCPLANT_PRODUCTION_DAG_MAX_GRAPH_ORGANS ||
+    parts.instances.length > PROCPLANT_PRODUCTION_DAG_MAX_GRAPH_ORGANS) {
+    throw new ProcPlantProductionDagError("clump foliage stage exceeds production geometry caps");
+  }
+  const template = materializeProcPlantInstancedParts(materialGenome, parts);
+  const levels = lod.parameters!.levels as (0 | 1 | 2 | 3)[];
+  const lods = compileProcPlantClumpStageLods(materialGenome, shootSeed, placementSeed, environment, levels);
+  const full = lods.find((entry) => entry.level === 0);
+  if (!full) throw new ProcPlantProductionDagError(`${output.id} requires LOD level 0 for runtime output`);
+  if (templateHash(full.template) !== templateHash(template)) {
+    throw new ProcPlantProductionDagError("clump material and LOD0 stages produced different canonical bytes");
+  }
+  const artifacts: Record<string, ProcPlantProductionStageArtifact> = Object.create(null) as Record<string, ProcPlantProductionStageArtifact>;
+  artifacts[source.id] = withArtifactHash({
+    kind: "source", stage: "source", nodeId: source.id, seed: graph.seed, lineage: [source.id], genome, environment,
+  });
+  artifacts[architecture.id] = withArtifactHash({
+    kind: "clump-transforms", stage: "architecture", nodeId: architecture.id, seed: placementSeed,
+    lineage: [source.id, architecture.id].sort(), genome: materialGenome, environment, plan, runtime,
+  });
+  artifacts[foliage.id] = withArtifactHash({
+    kind: "clump-parts", stage: "foliage", nodeId: foliage.id, seed: shootSeed,
+    lineage: [source.id, architecture.id, foliage.id].sort(), genome: materialGenome, environment, plan, parts, runtime,
+  });
+  const stats: ProcPlantStats = {
+    stems: parts.stats.stems,
+    leaves: parts.stats.leaves,
+    flowers: parts.stats.flowers,
+    ...(parts.stats.accessories === undefined ? {} : { accessories: parts.stats.accessories }),
+    triangles: template.idx.length / 3,
+  };
+  artifacts[material.id] = withArtifactHash({
+    kind: "material", stage: "material", nodeId: material.id,
+    seed: deriveProcPlantGeneratorNodeSeed(graph.seed, material.id),
+    lineage: [source.id, architecture.id, foliage.id, material.id].sort(), genome: materialGenome,
+    environment, graph: parts.graph, template, stats,
+  });
+  artifacts[lod.id] = withArtifactHash({
+    kind: "lod", stage: "lod", nodeId: lod.id, seed: deriveProcPlantGeneratorNodeSeed(graph.seed, lod.id),
+    lineage: [source.id, architecture.id, foliage.id, material.id, lod.id].sort(), genome: materialGenome,
+    graph: parts.graph, lods, stats, runtime,
+  });
+  artifacts[output.id] = withArtifactHash({
+    kind: "output", stage: "output", nodeId: output.id, seed: deriveProcPlantGeneratorNodeSeed(graph.seed, output.id),
+    lineage: [source.id, architecture.id, foliage.id, material.id, lod.id, output.id].sort(),
+    build: { template: full.template, graph: parts.graph, stats: { ...stats, triangles: full.triangles } }, lods, runtime,
+  });
+  const records: ProcPlantProductionDagRecord[] = [];
+  let work = 0;
+  for (const nodeId of order) {
+    const node = graph.nodes.find((entry) => entry.id === nodeId)!;
+    const artifact = artifacts[nodeId];
+    const operationWork = nodeWork(node);
+    const materializedWork = artifact ? artifactWork(artifact) : 0;
+    work += operationWork + materializedWork;
+    if (work > maximumWork) throw new ProcPlantProductionDagError(`production DAG exceeds the ${maximumWork} work cap at ${node.id}`);
+    records.push({
+      nodeId,
+      stage: node.stage,
+      seed: node.stage === "architecture" ? placementSeed : node.stage === "foliage" ? shootSeed : node.seedOverride ?? deriveProcPlantGeneratorNodeSeed(graph.seed, node.id),
+      status: !node.enabled ? "disabled" : artifact ? "executed" : "legacy",
+      dependencyIds: [...node.dependsOn].sort(),
+      artifactKind: artifact?.kind ?? null,
+      artifactHash: artifact?.hash ?? null,
+      work: operationWork + materializedWork,
+    });
+  }
+  return {
+    version: PROCPLANT_PRODUCTION_DAG_RESULT_VERSION,
+    path: "typed-artifacts",
+    graph,
+    previewHash: summarizeProcPlantGeneratorGraph(graph).hash,
+    artifacts,
+    records,
+    build: (artifacts[output.id] as ProcPlantOutputStageArtifact).build,
+    lods,
+    work,
+  };
 };
 
 export const compileProcPlantProductionDag = (
@@ -1367,13 +1572,16 @@ export const compileProcPlantProductionDag = (
   }
 
   if (genome.vine) validateGuidedVineGraphSemantics(graph, canonical);
-  assertSupportedBackend(genome);
-  const herbaceousBackend = herbaceousBackendFor(genome);
-  const canonicalNodeByStage = new Map(canonical.nodes.map((node) => [node.stage, node]));
   const maximumWork = options.maxWork ?? PROCPLANT_PRODUCTION_DAG_MAX_WORK;
   if (!Number.isInteger(maximumWork) || maximumWork < 1 || maximumWork > PROCPLANT_PRODUCTION_DAG_MAX_WORK) {
     throw new ProcPlantProductionDagError(`maxWork must be an integer in 1..${PROCPLANT_PRODUCTION_DAG_MAX_WORK}`);
   }
+  if (genome.clump && genome.clump.count > 1) {
+    return compileProcPlantClumpProductionDag(genome, graph, canonical, order, environment, maximumWork);
+  }
+  assertSupportedBackend(genome);
+  const herbaceousBackend = herbaceousBackendFor(genome);
+  const canonicalNodeByStage = new Map(canonical.nodes.map((node) => [node.stage, node]));
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
   const canonicalNodeById = new Map(canonical.nodes.map((node) => [node.id, node]));
   if (genome.weberPenn && graph.nodes.length !== canonical.nodes.length) {

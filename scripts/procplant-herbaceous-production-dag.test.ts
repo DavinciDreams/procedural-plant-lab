@@ -159,7 +159,6 @@ assert.throws(
 
 for (const genome of [
   procPlantPresets.phiFern!,
-  procPlantPresets.furGrass!,
   procPlantPresets.maidenhairFernPatch!,
 ] as const) {
   const graph = createProcPlantAuthoringGraph(genome, seed);
