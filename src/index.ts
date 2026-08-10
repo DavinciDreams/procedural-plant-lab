@@ -6,6 +6,7 @@ export * from "./biome-mix";
 export * from "./plant-readiness";
 export * from "./plant-variants";
 export * from "./procplant-asset-qa";
+export * from "./procplant-attachment-materializer";
 export * from "./procplant-authoring-graph";
 export * from "./procplant-debug";
 export * from "./procplant-dense-impostor-pool";

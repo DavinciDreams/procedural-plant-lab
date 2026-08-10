@@ -1,9 +1,20 @@
 import * as THREE from "three";
 import { PROCPLANT_GENERATOR_CONTRACT_REVISION } from "./procplant-contract";
 import {
+  createProcPlantAerialRootGeometry,
+  createProcPlantBerryGeometry,
+  createProcPlantConeGeometry,
+  createProcPlantFruitGeometry,
   createProcPlantLeafGeometry,
+  createProcPlantThornGeometry,
+  type ProcPlantAccessoryKind,
   type ProcPlantGenome,
 } from "./procplants";
+import {
+  materializeProcPlantAttachments,
+  type ProcPlantAttachmentMaterialization,
+  type ProcPlantAttachmentPrototype,
+} from "./procplant-attachment-materializer";
 import { importProcPlantHeroGlb } from "./procplant-hero-glb-import";
 import {
   authorProcPlantHeroSpine,
@@ -17,7 +28,7 @@ import {
   type ProcPlantMaterialPixelSource,
 } from "./procplant-material-bake";
 import { exportProcPlantScenesGlb } from "./procplant-export";
-import type { ProcPlantMeshSpine } from "./procplant-mesh-helper";
+import type { ProcPlantMeshAttachmentSpec, ProcPlantMeshSpine } from "./procplant-mesh-helper";
 
 export interface ProcPlantLabHeroPreview {
   group: THREE.Group;
@@ -28,8 +39,36 @@ export interface ProcPlantLabHeroPreview {
   leaves: THREE.InstancedMesh | null;
   leafMatrices: THREE.Matrix4[];
   leafSways: number[];
+  attachmentMaterialization: ProcPlantAttachmentMaterialization;
   spine: ProcPlantMeshSpine;
 }
+
+const createProcPlantHeroBranchPrototype = () => {
+  const geometry = new THREE.CylinderGeometry(0.035, 0.095, 1, 5, 1, false);
+  // Mesh-attachment transforms use local +Z as the emitted attachment tangent.
+  geometry.rotateX(Math.PI / 2);
+  geometry.translate(0, 0, 0.5);
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+};
+
+const createProcPlantHeroAccessoryPrototype = (kind: ProcPlantAccessoryKind) => {
+  const geometry = kind === "fruit"
+    ? createProcPlantFruitGeometry()
+    : kind === "berry"
+      ? createProcPlantBerryGeometry()
+      : kind === "cone"
+        ? createProcPlantConeGeometry()
+        : kind === "thorn"
+          ? createProcPlantThornGeometry()
+          : createProcPlantAerialRootGeometry();
+  // Procplant accessory primitives grow along +Y; attachment records grow along +Z.
+  geometry.rotateX(Math.PI / 2);
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+};
 
 export const createProcPlantLabHeroPreview = (
   source: ArrayBuffer,
@@ -40,6 +79,27 @@ export const createProcPlantLabHeroPreview = (
   manualSpine?: ProcPlantMeshSpine,
 ): ProcPlantLabHeroPreview => {
   if (source.byteLength > 64 * 1024 * 1024) throw new Error("Hero GLB exceeds the 64 MiB browser authoring limit.");
+  const accessoryGroups = (genome.accessoryOrgans ?? []).map((gene, index) => ({
+    gene,
+    groupId: `hero-organs-${index.toString().padStart(2, "0")}-${gene.kind}`,
+  }));
+  const attachmentSpecs: ProcPlantMeshAttachmentSpec[] = [
+    { id: "hero-branches", kind: "branch", count: 8, startT: 0.22, endT: 0.88, minimumSpacing: 0.055, clearance: 0.01, scale: 0.4 },
+    { id: "hero-leaves", kind: "leaf", count: 56, startT: 0.28, endT: 0.98, minimumSpacing: 0.018, clearance: 0.035, scale: 0.32 },
+    ...accessoryGroups.map(({ gene, groupId }): ProcPlantMeshAttachmentSpec => {
+      const startT = THREE.MathUtils.clamp(gene.startT ?? 0.2, 0, 1);
+      return {
+        id: groupId,
+        kind: "accessory",
+        count: Math.max(0, Math.min(32, Math.round(gene.count))),
+        startT,
+        endT: THREE.MathUtils.clamp(gene.endT ?? 1, startT, 1),
+        minimumSpacing: Math.max(0.008, gene.size * 0.6),
+        clearance: Math.max(0.002, gene.size * 0.08),
+        scale: Math.max(0.003, gene.size),
+      };
+    }),
+  ];
   const imported = importProcPlantHeroGlb(source, {
     bakeNodeTransforms: true,
     maxBytes: 64 * 1024 * 1024,
@@ -55,10 +115,7 @@ export const createProcPlantLabHeroPreview = (
     barkRepeatLength: 0.8,
     swayPower: 1.7,
     emitSpineAnchorsEvery: 2,
-    attachmentSpecs: [
-      { id: "hero-branches", kind: "branch", count: 8, startT: 0.22, endT: 0.88, minimumSpacing: 0.055, clearance: 0.01, scale: 0.4 },
-      { id: "hero-leaves", kind: "leaf", count: 56, startT: 0.28, endT: 0.98, minimumSpacing: 0.018, clearance: 0.035, scale: 0.32 },
-    ],
+    attachmentSpecs,
     attachmentOptions: { seed, maxCandidatesPerAttachment: 48 },
     collars: { enabled: true, includeBranchAttachments: true, strength: 0.32 },
   });
@@ -79,6 +136,51 @@ export const createProcPlantLabHeroPreview = (
   trunk.receiveShadow = true;
   trunk.userData.procplantOwnsMaterial = true;
   group.add(trunk);
+
+  const attachmentPrototypes: ProcPlantAttachmentPrototype[] = [{
+    id: "hero-branch",
+    groupIds: ["hero-branches"],
+    geometry: createProcPlantHeroBranchPrototype(),
+    material: trunkMaterial,
+    castShadow: true,
+    receiveShadow: true,
+    ownsGeometry: true,
+    ownsMaterial: false,
+  }];
+  for (const { gene, groupId } of accessoryGroups) {
+    const material = new THREE.MeshStandardMaterial({
+      name: `procplant-imported-hero-${gene.kind}`,
+      color: gene.color,
+      roughness: gene.kind === "berry" || gene.kind === "fruit" ? 0.58 : 0.78,
+      metalness: 0,
+    });
+    attachmentPrototypes.push({
+      id: groupId,
+      groupIds: [groupId],
+      geometry: createProcPlantHeroAccessoryPrototype(gene.kind),
+      material,
+      castShadow: true,
+      receiveShadow: true,
+      ownsGeometry: true,
+      ownsMaterial: true,
+    });
+  }
+  const attachmentMaterialization = materializeProcPlantAttachments(
+    authored.attachments ?? {
+      contract: "procplants.mesh-attachments",
+      version: 1,
+      seed,
+      requested: 0,
+      emitted: 0,
+      groups: [],
+      attachments: [],
+    },
+    attachmentPrototypes,
+    { includeKinds: ["branch", "accessory"], name: "procplant-imported-hero-attachments" },
+  );
+  if (attachmentMaterialization.audit.materializedAttachments > 0) {
+    group.add(attachmentMaterialization.group);
+  }
 
   const leafAttachments = authored.attachments?.attachments.filter((attachment) => attachment.kind === "leaf") ?? [];
   const leafMatrices = leafAttachments.map((attachment) => new THREE.Matrix4().fromArray(attachment.transform));
@@ -124,6 +226,7 @@ export const createProcPlantLabHeroPreview = (
     leaves,
     leafMatrices,
     leafSways,
+    attachmentMaterialization,
     spine: authored.spine,
   };
 };

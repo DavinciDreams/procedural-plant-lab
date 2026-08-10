@@ -2248,6 +2248,7 @@ const disposeHeroImportGroup = (preview: THREE.Group | null) => {
   if (!preview) return;
   preview.traverse((object) => {
     if (!(object instanceof THREE.Mesh)) return;
+    if (object instanceof THREE.InstancedMesh) object.dispose();
     object.geometry.dispose();
     if (object.userData.procplantOwnsMaterial) {
       const materials = Array.isArray(object.material) ? object.material : [object.material];
@@ -2283,6 +2284,7 @@ const installHeroImportPreview = (authored: ProcPlantLabHeroPreview, fileName: s
     sourceFile: fileName,
     sourceContentHash: authored.sourceContentHash,
     contentHash: authored.contentHash,
+    attachmentMaterialization: authored.attachmentMaterialization.audit,
   };
   scene.add(authored.group);
   if (heroMesh) heroMesh.visible = false;
@@ -2290,6 +2292,13 @@ const installHeroImportPreview = (authored: ProcPlantLabHeroPreview, fileName: s
   app.dataset.heroImportHash = authored.contentHash;
   app.dataset.heroImportVertices = String(authored.audit.vertexCount);
   app.dataset.heroImportAttachments = String(authored.audit.attachmentsEmitted);
+  app.dataset.heroImportAttachmentHash = authored.attachmentMaterialization.audit.contentHash;
+  app.dataset.heroImportAttachmentInstances = String(authored.attachmentMaterialization.audit.materializedAttachments);
+  app.dataset.heroImportAttachmentDraws = String(authored.attachmentMaterialization.audit.instanceDraws);
+  app.dataset.heroImportAttachmentVertices = String(authored.attachmentMaterialization.audit.materializedVertices);
+  app.dataset.heroImportAttachmentTriangles = String(authored.attachmentMaterialization.audit.materializedTriangles);
+  app.dataset.heroImportBranchInstances = String(authored.attachmentMaterialization.audit.branchInstances);
+  app.dataset.heroImportAccessoryInstances = String(authored.attachmentMaterialization.audit.accessoryInstances);
   if (heroSpineEditor) {
     heroSpineEditor.setTarget(authored.trunk);
     heroSpineEditor.copyDisplayTransform(authored.group);
@@ -2315,6 +2324,14 @@ const disposeHeroImportPreview = () => {
   delete app.dataset.heroImportHash;
   delete app.dataset.heroImportVertices;
   delete app.dataset.heroImportAttachments;
+  delete app.dataset.heroImportAttachmentHash;
+  delete app.dataset.heroImportAttachmentInstances;
+  delete app.dataset.heroImportAttachmentDraws;
+  delete app.dataset.heroImportAttachmentVertices;
+  delete app.dataset.heroImportAttachmentTriangles;
+  delete app.dataset.heroImportBranchInstances;
+  delete app.dataset.heroImportAccessoryInstances;
+  delete app.dataset.heroImportLastExportBytes;
   syncHeroSpineButtons();
 };
 
@@ -3995,12 +4012,13 @@ exportGlbButton.addEventListener("click", async () => {
   try {
     if (heroImportPreview) {
       const { downloadProcPlantLabHeroPreview } = await import("./procplant-lab-authoring-imports");
-      await downloadProcPlantLabHeroPreview(
+      const exportedBytes = await downloadProcPlantLabHeroPreview(
         heroImportPreview,
         heroImportAudit,
         app.dataset.heroImportHash ?? String(state.seed),
       );
-      setSaveStatus("Imported hero GLB exported with fitted spine, bark UV, wind, collars, and procedural leaf anchors.");
+      app.dataset.heroImportLastExportBytes = String(exportedBytes);
+      setSaveStatus("Imported hero GLB exported with fitted spine, bark UV, wind, collars, and instanced branch, leaf, and accessory anchors.");
       return;
     }
     const exportOptions = {

@@ -163,6 +163,9 @@ try {
       const lastGlbMaterialHash = document.querySelector('#app')?.dataset.lastGlbMaterialHash ?? '';
       const lastGlbMaterialAssignments = Number(document.querySelector('#app')?.dataset.lastGlbMaterialAssignments ?? 0);
       const lastGlbSurfaceGroups = Number(document.querySelector('#app')?.dataset.lastGlbSurfaceGroups ?? 0);
+      primary.value = 'winterberryShrub';
+      primary.dispatchEvent(new Event('change', { bubbles: true }));
+      await waitForIdle();
       const makeHeroGlb = () => {
         const binary = new Uint8Array(44);
         new Float32Array(binary.buffer, 0, 9).set([-0.5, 0, 0, 0.5, 0, 0, 0, 2, 0.2]);
@@ -210,8 +213,19 @@ try {
       const heroImportActive = document.querySelector('#app')?.dataset.heroImportActive ?? null;
       const heroImportVertices = Number(document.querySelector('#app')?.dataset.heroImportVertices ?? 0);
       const heroImportAttachments = Number(document.querySelector('#app')?.dataset.heroImportAttachments ?? 0);
+      const heroImportAttachmentHash = document.querySelector('#app')?.dataset.heroImportAttachmentHash ?? '';
+      const heroImportAttachmentInstances = Number(document.querySelector('#app')?.dataset.heroImportAttachmentInstances ?? 0);
+      const heroImportAttachmentDraws = Number(document.querySelector('#app')?.dataset.heroImportAttachmentDraws ?? 0);
+      const heroImportAttachmentVertices = Number(document.querySelector('#app')?.dataset.heroImportAttachmentVertices ?? 0);
+      const heroImportAttachmentTriangles = Number(document.querySelector('#app')?.dataset.heroImportAttachmentTriangles ?? 0);
+      const heroImportBranchInstances = Number(document.querySelector('#app')?.dataset.heroImportBranchInstances ?? 0);
+      const heroImportAccessoryInstances = Number(document.querySelector('#app')?.dataset.heroImportAccessoryInstances ?? 0);
       const heroImportStatus = document.querySelector('#heroImportStatus')?.textContent ?? '';
       const heroImportHashBeforeEdit = document.querySelector('#app')?.dataset.heroImportHash ?? '';
+      document.querySelector('#exportGlb').click();
+      for (let i = 0; i < 240 && !/instanced branch/.test(document.querySelector('#saveStatus')?.textContent ?? ''); i++) await wait(100);
+      const heroImportExportStatus = document.querySelector('#saveStatus')?.textContent ?? '';
+      const heroImportExportBytes = Number(document.querySelector('#app')?.dataset.heroImportLastExportBytes ?? 0);
       document.querySelector('#editHeroSpine').click();
       for (let i = 0; i < 120 && document.querySelector('#editHeroSpine')?.getAttribute('aria-pressed') !== 'true'; i++) await wait(100);
       const heroSpineEditing = document.querySelector('#editHeroSpine')?.getAttribute('aria-pressed') ?? null;
@@ -302,6 +316,15 @@ try {
         heroImportActive,
         heroImportVertices,
         heroImportAttachments,
+        heroImportAttachmentHash,
+        heroImportAttachmentInstances,
+        heroImportAttachmentDraws,
+        heroImportAttachmentVertices,
+        heroImportAttachmentTriangles,
+        heroImportBranchInstances,
+        heroImportAccessoryInstances,
+        heroImportExportStatus,
+        heroImportExportBytes,
         heroImportStatus,
         heroSpineEditing,
         heroSpineAddEnabled,
@@ -370,6 +393,15 @@ try {
   assert.equal(result.heroImportActive, "true");
   assert.equal(result.heroImportVertices, 3);
   assert.ok(result.heroImportAttachments > 0, "hero import must emit procedural attachment anchors");
+  assert.match(result.heroImportAttachmentHash, /^fnv1a32:[0-9a-f]{8}$/);
+  assert.equal(result.heroImportAttachmentInstances, result.heroImportBranchInstances + result.heroImportAccessoryInstances);
+  assert.ok(result.heroImportBranchInstances > 0, "hero branch records must materialize as shared instances");
+  assert.ok(result.heroImportAccessoryInstances > 0, "accessory-bearing hero genomes must materialize accessory instances");
+  assert.equal(result.heroImportAttachmentDraws, 2, "winterberry hero branches and berries must use two shared prototype draws");
+  assert.ok(result.heroImportAttachmentVertices > 0);
+  assert.ok(result.heroImportAttachmentTriangles > 0);
+  assert.ok(result.heroImportExportBytes > 0, "materialized imported hero content must survive real GLB export");
+  assert.match(result.heroImportExportStatus, /instanced branch, leaf, and accessory anchors/);
   assert.match(result.heroImportStatus, /bark UV, wind, and collars applied/);
   assert.equal(result.heroSpineEditing, "true");
   assert.equal(result.heroSpineAddEnabled, true);
