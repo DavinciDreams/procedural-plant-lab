@@ -518,6 +518,7 @@ const paletteMaskPng = makeIndexedPng(
 const metadata = {
   pivot: { x: 0.5, y: 0 }, attachment: { x: 0.5, y: 0 },
   bendAxis: { origin: { x: 0.5, y: 0 }, direction: { x: 0, y: 1 } },
+  normalDirection: { x: 0, y: 0, z: 1 },
 };
 const inlineManifest = JSON.stringify({
   cutouts: [{ id: "leaf", mask: { width: maskSize, height: maskSize, alpha: [...maskAlpha] }, metadata }],

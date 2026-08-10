@@ -21,11 +21,18 @@ export {
   procPlantPresetIds,
   hybridizePlantGenomes,
   buildProcPlantGraph,
+  inspectProcPlantSpaceColonizationChains,
+  buildProcPlantGraphIr,
   buildProcPlantInstancedParts,
   buildProcPlantInstancePrototype,
+  createProcPlantClumpStagePlan,
+  buildProcPlantClumpStageParts,
+  materializeProcPlantInstancedParts,
   buildProcPlantTemplateFromGraph,
   buildProcPlantTemplate,
+  compileProcPlantClumpStageLods,
   compileProcPlantLods,
+  compileProcPlantLodsFromTemplate,
   procPlantEcologyProfiles,
   scoreProcPlantForEcology,
   resolveProcPlantCommunity,
@@ -33,6 +40,9 @@ export {
   estimateProcPlantLods,
   buildProcPlantRuntimePackage,
 } from "./procplants";
+export * from "./procplant-chain-tube-overrides";
+export * from "./procplant-spline-crown";
+export * from "./procplant-production-dag";
 export * from "./plant-readiness";
 export * from "./plant-variants";
 export * from "./procplant-organ-variants";

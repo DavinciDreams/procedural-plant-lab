@@ -63,15 +63,17 @@ Good starting experiments:
 - Browser-native alpha cutout tracing, deterministic multi-island/hole triangulation, direct point editing and freehand island/hole creation, atlas packing, edge-dilated mip padding, UV/pivot/attachment/bend metadata, and mesh helpers.
 - Low-poly fruit, berry, cone, thorn, and aerial-root organs with branch-relative placement.
 - A reusable instanced placement LOD pool with hysteresis, culling, explicit allocation-free updates, and migration statistics.
-- Renderer-independent visibility clusters provide conservative storage-buffer-ready instance/cluster bounds, WebGL/WebGPU frustum planes, and allocation-stable CPU reference culling/LOD compaction for dense downstream renderers. A bounded WebGPU plan adds deterministic buffer layouts, WGSL reset/classify/finalize kernels, indirect draw commands, device-limit checks, and CPU parity without claiming live device adoption.
+- Renderer-independent visibility clusters provide conservative storage-buffer-ready instance/cluster bounds, WebGL/WebGPU frustum planes, and allocation-stable CPU reference culling/LOD compaction for dense downstream renderers. A bounded WebGPU plan and opt-in injected-device runtime add deterministic buffer layouts, WGSL reset/classify/finalize kernels, owned/reused GPU buffers, indirect draw commands, device-limit checks, readback parity diagnostics, loss/abort handling, and idempotent disposal. A borrowed-resource draw encoder can record compute and indexed-indirect LOD draws into one caller-owned command buffer; its portable default avoids the optional `indirect-first-instance` feature, while explicit feature use is checked at runtime. The WebGL lab remains the default, and Tellus intentionally stays on its currently faster WebGL path; neither adopts this WebGPU path, and no device FPS claim is implied.
 - Dense Weber-Penn tree placements migrate between real compiled LOD tiers after their worker compile completes.
 - Canonical graph-backed woody cohorts also migrate asynchronously while companion plants and local-light variants stay intact.
 - Eleven canonical fern/ground-cover cohorts migrate through the same allocation-free placement pool; density-1 Phi Fern and Clover measurements reduced live biome triangles by 73.5% and 59.4% respectively after the atomic worker swap.
 - Four additional broad low-poly patches add maidenhair fern, woodland violet, trillium, and horsetail silhouettes at 628-1,908 close triangles with real 4/2-triangle far tiers.
-- Typed generator-DAG, macro-rule, space-colonization, and parallel-transport swept-tube foundations for higher-level authoring tools.
+- Those four bespoke broad patches also have an edited production-DAG path: cluster/support architecture, branch-relative leaves, and flower stalks use independent deterministic stage seeds while the untouched graph retains exact legacy bytes and LOD/coverage budgets. Unsupported topology, placement, and phyllotaxy edits fail closed; Tellus defaults remain opt-in.
+- Typed generator-DAG, macro-rule, space-colonization, and parallel-transport swept-tube foundations for higher-level authoring tools. Edited graph-native, space-colonized, branch-module, guided-vine, bounded herbaceous/clump/bespoke-patch, and Weber-Penn plants execute through honest typed artifacts. Weber exposes real branch-soup/native-foliage artifacts and only vendor-representable controls; unsupported specialized rewires fail closed.
 - A production `colonizedHazelShrub` backend using deterministic space colonization, swept tubes, real reduced LOD, and branch-relative foliage.
 - Versioned freeform crowns use deterministic weighted constructive fields of up to 24 oriented ellipsoid/box lobes with positive union and subtractive cutouts, viewport add/select/center-drag/remove, per-lobe dimension/yaw/density controls, URL/JSON/genome/graph persistence, strict sampling/work caps, and exact default-geometry compatibility; global axis handles still scale the whole field.
-- A deterministic target-bound nine-stage authoring-graph adapter included in JSON exports, with built-in handlers for supported compiler projections, real architecture/branching-to-foliage dataflow, execution records, and a lazy editor for mapped seeds/enabled/count/curve/parameter controls, cycle-safe wiring, explicit unsupported audits, and live macro controls.
+- A deterministic target-bound nine-stage authoring-graph adapter included in JSON exports, with real typed backends, execution records, a lazy editor for mapped seeds/enabled/count/curve/parameter controls, cycle-safe wiring, and explicit unsupported audits.
+- Bounded clump production adapters preserve legacy bytes and specialized LOD policy: generic clumps separate whole-shoot generation from placement, while Daylily independently seeds crown architecture, branch-relative strap foliage, and real scape/flower topology with graph attachment IR.
 - Deterministic sphere/capsule/plane/box scene-guide queries provide signed clearance, attraction, repulsion, tip steering, and penetration resolution without a renderer dependency.
 - Versioned spatial direction, attract/magnet, repel/avoid, and curl fields deform public plant graphs deterministically while preserving connectivity and rebuilding branch-relative frames/attachments.
 - Versioned source/sink growth turns deterministic crown-occlusion probes or caller-supplied directional light into stable vigor, growth-scale, branch-activation, and de-duplicated self-prune recommendations. A graph-bound multi-step state persists reserves/growth, confirms activation and pruning with hysteresis, and serializes deterministic audits.
@@ -96,7 +98,7 @@ Good starting experiments:
 - Native headless GLB output for one selected LOD or the complete LOD set, with deterministic bytes and optional bounds-box/trunk-capsule collision proxies.
 - A typed deterministic material DAG validates bark/leaf PBR channels, texture roles/color spaces/transforms, procedural descriptors, constant folding, direct bindings, and explicit bake-required expressions. Its glTF planner maps lossless direct base/alpha/normal/ORM/AO/emissive bindings, while the CPU baker emits color-correct PNG and embedded glTF material bytes. Generated templates retain deterministic UV0 across every real LOD and are partitioned without index copies into explicit bark/stem and organ ranges. The lazy lab `Bake PBR Material` action downloads and installs deterministic bark/leaf base-color, packed ORM, and procedural normal resources on live wind-compatible MeshStandard materials; normal-mapped geometry gains an explicit normalized tangent frame only on this lazy path.
 - Optional deterministic lossless `EXT_meshopt_compression` for GLB geometry: required mode produces real transfer savings for decoder-aware consumers, while fallback mode retains ordinary core buffers for compatibility. Texture compression and triangle simplification are intentionally separate.
-- Deterministic ASCII USDA output for one real LOD or a standard four-choice `LOD` variant set, preserving topology, normals, display colors, sway/tintability primvars, typed metadata, and optional physics-enabled bounds-box/trunk-capsule collision proxies.
+- Deterministic ASCII USDA output for one real LOD or a standard four-choice `LOD` variant set, preserving topology, normals, display colors, sway/tintability primvars, typed metadata, and optional physics-enabled bounds-box/trunk-capsule collision proxies. An opt-in library path binds one explicit ready baked slot through `UsdPreviewSurface`, exports t-flipped `st`, color-correct `UsdUVTexture` base/ORM/normal/emissive inputs, and copied package-relative PNG assets. A companion deterministic USDZ writer stores the USDA default layer first and every dependency uncompressed on required 64-byte boundaries with path, entry, byte, and work caps.
 - Headless atlas manifests accept bounded dependency-free PNG alpha input, including non-interlaced and Adam7 images: 1/2/4/8/16-bit grayscale, 8/16-bit RGB/gray-alpha/RGBA, and 1/2/4/8-bit indexed color, with strict native-precision grayscale/RGB or indexed `tRNS`, in addition to legacy inline masks.
 - Optional bounds-box or trunk-capsule GLB collision proxies.
 - Deterministic season, health, and maturity variants that never mutate authored presets.
@@ -180,7 +182,7 @@ npm run test:tellus-contract
 - `src/procplants.ts` is the generator core.
 - `src/main.ts` is the standalone Three.js demo.
 - `src/plant-readiness.ts` provides exact structural export QA.
-- `src/procplant-wind.ts` installs the shared GPU wind deformation and attributes.
+- `src/procplant-wind.ts` installs the exact-compatible V1 GPU wind path and the lab's opt-in hierarchical V2 trunk/branch/leaf deformation for visible and shadow materials.
 - `src/procplant-lod.ts` compiles/caches hero LODs off-thread and selects them with hysteresis.
 - `src/procplant-contract.ts` defines and validates the shared runtime/Tellus/GLB LOD selection contract.
 - `src/procplant-debug.ts` builds disposable, allocation-free authoring overlays.
@@ -196,6 +198,8 @@ npm run test:tellus-contract
 - `src/procplant-dense-impostor-pool.ts` batches dense static billboard placements into deterministic atlas-view buckets.
 - `src/procplant-generator-graph.ts` defines deterministic typed generator DAGs and serializable manual operations.
 - `src/procplant-authoring-graph.ts` derives a live nine-stage graph and preview from any authored genome.
+- `src/procplant-production-dag.ts` executes typed graph-native, space-colonization, branch-module, guided-vine, bounded herbaceous, Weber-Penn, clump, Daylily, and bespoke broad-patch artifacts while retaining exact canonical legacy output and rejecting non-representable edits.
+- `src/procplant-graph-editor-controls.ts` validates canonical stage activation/removal, same-stage settings copy/paste, and supported placement/scope controls without inventing extra-node topology.
 - `src/procplant-rules.ts` applies safe environmental and authoring macro rules to allow-listed genome fields.
 - `src/procplant-guide-query.ts` samples primitive scene guides, obstacle clearance, and deterministic growth-tip steering.
 - `src/procplant-mesh-query.ts` builds bounded deterministic triangle BVHs for imported-mesh clearance and obstacle queries.
@@ -215,12 +219,17 @@ npm run test:tellus-contract
 - `src/procplant-visibility-clusters.ts` builds GPU-ready visibility clusters and allocation-stable CPU reference selections.
 - `src/procplant-three-visibility-lod-adapter.ts` applies those clusters to live Three.js camera frusta and placement LOD pools without steady-state allocation.
 - `src/procplant-webgpu-visibility.ts` plans bounded visibility buffers, WGSL compute passes, LOD compaction, and indirect draw commands with a CPU reference oracle.
+- `src/procplant-webgpu-visibility-runtime.ts` executes that plan on an injected WebGPU device while owning/reusing buffers and exposing opt-in readback validation.
+- `src/procplant-webgpu-indirect-draw.ts` exposes allocation-stable per-LOD compacted-index bindings and records one indexed-indirect draw per LOD without taking ownership of runtime buffers.
+
+The injected-device runtime is available from the explicit `procplants/webgpu` package entry. It is excluded from both the default browser startup graph and `procplants/core`; importing the existing plan API from the root/core entries remains supported. Tellus currently defaults to its faster WebGL renderer and does not exercise this path.
 - `src/procplant-organ-placement-overrides.ts` serializes and applies target-bound branch-relative leaf/flower/fruit placements.
 - `src/procplant-resource-growth.ts` allocates maintenance, reserves, and growth from directional light resources.
 - `src/procplant-crown-light.ts` samples bounded deterministic stem/organ occlusion and adapts it directly to resource growth.
 - `src/procplant-graph-resource-growth.ts` adapts public segment IR to vigor and self-prune recommendations.
 - `src/procplant-growth-simulation.ts` persists deterministic multi-step reserve, activation, growth, and prune evidence.
 - `src/procplant-growth-topology.ts` applies graph-bound confirmed self-prune and terminal dormant-bud shoot plans with exact audits.
+- `src/procplant-damage-topology.ts` applies opt-in target-bound missing-organ and broken-branch topology with repaired ancestry, capped scar records, and exact healthy/no-op reuse.
 - `src/procplant-weber-penn-trim.ts` serializes and audits stable attachment-level Weber-Penn trim overrides.
 - `src/procplant-space-colonization.ts` supplies deterministic attraction-volume growth foundations.
 - `src/procplant-spatial-force.ts` applies bounded localized force fields to public graph topology and rederives frames/attachments.
@@ -229,6 +238,7 @@ npm run test:tellus-contract
 - `src/procplant-mesh-helper.ts` auto-fits/binds imported meshes to spines and emits bark/wind/anchor attributes.
 - `src/procplant-hero-spine-authoring.ts` selects imported GLB primitives by stable provenance and emits capped, audited spine-bound geometry packages.
 - `src/procplant-junction-collar.ts` computes audited compact-support collar blending around imported-mesh branch anchors.
+- `procplants/junction-research` is a separate opt-in package entry backed by `src/procplant-watertight-junction.ts`: it samples one straight parent plus one to three straight children as an implicit union, emits stable bark/branch attributes, and releases geometry only after closed-manifold and bounded self-intersection audits pass. Unsupported or failed candidates return the caller's exact collar geometry. It is not the production swept-tree union path: the frozen three-way fixture costs 7,388 triangles versus 45 for independent low-resolution tubes, and 3 of 9 angle/radius sweep cases currently fail closed.
 - `src/procplant-foliage-relaxation.ts` relaxes public attachment/organ cards with bounded deterministic collision handling.
 - `src/procplant-scatter.ts` creates deterministic density-map ecosystem placement plans.
 - `src/procplant-lsystem.ts` provides parametric stochastic expansion and a 3D plant turtle.
@@ -237,6 +247,7 @@ npm run test:tellus-contract
 - `src/procplant-png-alpha.ts` strictly decodes bounded non-interlaced or Adam7 packed/8/16-bit PNG masks for headless atlas builds.
 - `src/procplant-export.ts` validates and lazily exports Procplant templates/LOD sets as GLB.
 - `src/procplant-usd-export.ts` serializes deterministic ASCII USDA meshes, LOD variants, primvars, metadata, and conservative collision proxies.
+- `src/procplant-usdz-export.ts` packages USDA plus copied PNG dependencies as bounded, deterministic, standards-aligned USDZ without claiming binary USDC.
 - `src/index.ts` is the versioned public library surface.
 - `src/core.ts` is the smaller runtime/Tellus library surface with stable `procplants/core` package exports.
 - `src/plant-variants.ts` derives seasonal, health, and maturity forms.
@@ -246,6 +257,8 @@ npm run test:tellus-contract
 - `docs/PRD_IMPLEMENTATION_STATUS.md` tracks implemented and remaining PRD work.
 - `docs/PERFORMANCE_REVIEW.md` records current bundle, geometry, and live placement-LOD evidence.
 - `docs/TELLUS_INTEGRATION.md` records the audited downstream boundary and safe adoption sequence.
+
+The existing `procplants usda` CLI remains intentionally geometry-only: its durable input contract is a genome JSON and its I/O adapter writes text. Textured USDA/USDZ require an explicit in-memory ready material-bake bundle and binary output ownership, so they are exposed through the library API instead of guessing external files or mislabeled `.usd`/USDC bytes. `npm run test:usd-openusd` uses pinned `usd-core==26.8` through `uv` to parse and compose every all/single LOD and collision selection and to validate package storage, CRC, allowed types, default-layer order, and 64-byte payload alignment.
 
 ## Generator Output
 

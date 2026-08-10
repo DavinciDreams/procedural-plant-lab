@@ -1,64 +1,86 @@
 # Tellus integration handoff
 
-Updated: 2026-08-08
+Updated: 2026-08-10
 
 ## Current boundary
 
-The current Tellus default branch audited for this work is `origin/master` at `aa3942e`. The local primary checkout is older (`8b24052`); the two intervening commits are dependency/security maintenance and do not change the procedural-plant contract.
+Tellus `master` is currently `ffb3a9f`. Two clean, green draft PRs carry the Procplants integration:
 
-Tellus currently owns a divergent generator copy at `src/tellus-procplants.ts`. Its biome/runtime consumers include `src/tellus-procplant-biomes.ts`, `src/tellus-procplant-vegetation.ts`, `src/tellus-biome-mix.ts`, `src/tellus-procedural-assets.ts`, and `src/biome-mixer.ts`.
+- Tellus [#177](https://github.com/DavinciDreams/tellus/pull/177), commit `af47d95`, removes the 5,782-line vendored generator and pins `procplants/core` at exact SHA `e3a69da8404efb7a093d18c699c13373365578f8` through a thin contract-revision-3 adapter.
+- Tellus [#178](https://github.com/DavinciDreams/tellus/pull/178), commit `0e14670`, is stacked on #177 and adopts package LOD0/LOD1/LOD2 geometry for eleven audited ground-cover cohorts.
 
-Default Tellus behavior must not be inferred from this repository alone:
+Both PRs remain open drafts. Their CI, typecheck, and production builds pass, but neither is merged, served, or deployed. The local primary Tellus checkout is stale and dirty; use the isolated PR worktrees or a fresh worktree rather than treating it as authoritative.
 
-- `phiFern` is currently routed to an external asset-store LOD2 model.
-- Procedural `phiFern` and `blueSpruce` are excluded from global defaults.
-- Tellus already owns its production chunk LOD, impostor, wind, culling, shadow, and asset-loading policy.
-- The standalone lab now proves allocation-free per-placement LOD plus conservative clustered-frustum masking for eleven fern/ground-cover presets, but those distance bands and measurements are Procplants evidence, not a replacement for Tellus's render-pressure policy.
+Tellus remains WebGL by default because that renderer is currently faster there. WebGPU requires an explicit local opt-in and is not exercised by the ground-cover integration. Procplants' WebGPU compute and indexed-indirect evidence is a separate correctness experiment, not a Tellus runtime or performance claim.
 
-Therefore these Procplants improvements do not change a deployed/default Tellus biome until Tellus deliberately adopts the shared contract and updates those mappings.
+## Ownership and default policy
 
-## Validated integration worktree
+Procplants owns deterministic genomes, graph/attachment IR, organ prototypes, geometry/UV tiers, generator contract revisioning, and renderer-independent LOD/visibility data. Tellus continues to own world placement, chunks, distance/render-pressure policy, shadows, materials, asset substitutions, renderer selection, and deployment verification.
 
-An isolated Tellus worktree at `origin/master` (`aa3942e`) now accepts producer
-contract revision 2 / fixture version 2. Its byte-identical golden fixture pins
-UV0, complete bark/organ surface coverage, supported instance kinds, the runtime
-LOD-selection tiers, biome asset-LOD normalization, and four representative
-presets. This is an approval/provenance gate, not a claim that Tellus's vendored
-generator reproduces the producer hashes.
+The integration deliberately preserves Tellus policy:
 
-The same worktree selectively adopted cost-only parity changes that are safe
-without the future package adapter. No automatic biome mapping, asset fallback,
-shadow, chunk LOD, or deployment default changed:
+- Automatic ecology uses a frozen Tellus-owned 13-preset allowlist.
+- Nine new ground covers remain placement-only and cannot enter automatic paint/ecology mappings.
+- Ground-cover cohorts do not cast or receive shadows in the validated field path.
+- Phi Fern and Clover remain eligible under the existing explicit mappings; the other new varieties are opt-in.
+- Package geometry costs do not override Tellus chunk, grass, shadow, or renderer policy.
 
-| Tellus preset | Before | After | Reduction |
-| --- | ---: | ---: | ---: |
-| Phi Fern | 6,384 tris | 352 tris | 94.5% |
-| Clover Groundcover | 1,574 tris | 1,226 tris | 22.1% |
-| Blue Spruce | 11,840 tris | 5,398 tris | 54.4% |
-| Alpine Fir | 15,824 tris | 6,750 tris | 57.3% |
+## Contract revision 3
 
-Phi Fern retains an approximately 1.23 by 1.61 local-unit footprint and Clover
-approximately 1.11 by 1.29. Tellus typecheck, the full 54-test procplant
-vegetation suite, the contract/cost gates, and the production build pass in that
-worktree. These are source/build results; no served world or deployment was
-changed or claimed.
+The producer and #177 use `PROCPLANT_GENERATOR_CONTRACT_REVISION === 3` and `fixtures/tellus-procplant-contract-v3.golden.json`. The acceptance fixture covers deterministic per-LOD geometry, bounds, sway, UV0, surface hashes, attachment/instance counts, and all 20 supported instance kinds including dedicated `fernFrond`.
 
-Against a separate clean `origin/master` build at the same commit and toolchain,
-the port adds only 915 raw / 280 gzip bytes to the procplant-biomes chunk
-(0.59% / 0.67%). Main is identical in raw bytes, vendor-three is byte-identical,
-and the other compared routes are unchanged within three gzip bytes.
+In Procplants:
 
-## Safe adoption sequence
+```powershell
+npm run build:lib
+npm run test:tellus-contract
+npm run test:package-consumer
+```
 
-1. Build the reusable package with `npm run build:lib` and consume its canonical `procplants/core` surface for generator/schema/runtime contracts; use the full root entry only for authoring/export features. Do not copy `src/procplants.ts` again. The package now builds on `prepare`, keeps Vite tooling development-only, and declares the Tellus-tested Three.js `>=0.183.2 <0.184.0` peer range so the renderer owns one singleton. An immutable reviewed commit/package is still required before Tellus declares the runtime dependency.
-2. Copy or generate `fixtures/tellus-procplant-contract-v2.golden.json` in Tellus CI and compare it before accepting a generator revision. This acceptance gate is implemented in Tellus. In this repository, `npm run test:tellus-contract` checks drift and `npm run write:tellus-contract` regenerates the fixture after review. The habit-aware ground-cover card revision changes the Clover LOD2/LOD3 bounds and geometry hashes while preserving the version-2 schema and 4/2-triangle budgets, so the consumer fixture must be reviewed and updated with the producer rather than bypassed.
-3. Add a thin Tellus adapter around `ProcPlantGenome`, `buildProcPlantInstancedParts`, `compileProcPlantLods`, and `PROCPLANT_GENERATOR_CONTRACT_REVISION`. Keep Tellus-owned chunking, distance policy, shadows, wind uniforms, and asset substitutions outside the generator package.
-4. The isolated Tellus worktree now exposes `maidenhairFernPatch` and `woodlandVioletCarpet` as explicit placement-only entries beside optimized `cloverGroundcover`, while keeping automatic paint/ecology mappings unchanged. Add the remaining groundcovers (`brackenFernMat`, `woodSorrelCarpet`, `woodlandAnemoneCarpet`, `creepingPhloxCarpet`, `wildStrawberryGroundcover`, `trilliumPatch`, and `horsetailColony`) only after field-density, shadow, grass-occupancy, and near/mid/far validation. Procplants has standalone pool evidence for these plus `phiFern` (73.5% fewer live biome triangles for Phi Fern and 59.4% for Clover at density 1), but Tellus must choose its own distances, shadow policy, and render-pressure response. The accessory-bearing `winterberryShrub`, `shorePineCones`, `thornyBramble`, and `epiphyticAroidRoots` should follow only after Tellus maps the new fruit/berry/cone/thorn/aerial-root instance kinds. Treat `climbingIvy`, `canopyLiana`, `floweringWallCreeper`, `hangingMoss`, and `cushionMoss` as a separate opt-in adoption: Tellus must map `mossTuft` and decide how authored static guide/support data relates to world geometry. `colonizedHazelShrub` is another opt-in backend and should be accepted only after Tellus validates its swept-tube vertex attributes and 4,898/2,457/4/2 LOD sequence. The low-cost `sugarMaple`, `weepingWillow`, `windsweptBonsai`, `deadwoodSnag`, and `twilightFantasyTree` presets are additive opt-ins and do not alter existing defaults.
-5. Compare optimized procedural Phi Fern and conifers against the current external substitutions before changing defaults. Validate runtime frames and served/deployed behavior; source/build success alone is not deployment proof.
-6. Treat generated UV0, baked-material GLBs, and `EXT_mesh_gpu_instancing` forest assets as separate opt-in consumer capabilities. Confirm Tellus texture/material conventions and extension support before enabling them; compact export is not evidence of Tellus runtime culling or deployment behavior.
+In Tellus #177, the tests resolve the installed `procplants/core` package and recompute the fixture evidence rather than importing the producer source tree. The adapter dispatches all 20 instance kinds exhaustively and supplies UV0 at every local renderer seam.
 
-## Contract ownership
+The exact #177 pin predates the cumulative authoring/DAG stack. Its geometry and revision-3 fixture remain compatible, but after the cumulative Procplants PR lands Tellus should pin the immutable merged SHA or a release and rerun the installed-package, contract, vegetation, cost, typecheck, and build gates.
 
-- Procplants owns deterministic genomes, graph/attachment IR, organ prototypes, cutout/impostor atlas construction, compiled geometry/UV tiers, the generic placement LOD pool, optional density-map scatter plans, bounded instanced asset export, phyllotaxy, and generator contract revisioning.
-- Tellus owns world placement, chunk lifecycle, camera/render-pressure LOD policy, shadow/reflection budgets, material integration, asset-store fallbacks, and deployment verification.
-- `TellusProcPlantPackage.generatorContractRevision` is the compatibility gate. Biome mix `version: 1` and registry `version: 2` remain their existing serialized schema versions and must not be confused with the generator revision.
+## Geometry and field evidence
+
+At canonical seed `612072`, current Procplants budgets are:
+
+| Preset | LOD triangles | LOD vertices | Notes |
+| --- | ---: | ---: | --- |
+| Phi Fern | 352 / 264 / 4 / 2 | 1,056 / 792 / 8 / 4 | 8 `fernFrond` instances; about 1.23 by 1.61 ground coverage |
+| Blue Spruce | 3,934 / 2,494 / 4 / 2 | 7,324 / 3,942 / 8 / 4 | Branch-relative conifer sprays |
+| Alpine Fir | 5,190 / 3,174 / 4 / 2 | 8,388 / 4,509 / 8 / 4 | Branch-relative conifer sprays |
+| Redwood Spire | 3,896 / 2,540 / 4 / 2 | 6,765 / 3,710 / 8 / 4 | Narrow conifer crown |
+| Tundra Small Pine | 3,678 / 2,354 / 4 / 2 | 7,148 / 3,826 / 8 / 4 | Compact pine |
+| Shore Pine | 1,596 / 1,080 / 4 / 2 | 4,692 / 3,168 / 8 / 4 | Includes package cone instances |
+
+The Procplants `test:conifer-fern-budget` gate freezes these current vertex/triangle budgets and hashes. The frozen v2 Phi Fern was 1,872/624/4/2 triangles and 5,616/1,872/8/4 vertices, so revision 3 reduces its close tier by 81.2% while broadening the dedicated fern crown.
+
+Tellus #178 validates eleven ground-cover cohorts through package detail, clustered, crossed-card, and omission tiers. Its deterministic field evidence is:
+
+- 49 chunks, 180 plants, 114 renderer instances, 51,304 triangles, and 184 non-empty draws.
+- 110.243 by 111.407 metres of placement coverage.
+- Zero active ground-cover shadow casters, receivers, or proxies.
+- A grass-coexistence chunk with 1,712 grass instances, 75,016 total triangles, and 9 draws.
+- A low-FPS scheduling test that proves bounded queue work only; it is not an FPS benchmark.
+
+These are deterministic scene-structure and cost checks. They do not instantiate a representative-device browser renderer, measure GPU time, or prove served/deployed capacity.
+
+## Delivery sequence
+
+1. Completed: Procplants PR #10 landed the linear package/fern/declaration foundation on `main` as merge commit `31a16bd1b21d5236a93a97af34c5ad196482968a`; exact SHA `e3a69da...` is now reachable.
+2. Publish and merge the validated cumulative Procplants integration rather than sequentially merging its many mutually conflicting draft siblings.
+3. Merge Tellus #177 into `master`.
+4. Retarget #178 to `master`, rerun CI, and merge it.
+5. Repin Tellus to the cumulative merged Procplants SHA or immutable release and rerun installed fixture-v3 acceptance.
+6. Run a controlled representative-device Tellus WebGL field test with fixed browser, power, shadow, grass, camera, and density conditions before changing any automatic variety defaults.
+
+Do not use Procplants' standalone WebGPU result as a substitute for step 6. If Tellus revisits WebGPU later, treat renderer adoption, indirect drawing, and throughput as a separate opt-in project.
+
+## Remaining consumer limits
+
+- No representative-device Tellus WebGL FPS/capacity result exists yet.
+- The nine new ground covers remain placement-only until that field validation is reviewed.
+- Imported live KTX2 preview still needs a renderer-configured decoder.
+- Compact GLB/USD/instancing output does not prove Tellus extension support, automatic consumer LOD selection, collision, or culling.
+- Source/build/CI success is not deployment evidence.

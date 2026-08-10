@@ -5,6 +5,12 @@ import {
   PROCPLANT_MATERIAL_BAKE_VERSION,
   type ProcPlantBakedMaterialBundle,
 } from "./procplant-material-bake";
+import {
+  PROCPLANT_MATERIAL_KTX2_CONTRACT,
+  PROCPLANT_MATERIAL_KTX2_VERSION,
+  validateProcPlantMaterialKtx2Bundle,
+  type ProcPlantMaterialKtx2Bundle,
+} from "./procplant-material-ktx2";
 import { exportProcPlantScenesGlb } from "./procplant-export";
 import {
   PROCPLANT_UV0_CONTRACT,
@@ -35,6 +41,8 @@ export interface ProcPlantGlbMaterialBindingOptions {
   maxImages?: number;
   maxImageBytes?: number;
   maxGlbBytes?: number;
+  /** Optional pre-encoded build-time payload. PNG remains the default and fallback-free KTX2 is explicit. */
+  textureEncoding?: ProcPlantMaterialKtx2Bundle;
 }
 
 export interface ProcPlantGlbMaterialAssignment {
@@ -230,6 +238,7 @@ export const bindProcPlantBakedMaterialsIntoGlb = (
   baseGlb: ArrayBuffer,
   baked: ProcPlantBakedMaterialBundle,
   prepared: PreparedProcPlantGlbMaterialBinding,
+  textureEncoding?: ProcPlantMaterialKtx2Bundle,
 ): ProcPlantMaterialBoundGlb => {
   if (prepared.contract !== PROCPLANT_GLB_MATERIAL_BINDING_CONTRACT || prepared.version !== PROCPLANT_GLB_MATERIAL_BINDING_VERSION) {
     throw new Error("unsupported prepared GLB material binding contract/version");
@@ -239,6 +248,23 @@ export const bindProcPlantBakedMaterialsIntoGlb = (
   }
   if (prepared.sourceId !== baked.sourceId || prepared.sourceContentHash !== baked.sourceContentHash) {
     throw new Error("prepared GLB material binding does not match the material bake source");
+  }
+  if (textureEncoding) {
+    if (textureEncoding.contract !== PROCPLANT_MATERIAL_KTX2_CONTRACT || textureEncoding.version !== PROCPLANT_MATERIAL_KTX2_VERSION) {
+      throw new Error("unsupported procplant material KTX2 contract/version");
+    }
+    if (textureEncoding.sourceBakeContentHash !== baked.contentHash || textureEncoding.images.length !== baked.images.length) {
+      throw new Error("material KTX2 bundle does not match the material bake");
+    }
+    validateProcPlantMaterialKtx2Bundle(baked, textureEncoding);
+    for (let index = 0; index < baked.images.length; index++) {
+      const source = baked.images[index]!;
+      const encoded = textureEncoding.images[index]!;
+      if (encoded.name !== source.name || encoded.usage !== source.usage || encoded.width !== source.width || encoded.height !== source.height ||
+        !(encoded.bytes instanceof Uint8Array) || encoded.bytes.byteLength === 0) {
+        throw new Error(`material KTX2 image ${index} does not match the material bake`);
+      }
+    }
   }
   const { json, binary } = parseGlb(baseGlb, prepared.maxGlbBytes);
   const nodes = Array.isArray(json.nodes) ? json.nodes : [];
@@ -259,20 +285,28 @@ export const bindProcPlantBakedMaterialsIntoGlb = (
   }
   const binaryParts: Uint8Array[] = [binary];
   let binaryLength = binary.byteLength;
-  for (const image of baked.images) {
+  for (let imageIndex = 0; imageIndex < baked.images.length; imageIndex++) {
+    const image = baked.images[imageIndex]!;
+    const encoded = textureEncoding?.images[imageIndex];
+    const imageBytes = encoded?.bytes ?? image.bytes;
     const aligned = align4(binaryLength);
-    const nextBinaryLength = aligned + image.bytes.byteLength;
+    const nextBinaryLength = aligned + imageBytes.byteLength;
     if (!Number.isSafeInteger(nextBinaryLength) || nextBinaryLength > prepared.maxGlbBytes) {
       throw new Error(`material-bound GLB image payload exceeds maxGlbBytes (${nextBinaryLength} > ${prepared.maxGlbBytes})`);
     }
     if (aligned > binaryLength) binaryParts.push(new Uint8Array(aligned - binaryLength));
     binaryLength = aligned;
     const bufferView = json.bufferViews.length;
-    json.bufferViews.push({ buffer: 0, byteOffset: binaryLength, byteLength: image.bytes.byteLength, name: image.name });
-    json.images.push({ bufferView, mimeType: "image/png", name: image.name });
-    json.textures.push({ source: json.images.length - 1, name: image.name });
-    binaryParts.push(image.bytes);
+    json.bufferViews.push({ buffer: 0, byteOffset: binaryLength, byteLength: imageBytes.byteLength, name: image.name });
+    json.images.push({ bufferView, mimeType: encoded ? "image/ktx2" : "image/png", name: image.name });
+    const source = json.images.length - 1;
+    json.textures.push(encoded ? { extensions: { KHR_texture_basisu: { source } }, name: image.name } : { source, name: image.name });
+    binaryParts.push(imageBytes);
     binaryLength = nextBinaryLength;
+  }
+  if (textureEncoding) {
+    json.extensionsUsed = [...new Set([...(json.extensionsUsed ?? []), "KHR_texture_basisu"])];
+    json.extensionsRequired = [...new Set([...(json.extensionsRequired ?? []), "KHR_texture_basisu"])];
   }
   for (const material of baked.gltf.materials) json.materials.push(adjustMaterialTextureIndexes(material, textureBase));
   const assignmentsByMesh = new Map<string, ProcPlantGlbMaterialAssignment[]>();
@@ -338,6 +372,13 @@ export const bindProcPlantBakedMaterialsIntoGlb = (
       sourceId: prepared.sourceId,
       sourceContentHash: prepared.sourceContentHash,
       assignments: prepared.assignments,
+      textureEncoding: textureEncoding ? {
+        contract: textureEncoding.contract,
+        version: textureEncoding.version,
+        contentHash: textureEncoding.contentHash,
+        encoder: textureEncoding.encoder,
+        determinismExpectation: textureEncoding.determinismExpectation,
+      } : { mimeType: "image/png" },
     },
   };
   const jsonRaw = new TextEncoder().encode(JSON.stringify(json));
@@ -375,7 +416,7 @@ export const exportProcPlantGlbWithBakedMaterials = async (
   const groupedNames = new Set(prepared.assignments.filter((assignment) => assignment.groupIndex !== undefined).map((assignment) => assignment.meshName));
   if (groupedNames.size === 0) {
     const base = await exportProcPlantScenesGlb(input.scene, options.exporter);
-    return bindProcPlantBakedMaterialsIntoGlb(base, baked, prepared);
+    return bindProcPlantBakedMaterialsIntoGlb(base, baked, prepared, options.textureEncoding);
   }
   const exportScene = input.scene.clone(true);
   const ownedGeometries: THREE.BufferGeometry[] = [];
@@ -394,7 +435,7 @@ export const exportProcPlantGlbWithBakedMaterials = async (
       exportMesh.material = Array.from({ length: materialCount }, () => placeholder);
     }
     const base = await exportProcPlantScenesGlb(exportScene, options.exporter);
-    return bindProcPlantBakedMaterialsIntoGlb(base, baked, prepared);
+    return bindProcPlantBakedMaterialsIntoGlb(base, baked, prepared, options.textureEncoding);
   } finally {
     for (const geometry of ownedGeometries) geometry.dispose();
   }

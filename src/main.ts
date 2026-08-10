@@ -28,14 +28,39 @@ import {
   defaultPlantEnvironment,
   GOLDEN_ANGLE_RADIANS,
   hybridizePlantGenomes,
+  inspectProcPlantSpaceColonizationChains,
   procPlantPresets,
   type ProcPlantInstance,
   type ProcPlantEnvironment,
   type ProcPlantGenome,
   type ProcPlantGraph,
   type ProcPlantInstancedParts,
+  type ProcPlantStats,
   type ProcPlantTemplate,
+  type ProcPlantWeberPennBuildMetadata,
 } from "./procplants";
+import {
+  createProcPlantChainTubeOverridePackage,
+  deserializeProcPlantChainTubeOverridePackage,
+  removeProcPlantChainTubeOverride,
+  serializeProcPlantChainTubeOverridePackage,
+  setProcPlantChainTubeOverride,
+  validateProcPlantChainTubeOverridePackage,
+  type ProcPlantColonizationChainSnapshot,
+  type ProcPlantChainTubeOverridePackage,
+} from "./procplant-chain-tube-overrides";
+import {
+  addProcPlantCrownSpline,
+  addProcPlantCrownSplinePoint,
+  removeProcPlantCrownSpline,
+  removeProcPlantCrownSplinePoint,
+  updateProcPlantCrownSplinePoint,
+} from "./procplant-spline-crown";
+import {
+  createProcPlantWeberPennTrimOperation,
+  createProcPlantWeberPennTrimOverrideSet,
+  type ProcPlantWeberPennTrimTarget,
+} from "./procplant-weber-penn-trim";
 import {
   allProcPlantPresetIds,
   installSavedProcPlantPresets,
@@ -44,12 +69,16 @@ import {
   savedPresetLabelMap,
 } from "./saved-presets";
 import {
+  addProcPlantHierarchicalWindAttributes,
   addProcPlantInstanceWindAttributes,
   addProcPlantSwayAttribute,
   createProcPlantWindShadowMaterials,
   createProcPlantWindUniforms,
   installProcPlantWindShader,
+  PROCPLANT_WIND_BAND_LEAF,
+  PROCPLANT_WIND_BAND_TRUNK,
   PROCPLANT_WIND_PHASE_ATTRIBUTE,
+  type ProcPlantWindBand,
 } from "./procplant-wind";
 import {
   ProcPlantLodCompiler,
@@ -78,6 +107,9 @@ import type {
 import {
   cloneProcPlantFreeformCrown,
   deserializeProcPlantFreeformCrown,
+  PROCPLANT_FREEFORM_CROWN_CONTRACT,
+  PROCPLANT_FREEFORM_CROWN_SPLINE_VERSION,
+  PROCPLANT_FREEFORM_CROWN_VERSION,
   serializeProcPlantFreeformCrown,
   type ProcPlantFreeformCrown,
 } from "./procplant-space-colonization";
@@ -87,12 +119,14 @@ import type {
 } from "./procplant-organ-placement-overrides";
 import type { ProcPlantBakedMaterialBundle } from "./procplant-material-bake";
 import type { ProcPlantThreeBakedMaterialSet } from "./procplant-three-material-adapter";
+import type { ProcPlantThreeMaterialShaderSetInstallation } from "./procplant-three-material-shader";
 import type {
   ProcPlantHeroSpineEditor,
   ProcPlantHeroSpineEditorState,
 } from "./procplant-hero-spine-editor";
 import type { ProcPlantMeshSpine } from "./procplant-mesh-helper";
 import type { ProcPlantLabHeroPreview } from "./procplant-lab-authoring-imports";
+import type { ProcPlantMaterialGraphEditorState } from "./procplant-material-graph-editor";
 
 type SpeciesId = string;
 
@@ -129,6 +163,7 @@ interface LabState {
   crownDepth: number;
   crownDensity: number;
   crownField: ProcPlantFreeformCrown | null;
+  chainTubeOverrides: ProcPlantChainTubeOverridePackage | null;
   tubeResolution: number;
   collarStrength: number;
   barkRoughness: number;
@@ -169,6 +204,7 @@ const state: LabState = {
   crownDepth: 1,
   crownDensity: 1,
   crownField: null,
+  chainTubeOverrides: null,
   tubeResolution: 1,
   collarStrength: 1,
   barkRoughness: 1,
@@ -314,6 +350,19 @@ app.innerHTML = `
           <div class="field"><label for="collarStrength"><span>Junction collars</span><span id="collarStrengthValue"></span></label><input id="collarStrength" type="range" min="0" max="2" value="1" step="0.05" /></div>
           <div class="field"><label for="barkRoughness"><span>Bark roughness</span><span id="barkRoughnessValue"></span></label><input id="barkRoughness" type="range" min="0" max="2" value="1" step="0.05" /></div>
         </div>
+        <div id="chainTubeActions" class="crown-volume-actions" hidden>
+          <div class="field">
+            <label for="chainTubeSelect"><span>Branch chain</span><span id="chainTubeCountValue"></span></label>
+            <select id="chainTubeSelect"></select>
+          </div>
+          <div class="advanced-grid">
+            <div class="field"><label for="chainTubeRadius"><span>Chain radius</span><span id="chainTubeRadiusValue"></span></label><input id="chainTubeRadius" type="range" min="0.25" max="4" value="1" step="0.05" /></div>
+            <div class="field"><label for="chainTubeTaper"><span>Tip taper</span><span id="chainTubeTaperValue"></span></label><input id="chainTubeTaper" type="range" min="0.1" max="2" value="1" step="0.05" /></div>
+            <div class="field"><label for="chainTubeResolution"><span>Chain resolution</span><span id="chainTubeResolutionValue"></span></label><input id="chainTubeResolution" type="range" min="3" max="12" value="5" step="1" /></div>
+          </div>
+          <button id="chainTubeReset" type="button">Reset Selected Chain</button>
+          <small>Edits are bound to this seed and growth graph. Changing the crown or seed safely clears stale edits.</small>
+        </div>
         <div id="crownVolumeActions" class="crown-volume-actions" hidden>
           <button id="crownVolumeMode" type="button" aria-pressed="false" aria-controls="crownWidth crownHeight crownDepth" disabled>Crown Handles</button>
           <button id="crownVolumeAdd" type="button" disabled>Add Crown Lobe</button>
@@ -326,6 +375,26 @@ app.innerHTML = `
             <div class="field"><label for="crownLobeDepth"><span>Lobe depth</span><span id="crownLobeDepthValue"></span></label><input id="crownLobeDepth" type="range" min="0.05" max="10" value="1" step="0.05" /></div>
             <div class="field"><label for="crownLobeRotation"><span>Lobe yaw</span><span id="crownLobeRotationValue"></span></label><input id="crownLobeRotation" type="range" min="-180" max="180" value="0" step="1" /></div>
             <div class="field"><label for="crownLobeWeight"><span>Lobe density</span><span id="crownLobeWeightValue"></span></label><input id="crownLobeWeight" type="range" min="0.1" max="5" value="1" step="0.1" /></div>
+          </div>
+          <div id="crownSplineControls" class="crown-lobe-controls">
+            <div class="button-row">
+              <button id="crownSplineAdd" type="button">Add Spline</button>
+              <button id="crownSplineSubtract" type="button">Add Cutout Spline</button>
+              <button id="crownSplineRemove" type="button" disabled>Remove Spline</button>
+            </div>
+            <div class="advanced-grid">
+              <div class="field"><label for="crownSplineSelect"><span>Spline</span><span id="crownSplineCountValue"></span></label><select id="crownSplineSelect"></select></div>
+              <div class="field"><label for="crownSplinePointSelect"><span>Control point</span><span id="crownSplinePointCountValue"></span></label><select id="crownSplinePointSelect"></select></div>
+              <div class="field"><label for="crownSplinePointX"><span>Point X</span></label><input id="crownSplinePointX" type="number" min="-1000000" max="1000000" value="0" step="0.05" /></div>
+              <div class="field"><label for="crownSplinePointY"><span>Point Y</span></label><input id="crownSplinePointY" type="number" min="-1000000" max="1000000" value="0" step="0.05" /></div>
+              <div class="field"><label for="crownSplinePointZ"><span>Point Z</span></label><input id="crownSplinePointZ" type="number" min="-1000000" max="1000000" value="0" step="0.05" /></div>
+              <div class="field"><label for="crownSplinePointRadius"><span>Point radius</span></label><input id="crownSplinePointRadius" type="number" min="0.01" max="10000" value="0.25" step="0.05" /></div>
+            </div>
+            <div class="button-row">
+              <button id="crownSplinePointAdd" type="button" disabled>Add Point</button>
+              <button id="crownSplinePointRemove" type="button" disabled>Remove Point</button>
+            </div>
+            <small>Catmull–Rom centerlines define bounded attraction volumes. Pink splines subtract from the positive crown union.</small>
           </div>
         </div>
       </details>
@@ -352,6 +421,7 @@ app.innerHTML = `
         <button id="pruneMode" type="button" aria-pressed="false">Trim Mode</button>
         <button id="pruneSelected" type="button" disabled>Prune Selected</button>
         <button id="undoPrune" type="button" disabled>Undo Trim</button>
+        <button id="resetPrune" type="button" disabled>Reset Trim</button>
       </div>
       <div class="button-row">
         <button id="placementMode" type="button" aria-pressed="false" disabled>Place Organ</button>
@@ -377,6 +447,7 @@ app.innerHTML = `
         <button id="importHeroGlb" type="button">Import Hero GLB</button>
         <button id="clearHeroGlb" type="button" disabled>Clear Hero Import</button>
         <button id="bakeMaterial" type="button">Bake PBR Material</button>
+        <button id="editMaterialGraph" type="button" aria-expanded="false" aria-controls="materialGraphEditor">Material Graph</button>
         <input id="heroGlbFile" type="file" accept=".glb,model/gltf-binary" hidden />
       </div>
       <div class="button-row">
@@ -387,6 +458,7 @@ app.innerHTML = `
       </div>
       <output id="heroImportStatus" class="save-status" aria-live="polite"></output>
       <output id="materialBakeStatus" class="save-status" aria-live="polite"></output>
+      <section id="materialGraphEditor" class="graph-preview material-graph-editor" aria-live="polite" hidden></section>
       <details class="advanced-controls cutout-controls">
         <summary>Leaf cutout metadata</summary>
         <p>Trace and rebuild the active image without re-importing it.</p>
@@ -487,20 +559,22 @@ grid.material.opacity = 0.12;
 grid.position.y = 0.01;
 scene.add(grid);
 
+const hierarchicalWindShaderOptions = { hierarchical: true } as const;
 const windUniforms = createProcPlantWindUniforms();
 const plantMaterial = installProcPlantWindShader(new THREE.MeshLambertMaterial({
   vertexColors: true,
   side: THREE.DoubleSide,
-}), windUniforms);
+}), windUniforms, hierarchicalWindShaderOptions);
 
 const organMaterial = installProcPlantWindShader(new THREE.MeshLambertMaterial({
   color: 0xffffff,
   vertexColors: true,
   side: THREE.DoubleSide,
-}), windUniforms);
+}), windUniforms, hierarchicalWindShaderOptions);
 let liveBakedMaterials: ProcPlantThreeBakedMaterialSet | null = null;
 let liveBakedMaterialSourceKey: string | null = null;
 const retiredBakedMaterials: ProcPlantThreeBakedMaterialSet[] = [];
+const liveMaterialShaderInstallations = new WeakMap<ProcPlantThreeBakedMaterialSet, ProcPlantThreeMaterialShaderSetInstallation>();
 let disposeLiveBakedMaterials: ((prepared: ProcPlantThreeBakedMaterialSet) => void) | null = null;
 let createLiveProcPlantThreeGeometry: typeof import("./procplant-three-geometry").createProcPlantThreeGeometry | null = null;
 const activeBarkMaterial = () => liveBakedMaterials?.bark ?? plantMaterial;
@@ -515,7 +589,7 @@ const bakedMaterialSourceKey = (genome: ProcPlantGenome, seed: number) => [
   genome.leaf.colorA,
   genome.leaf.colorB,
 ].join(":");
-const windShadowMaterials = createProcPlantWindShadowMaterials(windUniforms);
+const windShadowMaterials = createProcPlantWindShadowMaterials(windUniforms, hierarchicalWindShaderOptions);
 let cutoutLeafId: string | null = null;
 let cutoutLeafGeometry: THREE.BufferGeometry | null = null;
 let cutoutLeafMaterial: THREE.MeshLambertMaterial | null = null;
@@ -526,8 +600,10 @@ const configureWindMesh = (
   mesh: THREE.Mesh | THREE.InstancedMesh,
   matrices?: ArrayLike<THREE.Matrix4>,
   swayValues?: ArrayLike<number>,
+  fallbackBand: ProcPlantWindBand = PROCPLANT_WIND_BAND_TRUNK,
 ) => {
   addProcPlantSwayAttribute(mesh.geometry);
+  addProcPlantHierarchicalWindAttributes(mesh.geometry, { fallbackBand });
   if (mesh instanceof THREE.InstancedMesh) {
     addProcPlantInstanceWindAttributes(mesh, matrices, swayValues);
   }
@@ -542,6 +618,9 @@ let heroMesh: THREE.Mesh | null = null;
 interface HeroLodState {
   mesh: THREE.Mesh;
   graph: ProcPlantGraph | null;
+  weberPennTrim: ProcPlantWeberPennBuildMetadata | null;
+  stats: ProcPlantStats;
+  authoringGeometryLocked: boolean;
   lods: ProcPlantCompiledLod[];
   geometries: THREE.BufferGeometry[];
   controller: ProcPlantLodController;
@@ -601,6 +680,9 @@ let heroSpineEditorState: ProcPlantHeroSpineEditorState | null = null;
 let heroSpineRebuildRequest = 0;
 let materialBakeAudit: Record<string, unknown> | null = null;
 let materialBakeBundle: ProcPlantBakedMaterialBundle | null = null;
+let materialGraphEditorState: ProcPlantMaterialGraphEditorState | null = null;
+let materialGraphEditorSourceKey: string | null = null;
+let materialShaderPreviewEnabled = false;
 const authoredCutouts: Array<Record<string, unknown>> = [];
 interface ActiveCutoutSource {
   id: string;
@@ -613,6 +695,7 @@ interface ActiveCutoutSource {
 let activeCutoutSource: ActiveCutoutSource | null = null;
 let activeCutout: ProcPlantCutout | null = null;
 const pruneOperations = new Map<string, string[][]>();
+const weberPennTrimTargets = new Map<string, ProcPlantWeberPennTrimTarget>();
 const organPlacementPackages = new Map<string, ProcPlantOrganPlacementPackage>();
 let pruneModeVisible = false;
 let placementModeVisible = false;
@@ -797,7 +880,9 @@ const addHeroSpinePointButton = document.querySelector<HTMLButtonElement>("#addH
 const deleteHeroSpinePointButton = document.querySelector<HTMLButtonElement>("#deleteHeroSpinePoint")!;
 const resetHeroSpineButton = document.querySelector<HTMLButtonElement>("#resetHeroSpine")!;
 const bakeMaterialButton = document.querySelector<HTMLButtonElement>("#bakeMaterial")!;
+const editMaterialGraphButton = document.querySelector<HTMLButtonElement>("#editMaterialGraph")!;
 const materialBakeStatus = document.querySelector<HTMLOutputElement>("#materialBakeStatus")!;
+const materialGraphEditor = document.querySelector<HTMLElement>("#materialGraphEditor")!;
 const editCutoutContourButton = document.querySelector<HTMLButtonElement>("#editCutoutContour")!;
 const cutoutFileInput = document.querySelector<HTMLInputElement>("#cutoutFile")!;
 const applyCutoutMetadataButton = document.querySelector<HTMLButtonElement>("#applyCutoutMetadata")!;
@@ -806,6 +891,7 @@ const graphPreview = document.querySelector<HTMLElement>("#graphPreview")!;
 const pruneModeButton = document.querySelector<HTMLButtonElement>("#pruneMode")!;
 const pruneSelectedButton = document.querySelector<HTMLButtonElement>("#pruneSelected")!;
 const undoPruneButton = document.querySelector<HTMLButtonElement>("#undoPrune")!;
+const resetPruneButton = document.querySelector<HTMLButtonElement>("#resetPrune")!;
 const placementModeButton = document.querySelector<HTMLButtonElement>("#placementMode")!;
 const placementKindSelect = document.querySelector<HTMLSelectElement>("#placementKind")!;
 const undoPlacementButton = document.querySelector<HTMLButtonElement>("#undoPlacement")!;
@@ -814,6 +900,32 @@ const crownVolumeAddButton = document.querySelector<HTMLButtonElement>("#crownVo
 const crownVolumeSubtractButton = document.querySelector<HTMLButtonElement>("#crownVolumeSubtract")!;
 const crownVolumeRemoveButton = document.querySelector<HTMLButtonElement>("#crownVolumeRemove")!;
 const crownVolumeActions = document.querySelector<HTMLElement>("#crownVolumeActions")!;
+const crownSplineControls = document.querySelector<HTMLElement>("#crownSplineControls")!;
+const crownSplineAddButton = document.querySelector<HTMLButtonElement>("#crownSplineAdd")!;
+const crownSplineSubtractButton = document.querySelector<HTMLButtonElement>("#crownSplineSubtract")!;
+const crownSplineRemoveButton = document.querySelector<HTMLButtonElement>("#crownSplineRemove")!;
+const crownSplineSelect = document.querySelector<HTMLSelectElement>("#crownSplineSelect")!;
+const crownSplinePointSelect = document.querySelector<HTMLSelectElement>("#crownSplinePointSelect")!;
+const crownSplinePointAddButton = document.querySelector<HTMLButtonElement>("#crownSplinePointAdd")!;
+const crownSplinePointRemoveButton = document.querySelector<HTMLButtonElement>("#crownSplinePointRemove")!;
+const crownSplineCountOutput = document.querySelector<HTMLElement>("#crownSplineCountValue")!;
+const crownSplinePointCountOutput = document.querySelector<HTMLElement>("#crownSplinePointCountValue")!;
+const crownSplinePointInputs = {
+  x: document.querySelector<HTMLInputElement>("#crownSplinePointX")!,
+  y: document.querySelector<HTMLInputElement>("#crownSplinePointY")!,
+  z: document.querySelector<HTMLInputElement>("#crownSplinePointZ")!,
+  radius: document.querySelector<HTMLInputElement>("#crownSplinePointRadius")!,
+};
+const chainTubeActions = document.querySelector<HTMLElement>("#chainTubeActions")!;
+const chainTubeSelect = document.querySelector<HTMLSelectElement>("#chainTubeSelect")!;
+const chainTubeRadiusInput = document.querySelector<HTMLInputElement>("#chainTubeRadius")!;
+const chainTubeTaperInput = document.querySelector<HTMLInputElement>("#chainTubeTaper")!;
+const chainTubeResolutionInput = document.querySelector<HTMLInputElement>("#chainTubeResolution")!;
+const chainTubeRadiusOutput = document.querySelector<HTMLElement>("#chainTubeRadiusValue")!;
+const chainTubeTaperOutput = document.querySelector<HTMLElement>("#chainTubeTaperValue")!;
+const chainTubeResolutionOutput = document.querySelector<HTMLElement>("#chainTubeResolutionValue")!;
+const chainTubeCountOutput = document.querySelector<HTMLElement>("#chainTubeCountValue")!;
+const chainTubeResetButton = document.querySelector<HTMLButtonElement>("#chainTubeReset")!;
 const crownLobeControls = document.querySelector<HTMLElement>("#crownLobeControls")!;
 const crownLobeInputs = {
   width: document.querySelector<HTMLInputElement>("#crownLobeWidth")!,
@@ -887,6 +999,17 @@ const restoreStateFromUrl = () => {
     } catch (error) {
       state.crownField = null;
       app.dataset.crownFieldRestoreError = error instanceof Error ? error.message : String(error);
+    }
+  }
+  const chainTubeOverrides = params.get("ct");
+  if (chainTubeOverrides) {
+    try {
+      const restored = deserializeProcPlantChainTubeOverridePackage(chainTubeOverrides);
+      state.chainTubeOverrides = restored.overrides.length > 0 ? restored : null;
+      app.dataset.chainTubeRestored = restored.overrides.length > 0 ? "true" : "empty-normalized";
+    } catch (error) {
+      state.chainTubeOverrides = null;
+      app.dataset.chainTubeRestoreError = error instanceof Error ? error.message : String(error);
     }
   }
 };
@@ -993,6 +1116,9 @@ const stateParams = (includeCamera = false) => {
   params.set("jc", state.collarStrength.toFixed(2));
   params.set("br", state.barkRoughness.toFixed(2));
   if (state.crownField) params.set("cf", serializeProcPlantFreeformCrown(state.crownField));
+  if (state.chainTubeOverrides?.overrides.length) {
+    params.set("ct", serializeProcPlantChainTubeOverridePackage(state.chainTubeOverrides));
+  }
   if (includeCamera) {
     params.set("cx", camera.position.x.toFixed(3));
     params.set("cy", camera.position.y.toFixed(3));
@@ -1039,6 +1165,7 @@ const overridesActive = () =>
   Math.abs(state.crownHeight - 1) > 0.001 ||
   Math.abs(state.crownDepth - 1) > 0.001 ||
   state.crownField !== null ||
+  state.chainTubeOverrides !== null ||
   Math.abs(state.crownDensity - 1) > 0.001 ||
   Math.abs(state.tubeResolution - 1) > 0.001 ||
   Math.abs(state.collarStrength - 1) > 0.001 ||
@@ -1048,6 +1175,7 @@ const macroRulesActive = () => state.windExposure > 0.001 || state.wetness > 0.0
   state.pruning > 0.001 || state.stylization > 0.001 || state.biomeAdaptation > 0.001;
 type ProcPlantRulesModule = typeof import("./procplant-rules");
 type ProcPlantGraphEditorUiModule = typeof import("./procplant-graph-editor-ui");
+type ProcPlantMaterialGraphEditorUiModule = typeof import("./procplant-material-graph-editor-ui");
 type ProcPlantAuthoringToolsModule = typeof import("./procplant-authoring-tools");
 type ProcPlantCrownVolumeToolModule = typeof import("./procplant-crown-volume-tool");
 type ProcPlantOrganPlacementModule = typeof import("./procplant-organ-placement-overrides");
@@ -1057,6 +1185,8 @@ let procPlantRulesPromise: Promise<ProcPlantRulesModule> | null = null;
 let procPlantRulesFailed = false;
 let procPlantGraphEditorUiModule: ProcPlantGraphEditorUiModule | null = null;
 let procPlantGraphEditorUiPromise: Promise<ProcPlantGraphEditorUiModule> | null = null;
+let procPlantMaterialGraphEditorUiModule: ProcPlantMaterialGraphEditorUiModule | null = null;
+let procPlantMaterialGraphEditorUiPromise: Promise<ProcPlantMaterialGraphEditorUiModule> | null = null;
 let procPlantAuthoringToolsModule: ProcPlantAuthoringToolsModule | null = null;
 let procPlantAuthoringToolsPromise: Promise<ProcPlantAuthoringToolsModule> | null = null;
 let procPlantCrownVolumeToolModule: ProcPlantCrownVolumeToolModule | null = null;
@@ -1075,6 +1205,18 @@ const loadProcPlantGraphEditorUi = () => {
     procPlantGraphEditorUiPromise = null;
   });
   return procPlantGraphEditorUiPromise;
+};
+const loadProcPlantMaterialGraphEditorUi = () => {
+  if (procPlantMaterialGraphEditorUiModule) return Promise.resolve(procPlantMaterialGraphEditorUiModule);
+  if (procPlantMaterialGraphEditorUiPromise) return procPlantMaterialGraphEditorUiPromise;
+  procPlantMaterialGraphEditorUiPromise = import("./procplant-material-graph-editor-ui").then((module) => {
+    procPlantMaterialGraphEditorUiModule = module;
+    app.dataset.materialGraphEditorLoaded = "true";
+    return module;
+  }).finally(() => {
+    procPlantMaterialGraphEditorUiPromise = null;
+  });
+  return procPlantMaterialGraphEditorUiPromise;
 };
 const loadProcPlantAuthoringTools = () => {
   if (procPlantAuthoringToolsModule) return Promise.resolve(procPlantAuthoringToolsModule);
@@ -1253,6 +1395,20 @@ const applyOverrides = (genome: ProcPlantGenome): ProcPlantGenome => {
           control.dimensions[2] * state.crownDepth,
         ] as const,
       })),
+      ...(sourceField.version === PROCPLANT_FREEFORM_CROWN_SPLINE_VERSION ? {
+        splines: sourceField.splines.map((spline) => ({
+          ...spline,
+          points: spline.points.map((point) => ({
+            ...point,
+            position: [
+              centerX + (point.position[0] - centerX) * state.crownWidth,
+              centerY + (point.position[1] - centerY) * state.crownHeight,
+              centerZ + (point.position[2] - centerZ) * state.crownDepth,
+            ] as const,
+            radius: point.radius * (state.crownWidth + state.crownHeight + state.crownDepth) / 3,
+          })),
+        })),
+      } : {}),
     } : undefined;
     next.spaceColonization = {
       ...gene,
@@ -1271,19 +1427,31 @@ const applyOverrides = (genome: ProcPlantGenome): ProcPlantGenome => {
     };
   }
 
+  if (genome.spaceColonization && state.chainTubeOverrides) {
+    next.spaceColonization = {
+      ...(next.spaceColonization ?? genome.spaceColonization),
+      chainTubeOverrides: state.chainTubeOverrides,
+    };
+  }
+
   return next;
 };
 
 const applyGraphGenomeOverrides = (genome: ProcPlantGenome): ProcPlantGenome => {
   const operations = graphOverrideOperations.get(genome.id);
   if (!operations?.length || !procPlantGraphEditorUiModule) return genome;
-  return procPlantGraphEditorUiModule.compileProcPlantGraphEditorState(genome, state.seed, operations).applyAudit.genome;
+  // Edited production graphs compile concrete stage artifacts for the authored
+  // hero. Keep the source genome intact instead of projecting DAG semantics
+  // back into unrelated genome fields and scatter cohorts.
+  return genome;
 };
 
 const graphExecutionSeedForGenome = (genome: ProcPlantGenome): number => {
   const operations = graphOverrideOperations.get(genome.id);
   if (!operations?.length || !procPlantGraphEditorUiModule) return state.seed;
-  return procPlantGraphEditorUiModule.compileProcPlantGraphEditorState(genome, state.seed, operations).applyAudit.executionSeed;
+  // Production graph nodes own independent deterministic streams. Do not fold
+  // their overrides back into one global seed for unrelated preview systems.
+  return state.seed;
 };
 
 const selectedSourceGenome = (): ProcPlantGenome => {
@@ -1340,6 +1508,91 @@ const selectedGenome = (): ProcPlantGenome => {
 
 const selectedGeneratorSeed = () => graphExecutionSeedForGenome(selectedBaseGenome(false));
 
+let currentChainTubeSnapshot: ProcPlantColonizationChainSnapshot | null = null;
+
+const genomeWithoutChainTubeOverrides = (genome: ProcPlantGenome): ProcPlantGenome => {
+  if (!genome.spaceColonization?.chainTubeOverrides) return genome;
+  const spaceColonization = { ...genome.spaceColonization };
+  delete spaceColonization.chainTubeOverrides;
+  return { ...genome, spaceColonization };
+};
+
+const clearChainTubeOverrides = (reason?: string) => {
+  state.chainTubeOverrides = null;
+  delete app.dataset.chainTubeOverrideCount;
+  if (reason) app.dataset.chainTubeResetReason = reason;
+};
+
+const reconcileChainTubeOverrides = (
+  genome: ProcPlantGenome,
+  seed: number,
+  env: ProcPlantEnvironment,
+): ProcPlantGenome => {
+  if (!state.chainTubeOverrides || !genome.spaceColonization) return genome;
+  const clean = genomeWithoutChainTubeOverrides(genome);
+  try {
+    const snapshot = inspectProcPlantSpaceColonizationChains(clean, seed, env);
+    validateProcPlantChainTubeOverridePackage(state.chainTubeOverrides, snapshot);
+    return genome;
+  } catch (error) {
+    clearChainTubeOverrides("stale-target");
+    app.dataset.chainTubeRestoreError = error instanceof Error ? error.message : String(error);
+    return clean;
+  }
+};
+
+const syncChainTubeInputs = () => {
+  const snapshot = currentChainTubeSnapshot;
+  const chainId = chainTubeSelect.value;
+  const chain = snapshot?.chains.find((entry) => entry.id === chainId);
+  const authored = state.chainTubeOverrides?.overrides.find((entry) => entry.chainId === chainId);
+  const genome = selectedGenome();
+  const defaultResolution = Math.max(3, Math.min(8, Math.round(genome.spaceColonization?.radialSegments ?? 5)));
+  chainTubeRadiusInput.value = String(authored?.radiusScale ?? 1);
+  chainTubeTaperInput.value = String(authored?.taperScale ?? 1);
+  chainTubeResolutionInput.value = String(authored?.radialSegments ?? defaultResolution);
+  chainTubeRadiusOutput.textContent = Number(chainTubeRadiusInput.value).toFixed(2);
+  chainTubeTaperOutput.textContent = Number(chainTubeTaperInput.value).toFixed(2);
+  chainTubeResolutionOutput.textContent = chainTubeResolutionInput.value;
+  chainTubeResetButton.disabled = regenerationBusy || !authored;
+  for (const input of [chainTubeRadiusInput, chainTubeTaperInput, chainTubeResolutionInput]) {
+    input.disabled = regenerationBusy || !chain;
+  }
+  if (chain) app.dataset.chainTubeSelected = chain.id;
+  else delete app.dataset.chainTubeSelected;
+};
+
+const syncChainTubeControls = (genome: ProcPlantGenome, seed: number, env: ProcPlantEnvironment) => {
+  const clean = genomeWithoutChainTubeOverrides(genome);
+  if (!clean.spaceColonization) {
+    currentChainTubeSnapshot = null;
+    chainTubeActions.hidden = true;
+    delete app.dataset.chainTubeAvailable;
+    delete app.dataset.chainTubeGraphSignature;
+    delete app.dataset.chainTubeCount;
+    return;
+  }
+  const previousSelection = chainTubeSelect.value;
+  currentChainTubeSnapshot = inspectProcPlantSpaceColonizationChains(clean, seed, env);
+  chainTubeSelect.innerHTML = "";
+  currentChainTubeSnapshot.chains.forEach((chain, index) => {
+    const option = document.createElement("option");
+    option.value = chain.id;
+    option.textContent = `Chain ${index + 1} · order ${chain.branchOrder} · ${chain.nodeIds.length} nodes`;
+    chainTubeSelect.appendChild(option);
+  });
+  if (currentChainTubeSnapshot.chains.some((chain) => chain.id === previousSelection)) {
+    chainTubeSelect.value = previousSelection;
+  }
+  chainTubeActions.hidden = false;
+  chainTubeCountOutput.textContent = `${currentChainTubeSnapshot.chains.length}`;
+  app.dataset.chainTubeAvailable = "true";
+  app.dataset.chainTubeGraphSignature = currentChainTubeSnapshot.target.graphSignature;
+  app.dataset.chainTubeCount = String(currentChainTubeSnapshot.chains.length);
+  app.dataset.chainTubeOverrideCount = String(state.chainTubeOverrides?.overrides.length ?? 0);
+  syncChainTubeInputs();
+};
+
 const crownVolumeValues = (): ProcPlantCrownVolumeValues => ({
   width: state.crownWidth,
   height: state.crownHeight,
@@ -1373,6 +1626,82 @@ const applyCrownField = (field: ProcPlantFreeformCrown | null) => {
   updateAddressState();
   app.dataset.crownFieldVolumeCount = String(state.crownField?.volumes.length ?? 0);
   app.dataset.crownFieldContract = state.crownField?.contract ?? "legacy";
+};
+
+let selectedCrownSplineId: string | null = null;
+let selectedCrownSplinePointId: string | null = null;
+
+const authoredCrownField = () => state.crownField ?? selectedSourceGenome().spaceColonization?.freeform ?? null;
+
+const currentCrownSplines = () => {
+  const field = authoredCrownField();
+  return field?.version === PROCPLANT_FREEFORM_CROWN_SPLINE_VERSION ? field.splines : [];
+};
+
+const syncCrownSplineControls = () => {
+  const gene = selectedSourceGenome().spaceColonization;
+  const splines = currentCrownSplines();
+  crownSplineControls.hidden = !gene;
+  crownSplineSelect.innerHTML = "";
+  splines.forEach((spline, index) => {
+    const option = document.createElement("option");
+    option.value = spline.id;
+    option.textContent = `${spline.operation === "subtract" ? "Cutout" : "Spline"} ${index + 1} · ${spline.points.length} points`;
+    crownSplineSelect.appendChild(option);
+  });
+  if (!splines.some((spline) => spline.id === selectedCrownSplineId)) selectedCrownSplineId = splines[0]?.id ?? null;
+  if (selectedCrownSplineId) crownSplineSelect.value = selectedCrownSplineId;
+  const selectedSpline = splines.find((spline) => spline.id === selectedCrownSplineId);
+  crownSplinePointSelect.innerHTML = "";
+  selectedSpline?.points.forEach((point, index) => {
+    const option = document.createElement("option");
+    option.value = point.id;
+    option.textContent = `Point ${index + 1} · ${point.id}`;
+    crownSplinePointSelect.appendChild(option);
+  });
+  if (!selectedSpline?.points.some((point) => point.id === selectedCrownSplinePointId)) {
+    selectedCrownSplinePointId = selectedSpline?.points[0]?.id ?? null;
+  }
+  if (selectedCrownSplinePointId) crownSplinePointSelect.value = selectedCrownSplinePointId;
+  const selectedPoint = selectedSpline?.points.find((point) => point.id === selectedCrownSplinePointId);
+  crownSplineCountOutput.textContent = String(splines.length);
+  crownSplinePointCountOutput.textContent = String(selectedSpline?.points.length ?? 0);
+  if (selectedPoint) {
+    crownSplinePointInputs.x.value = String(selectedPoint.position[0]);
+    crownSplinePointInputs.y.value = String(selectedPoint.position[1]);
+    crownSplinePointInputs.z.value = String(selectedPoint.position[2]);
+    crownSplinePointInputs.radius.value = String(selectedPoint.radius);
+  }
+  const unavailable = regenerationBusy || !gene;
+  crownSplineAddButton.disabled = unavailable;
+  crownSplineSubtractButton.disabled = unavailable;
+  crownSplineRemoveButton.disabled = unavailable || !selectedSpline;
+  crownSplineSelect.disabled = unavailable || splines.length === 0;
+  crownSplinePointSelect.disabled = unavailable || !selectedPoint;
+  crownSplinePointAddButton.disabled = unavailable || !selectedSpline;
+  crownSplinePointRemoveButton.disabled = unavailable || !selectedSpline || selectedSpline.points.length <= 2;
+  for (const input of Object.values(crownSplinePointInputs)) input.disabled = unavailable || !selectedPoint;
+  app.dataset.crownSplineAvailable = String(Boolean(gene));
+  app.dataset.crownSplineCount = String(splines.length);
+  app.dataset.crownSplinePointCount = String(selectedSpline?.points.length ?? 0);
+  app.dataset.crownSplineVersion = authoredCrownField()?.version === PROCPLANT_FREEFORM_CROWN_SPLINE_VERSION ? "2" : "legacy";
+  if (selectedSpline) {
+    app.dataset.crownSplineSelected = selectedSpline.id;
+    app.dataset.crownSplineOperation = selectedSpline.operation ?? "add";
+  } else {
+    delete app.dataset.crownSplineSelected;
+    delete app.dataset.crownSplineOperation;
+  }
+  if (selectedPoint) app.dataset.crownSplinePointSelected = selectedPoint.id;
+  else delete app.dataset.crownSplinePointSelected;
+};
+
+const commitCrownSplineField = (field: ProcPlantFreeformCrown | null, message: string) => {
+  clearChainTubeOverrides("changed-spline-crown");
+  applyCrownField(field);
+  syncCrownSplineControls();
+  setSaveStatus(message);
+  regenerate();
 };
 
 let crownVolumeToolRequest = 0;
@@ -1416,6 +1745,7 @@ const disposeCrownVolumeTool = () => {
   delete app.dataset.crownVolumeDragging;
   delete app.dataset.crownVolumeAxis;
   delete app.dataset.crownVolumeSelected;
+  delete app.dataset.crownSplineVisualCount;
   crownVolumeAddButton.disabled = true;
   crownVolumeSubtractButton.disabled = true;
   crownVolumeRemoveButton.disabled = true;
@@ -1437,6 +1767,7 @@ const syncCrownVolumeButton = () => {
   crownVolumeSubtractButton.disabled = crownVolumeAddButton.disabled;
   crownVolumeRemoveButton.disabled = crownVolumeAddButton.disabled || !crownVolumeTool?.getSelectedVolumeId();
   syncCrownLobeControls();
+  syncCrownSplineControls();
   app.dataset.crownVolumeAvailable = String(available);
   if (!crownVolumeModeVisible) delete app.dataset.crownVolumeActive;
 };
@@ -1472,6 +1803,7 @@ const refreshCrownVolumeTool = async () => {
       app.dataset.crownVolumeAxis = axis;
     },
     onCommit: (values, axis) => {
+      clearChainTubeOverrides(`changed-crown-${axis}`);
       applyCrownVolumeValues(values);
       setSaveStatus(`Crown ${axis} set to ${values[axis].toFixed(2)}; rebuilding the supported volume dimension.`);
       regenerate();
@@ -1491,6 +1823,7 @@ const refreshCrownVolumeTool = async () => {
       app.dataset.crownVolumeSelected = volumeId;
     },
     onFreeformCommit: (field, volumeId) => {
+      clearChainTubeOverrides("changed-freeform-crown");
       applyCrownField(field);
       if (volumeId) app.dataset.crownVolumeSelected = volumeId;
       else delete app.dataset.crownVolumeSelected;
@@ -1523,6 +1856,11 @@ const refreshCrownVolumeTool = async () => {
   crownVolumeTool = tool;
   scene.add(tool.root);
   app.dataset.crownVolumeActive = "true";
+  let splineVisualCount = 0;
+  tool.root.traverse((object) => {
+    if (object.name.startsWith("procplant-crown-spline-")) splineVisualCount++;
+  });
+  app.dataset.crownSplineVisualCount = String(splineVisualCount);
   applyCrownVolumeValues(crownVolumeValues());
   applyCrownField(state.crownField ?? gene.freeform ?? null);
   syncCrownVolumeButton();
@@ -1556,6 +1894,58 @@ const renderGraphPreview = async () => {
       void renderGraphPreview();
     },
   });
+};
+
+let materialGraphEditorRequest = 0;
+const renderMaterialGraphEditor = async () => {
+  if (materialGraphEditor.hidden) return;
+  const request = ++materialGraphEditorRequest;
+  materialGraphEditor.replaceChildren();
+  materialGraphEditor.textContent = "Building material graph editor...";
+  const [editorModule, labModule] = await Promise.all([
+    loadProcPlantMaterialGraphEditorUi(),
+    import("./procplant-lab-authoring-imports"),
+  ]);
+  if (request !== materialGraphEditorRequest || materialGraphEditor.hidden) return;
+  const genome = selectedGenome();
+  const seed = selectedGeneratorSeed();
+  const sourceKey = bakedMaterialSourceKey(genome, seed);
+  if (!materialGraphEditorState || materialGraphEditorSourceKey !== sourceKey) {
+    const source = labModule.createProcPlantLabMaterialAuthoringSource(genome, seed);
+    materialGraphEditorState = editorModule.createProcPlantMaterialGraphEditorState(source.graph);
+    materialGraphEditorSourceKey = sourceKey;
+  }
+  editorModule.renderProcPlantMaterialGraphEditor({
+    container: materialGraphEditor,
+    state: materialGraphEditorState,
+    onStateChanged: (nextState) => {
+      materialGraphEditorState = nextState;
+      app.dataset.materialGraphHash = nextState.compiled.contentHash;
+      app.dataset.materialGraphChanged = String(nextState.changed);
+      void renderMaterialGraphEditor();
+    },
+    shaderPreview: {
+      enabled: materialShaderPreviewEnabled,
+      onEnabledChanged: (enabled) => {
+        materialShaderPreviewEnabled = enabled;
+        app.dataset.materialShaderPreviewEnabled = String(enabled);
+        if (!enabled && liveBakedMaterials) {
+          liveMaterialShaderInstallations.get(liveBakedMaterials)?.dispose();
+          liveMaterialShaderInstallations.delete(liveBakedMaterials);
+          delete app.dataset.materialShaderPreviewHash;
+          app.dataset.materialShaderPreviewActive = "false";
+          materialBakeStatus.textContent = "Generated shader preview disabled; the validated baked MeshStandard materials remain active.";
+        } else if (enabled) {
+          materialBakeStatus.textContent = "Generated shader preview enabled. Bake PBR Material to install it on the live plant; export remains baked.";
+        }
+        void renderMaterialGraphEditor();
+      },
+    },
+  });
+  app.dataset.materialGraphHash = materialGraphEditorState.compiled.contentHash;
+  app.dataset.materialGraphChanged = String(materialGraphEditorState.changed);
+  app.dataset.materialShaderPlanReady = materialGraphEditor.querySelector<HTMLElement>(".material-shader-preview")?.dataset.ready ?? "false";
+  app.dataset.materialShaderPlanHash = materialGraphEditor.querySelector<HTMLElement>(".material-shader-preview")?.dataset.hash ?? "";
 };
 
 const templateToGeometry = (template: ProcPlantTemplate) => {
@@ -1752,7 +2142,7 @@ const addGrassCarpet = (
   }
   if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   mesh.instanceMatrix.needsUpdate = true;
-  configureWindMesh(mesh);
+  configureWindMesh(mesh, undefined, undefined, PROCPLANT_WIND_BAND_LEAF);
   group.add(mesh);
   currentStats.draws += 1;
   const triangles = ((geometry.index?.count ?? geometry.getAttribute("position").count) / 3) * tuftCount;
@@ -1994,6 +2384,7 @@ const scatterBiome = async (genome: ProcPlantGenome, env: ProcPlantEnvironment, 
       mesh,
       bucket.instances.map((instance) => instance.matrix),
       bucket.instances.map((instance) => instance.sway),
+      PROCPLANT_WIND_BAND_LEAF,
     );
     if (usesCutout && mesh.castShadow && cutoutLeafDepthMaterial && cutoutLeafDistanceMaterial) {
       mesh.customDepthMaterial = cutoutLeafDepthMaterial;
@@ -2026,6 +2417,7 @@ const scatterBiome = async (genome: ProcPlantGenome, env: ProcPlantEnvironment, 
   return {
     group,
     heroTemplate: reusableTree?.stems,
+    heroStats: reusableTree?.stats,
     generatorBuilds: reusableTree ? 1 : prototypeCache.size,
     treeLodSource: lodPlacements.length > 1 && lodFallbackMeshes.length > 0
       ? {
@@ -2153,6 +2545,7 @@ const disposeHeroPruneTool = () => {
   if (!heroPruneTool) return;
   heroPruneTool.dispose();
   heroPruneTool = null;
+  delete app.dataset.heroPruneSelectedIds;
 };
 
 const syncPruneButtons = () => {
@@ -2160,28 +2553,69 @@ const syncPruneButtons = () => {
   pruneModeButton.textContent = pruneModeVisible ? "Exit Trim" : "Trim Mode";
   pruneSelectedButton.disabled = regenerationBusy || !heroPruneTool?.getSelectedSegment();
   undoPruneButton.disabled = regenerationBusy || currentPruneOperations().length === 0;
+  resetPruneButton.disabled = undoPruneButton.disabled;
 };
 
 const refreshHeroPruneTool = async () => {
   disposeHeroPruneTool();
   const request = ++heroPruneToolRequest;
   const target = heroLodState;
-  if (!pruneModeVisible || !target?.graph) {
-    app.dataset.heroPruneAvailable = String(Boolean(target?.graph));
+  if (!pruneModeVisible || !target) {
+    app.dataset.heroPruneAvailable = String(Boolean(target?.graph || target?.weberPennTrim));
     syncPruneButtons();
     return;
   }
   const { createProcPlantPruneTool } = await loadProcPlantAuthoringTools();
+  if (request !== heroPruneToolRequest || !pruneModeVisible || heroLodState !== target) return;
+  // The default Weber-Penn preview is worker-built. Materialize its exact
+  // signature-bound picker only when trim mode is requested, keeping startup
+  // and ordinary regeneration off the main thread.
+  if (!target.weberPennTrim && selectedGenome().weberPenn) {
+    setSaveStatus("Preparing stable Weber-Penn stem identities for trim mode…");
+    const built = buildProcPlantTemplate(selectedGenome(), selectedGeneratorSeed(), envFromState());
+    if (request !== heroPruneToolRequest || !pruneModeVisible || heroLodState !== target) return;
+    const sourceLod: ProcPlantCompiledLod = {
+      level: 0,
+      label: "full",
+      distance: 0,
+      template: built.template,
+      triangles: built.template.idx.length / 3,
+      vertices: built.template.pos.length / 3,
+    };
+    const sourceGeometry = templateToGeometry(built.template);
+    for (const geometry of target.geometries) geometry.dispose();
+    target.mesh.geometry = sourceGeometry;
+    target.lods = [sourceLod];
+    target.geometries = [sourceGeometry];
+    target.controller = new ProcPlantLodController(
+      [sourceLod],
+      camera.position.distanceTo(target.mesh.position) / target.scale,
+    );
+    target.graph = built.graph;
+    target.weberPennTrim = built.weberPennTrim ?? null;
+    target.stats = built.stats;
+    target.authoringGeometryLocked = true;
+    app.dataset.heroLod = "full";
+    app.dataset.heroLodLevel = "0";
+    app.dataset.heroLodPending = "false";
+    app.dataset.heroTemplateTriangles = String(sourceLod.triangles);
+    app.dataset.heroTemplateVertices = String(sourceLod.vertices);
+    refreshPreviewGeometryStats();
+  }
+  const pickerGraph = target.weberPennTrim?.pickerGraph ?? target.graph;
   // The request guard is what catches a mode toggled off and back on across the
   // import; heroLodState alone is unchanged in that case.
-  if (request !== heroPruneToolRequest || !pruneModeVisible || heroLodState !== target || !target.graph) return;
-  const tool = createProcPlantPruneTool(target.graph, { visible: true, opacity: 0.3, radiusScale: 2.2 });
+  if (request !== heroPruneToolRequest || !pruneModeVisible || heroLodState !== target || !pickerGraph) return;
+  const tool = createProcPlantPruneTool(pickerGraph, { visible: true, opacity: 0.3, radiusScale: 2.2 });
   tool.object.position.copy(target.mesh.position);
   tool.object.quaternion.copy(target.mesh.quaternion);
   tool.object.scale.copy(target.mesh.scale);
   heroPruneTool = tool;
   scene.add(tool.object);
   app.dataset.heroPruneAvailable = "true";
+  app.dataset.heroPruneBackend = target.weberPennTrim ? "weber-penn" : "graph";
+  if (target.weberPennTrim) app.dataset.heroPruneTargetSignature = target.weberPennTrim.target.topologySignature ?? "";
+  else delete app.dataset.heroPruneTargetSignature;
   syncPruneButtons();
 };
 
@@ -2248,6 +2682,7 @@ const disposeHeroImportGroup = (preview: THREE.Group | null) => {
   if (!preview) return;
   preview.traverse((object) => {
     if (!(object instanceof THREE.Mesh)) return;
+    if (object instanceof THREE.InstancedMesh) object.dispose();
     object.geometry.dispose();
     if (object.userData.procplantOwnsMaterial) {
       const materials = Array.isArray(object.material) ? object.material : [object.material];
@@ -2283,6 +2718,8 @@ const installHeroImportPreview = (authored: ProcPlantLabHeroPreview, fileName: s
     sourceFile: fileName,
     sourceContentHash: authored.sourceContentHash,
     contentHash: authored.contentHash,
+    attachmentMaterialization: authored.attachmentMaterialization.audit,
+    sourceMaterial: authored.sourceMaterialAudit,
   };
   scene.add(authored.group);
   if (heroMesh) heroMesh.visible = false;
@@ -2290,6 +2727,16 @@ const installHeroImportPreview = (authored: ProcPlantLabHeroPreview, fileName: s
   app.dataset.heroImportHash = authored.contentHash;
   app.dataset.heroImportVertices = String(authored.audit.vertexCount);
   app.dataset.heroImportAttachments = String(authored.audit.attachmentsEmitted);
+  app.dataset.heroImportAttachmentHash = authored.attachmentMaterialization.audit.contentHash;
+  app.dataset.heroImportAttachmentInstances = String(authored.attachmentMaterialization.audit.materializedAttachments);
+  app.dataset.heroImportAttachmentDraws = String(authored.attachmentMaterialization.audit.instanceDraws);
+  app.dataset.heroImportAttachmentVertices = String(authored.attachmentMaterialization.audit.materializedVertices);
+  app.dataset.heroImportAttachmentTriangles = String(authored.attachmentMaterialization.audit.materializedTriangles);
+  app.dataset.heroImportBranchInstances = String(authored.attachmentMaterialization.audit.branchInstances);
+  app.dataset.heroImportAccessoryInstances = String(authored.attachmentMaterialization.audit.accessoryInstances);
+  app.dataset.heroImportSourceMaterial = String(authored.sourceMaterialAudit.sourceMaterialApplied);
+  app.dataset.heroImportSourceMaterialTextures = String(authored.sourceMaterialAudit.textureBindings);
+  app.dataset.heroImportSourceMaterialImages = String(authored.sourceMaterialAudit.decodedImages);
   if (heroSpineEditor) {
     heroSpineEditor.setTarget(authored.trunk);
     heroSpineEditor.copyDisplayTransform(authored.group);
@@ -2315,6 +2762,20 @@ const disposeHeroImportPreview = () => {
   delete app.dataset.heroImportHash;
   delete app.dataset.heroImportVertices;
   delete app.dataset.heroImportAttachments;
+  delete app.dataset.heroImportAttachmentHash;
+  delete app.dataset.heroImportAttachmentInstances;
+  delete app.dataset.heroImportAttachmentDraws;
+  delete app.dataset.heroImportAttachmentVertices;
+  delete app.dataset.heroImportAttachmentTriangles;
+  delete app.dataset.heroImportBranchInstances;
+  delete app.dataset.heroImportAccessoryInstances;
+  delete app.dataset.heroImportSourceMaterial;
+  delete app.dataset.heroImportSourceMaterialTextures;
+  delete app.dataset.heroImportSourceMaterialImages;
+  delete app.dataset.heroImportLastExportBytes;
+  delete app.dataset.heroImportLastExportMaterials;
+  delete app.dataset.heroImportLastExportTextures;
+  delete app.dataset.heroImportLastExportImages;
   syncHeroSpineButtons();
 };
 
@@ -2462,7 +2923,7 @@ const installCompiledHeroLods = async (
   resultPromise: Promise<{ lods: ProcPlantCompiledLod[] | null; error: unknown }>,
 ) => {
   const result = await resultPromise;
-  if (request !== regenerationRequest || heroLodState !== target || biomeGroup !== targetGroup) return;
+  if (request !== regenerationRequest || heroLodState !== target || biomeGroup !== targetGroup || target.authoringGeometryLocked) return;
   if (!result.lods) {
     if (!(result.error instanceof DOMException && result.error.name === "AbortError")) {
       console.warn("[procplants] Hero LOD worker unavailable; keeping full geometry.", result.error);
@@ -2559,7 +3020,7 @@ const installCompiledHeroLods = async (
   // The dynamic imports above yield, so a newer regeneration may have taken over
   // while this run was suspended. Re-check before mutating any shared scene state:
   // proceeding here would dispose the live pool and blank the pooled cohort.
-  if (request !== regenerationRequest || heroLodState !== target || biomeGroup !== targetGroup) {
+  if (request !== regenerationRequest || heroLodState !== target || biomeGroup !== targetGroup || target.authoringGeometryLocked) {
     disposeBiomePlacementLodState(nextBiomePlacementLodState);
     for (const geometry of geometries) geometry.dispose();
     return;
@@ -2596,9 +3057,17 @@ const performRegeneration = async (request: number) => {
     delete app.dataset.readinessScore;
     delete app.dataset.readinessReady;
   }
-  const genome = selectedGenome();
+  let genome = selectedGenome();
   const generatorSeed = selectedGeneratorSeed();
+  const env = envFromState();
+  genome = reconcileChainTubeOverrides(genome, generatorSeed, env);
   const materialSourceKey = bakedMaterialSourceKey(genome, generatorSeed);
+  if (materialGraphEditorSourceKey !== null && materialGraphEditorSourceKey !== materialSourceKey) {
+    materialGraphEditorState = null;
+    materialGraphEditorSourceKey = null;
+    delete app.dataset.materialGraphHash;
+    delete app.dataset.materialGraphChanged;
+  }
   if (liveBakedMaterials && liveBakedMaterialSourceKey !== materialSourceKey) {
     retiredBakedMaterials.push(liveBakedMaterials);
     liveBakedMaterials = null;
@@ -2609,7 +3078,25 @@ const performRegeneration = async (request: number) => {
     delete app.dataset.materialLiveTangents;
     materialBakeStatus.textContent = "The baked material was detached because the plant genome or generator seed changed. Bake again for this plant.";
   }
-  const env = envFromState();
+  const graphSourceGenome = selectedBaseGenome(false);
+  const generatorOverrides = graphOverrideOperations.get(graphSourceGenome.id) ?? [];
+  const productionDag = generatorOverrides.length > 0 && procPlantGraphEditorUiModule
+    ? procPlantGraphEditorUiModule.compileProcPlantGraphEditorState(
+        graphSourceGenome,
+        state.seed,
+        generatorOverrides,
+        env,
+      ).production
+    : null;
+  app.dataset.productionDagPath = productionDag?.path ?? "legacy-canonical";
+  app.dataset.productionDagArtifacts = String(productionDag?.records.filter((record) => record.status === "executed").length ?? 0);
+  if (productionDag) {
+    app.dataset.productionDagWork = String(productionDag.work);
+    app.dataset.productionDagHash = productionDag.previewHash;
+  } else {
+    delete app.dataset.productionDagWork;
+    delete app.dataset.productionDagHash;
+  }
   updateAddressState();
   sun.intensity = 1.4 + state.light * 3.4;
   scene.background = new THREE.Color(0xb9d7ee).lerp(new THREE.Color(0x6f7d8d), 1 - state.light);
@@ -2617,17 +3104,31 @@ const performRegeneration = async (request: number) => {
 
   currentStats = { triangles: 0, plants: 0, leaves: 0, draws: 0 };
   const authoredPrunes = currentPruneOperations();
+  const pruneKey = currentPruneKey();
+  const weberPennTrimTarget = genome.weberPenn ? weberPennTrimTargets.get(pruneKey) : undefined;
+  const weberPennTrimOverrides = weberPennTrimTarget && authoredPrunes.length > 0
+    ? createProcPlantWeberPennTrimOverrideSet(
+        weberPennTrimTarget,
+        [createProcPlantWeberPennTrimOperation("remove", {
+          kind: "segment-ids",
+          segmentIds: authoredPrunes,
+        })],
+      )
+    : undefined;
   const authoredPlacements = currentPlacementPackage();
   const authoringToolsPromise = authoredPrunes.length > 0 ? loadProcPlantAuthoringTools() : null;
   const placementModulePromise = authoredPlacements?.operations.length ? loadProcPlantOrganPlacement() : null;
-  const shouldCompileHeroLods = authoredPrunes.length === 0 && !authoredPlacements?.operations.length;
+  const shouldCompileHeroLods = authoredPrunes.length === 0 && !authoredPlacements?.operations.length && !productionDag;
   const lodResultPromise = shouldCompileHeroLods
     ? heroLodCompiler.compile(genome, generatorSeed, env).then(
         (lods) => ({ lods, error: null }),
         (error: unknown) => ({ lods: null, error }),
       )
     : null;
-  const biome = await scatterBiome(genome, env, generatorSeed);
+  // Per-chain packages target the exact hero seed and growth signature. The
+  // surrounding biome deliberately varies seed and local light, so it must use
+  // the same genome without hero-scoped chain edits.
+  const biome = await scatterBiome(genomeWithoutChainTubeOverrides(genome), env, generatorSeed);
   if (request !== regenerationRequest) {
     disposeGroup(biome.group);
     return;
@@ -2635,7 +3136,9 @@ const performRegeneration = async (request: number) => {
 
   // Finish both replacements before removing the visible scene. This keeps a
   // failed or superseded build from leaving a partially-empty preview.
-  let heroBuild = biome.heroTemplate ? null : buildProcPlantTemplate(genome, generatorSeed, env);
+  let heroBuild = productionDag?.build ?? (biome.heroTemplate && !weberPennTrimOverrides
+    ? null
+    : buildProcPlantTemplate(genome, generatorSeed, env, { trimOverrides: weberPennTrimOverrides }));
   if (heroBuild && authoredPrunes.length > 0 && !genome.weberPenn && !genome.branchModules) {
     const { pruneProcPlantGraph } = await authoringToolsPromise!;
     if (request !== regenerationRequest) {
@@ -2665,17 +3168,19 @@ const performRegeneration = async (request: number) => {
     delete app.dataset.organPlacementApplied;
     delete app.dataset.organPlacementUnsupported;
   }
-  const template = biome.heroTemplate ?? heroBuild!.template;
-  const heroLods: ProcPlantCompiledLod[] = [{
-    level: 0,
-    label: "full",
-    distance: 0,
-    template,
-    triangles: template.idx.length / 3,
-    vertices: template.pos.length / 3,
-  }];
+  const template = productionDag?.build.template ?? heroBuild?.template ?? biome.heroTemplate!;
+  const heroLods: ProcPlantCompiledLod[] = productionDag && authoredPrunes.length === 0 && !authoredPlacements?.operations.length
+    ? productionDag.lods
+    : [{
+        level: 0,
+        label: "full",
+        distance: 0,
+        template,
+        triangles: template.idx.length / 3,
+        vertices: template.pos.length / 3,
+      }];
   const heroScale = heroScaleForGenome(genome);
-  const heroGeometries = [templateToGeometry(template)];
+  const heroGeometries = heroLods.map((lod) => templateToGeometry(lod.template));
   let nextHero: THREE.Mesh;
   let nextController: ProcPlantLodController;
   try {
@@ -2695,9 +3200,20 @@ const performRegeneration = async (request: number) => {
   nextHero.scale.setScalar(heroScale);
   nextHero.visible = heroImportPreview === null;
   configureWindMesh(nextHero);
+  const weberPennTrim: ProcPlantWeberPennBuildMetadata | null = heroBuild && "weberPennTrim" in heroBuild
+    ? (heroBuild.weberPennTrim as ProcPlantWeberPennBuildMetadata | null | undefined) ?? null
+    : null;
   const nextHeroLodState: HeroLodState = {
     mesh: nextHero,
     graph: heroBuild?.graph ?? null,
+    weberPennTrim,
+    stats: heroBuild?.stats ?? biome.heroStats ?? {
+      stems: 0,
+      leaves: 0,
+      flowers: 0,
+      triangles: template.idx.length / 3,
+    },
+    authoringGeometryLocked: Boolean(weberPennTrim),
     lods: heroLods,
     geometries: heroGeometries,
     controller: nextController,
@@ -2708,6 +3224,25 @@ const performRegeneration = async (request: number) => {
     impostorBaseQuaternion: nextHero.quaternion.clone(),
     impostorFacing: false,
   };
+
+  const trimAudit = nextHeroLodState.weberPennTrim?.trimAudit;
+  if (trimAudit) {
+    app.dataset.weberPennTrimStatus = trimAudit.status;
+    app.dataset.weberPennTrimSourceSignature = trimAudit.sourceTopologySignature;
+    app.dataset.weberPennTrimResultSignature = trimAudit.resultTopologySignature;
+    app.dataset.weberPennTrimRemovedStems = String(trimAudit.removedStemIds.length);
+    app.dataset.weberPennTrimRemovedLeaves = String(trimAudit.removedLeafIds.length);
+    app.dataset.weberPennTrimBeforeTriangles = String(trimAudit.beforeBranchTriangles + trimAudit.beforeNativeLeafTriangles);
+    app.dataset.weberPennTrimAfterTriangles = String(trimAudit.afterBranchTriangles + trimAudit.afterNativeLeafTriangles);
+  } else {
+    delete app.dataset.weberPennTrimStatus;
+    delete app.dataset.weberPennTrimSourceSignature;
+    delete app.dataset.weberPennTrimResultSignature;
+    delete app.dataset.weberPennTrimRemovedStems;
+    delete app.dataset.weberPennTrimRemovedLeaves;
+    delete app.dataset.weberPennTrimBeforeTriangles;
+    delete app.dataset.weberPennTrimAfterTriangles;
+  }
 
   const previousBiome = biomeGroup;
   const previousHeroLodState = heroLodState;
@@ -2769,15 +3304,19 @@ const performRegeneration = async (request: number) => {
   growthStatus.dataset.buildMs = (performance.now() - startedAt).toFixed(1);
   app.dataset.heroLod = nextController.active.label;
   app.dataset.heroLodLevel = String(nextController.active.level);
+  app.dataset.heroTemplateTriangles = String(template.idx.length / 3);
+  app.dataset.heroTemplateVertices = String(template.pos.length / 3);
   app.dataset.heroLodPending = String(shouldCompileHeroLods);
   syncImpostorButtons();
   syncCrownVolumeButton();
+  syncChainTubeControls(genome, generatorSeed, env);
   syncPlacementButtons();
   if (crownVolumeModeVisible) void refreshCrownVolumeTool();
   if (lodResultPromise) {
     void installCompiledHeroLods(request, nextHeroLodState, biome.group, biome.treeLodSource, lodResultPromise);
   }
   if (!graphPreview.hidden) void renderGraphPreview();
+  if (!materialGraphEditor.hidden) void renderMaterialGraphEditor();
 };
 
 let regenerationTimer: number | null = null;
@@ -2800,6 +3339,7 @@ const setRegenerationBusy = (busy: boolean) => {
   importHeroGlbButton.disabled = busy;
   clearHeroGlbButton.disabled = busy || heroImportPreview === null;
   bakeMaterialButton.disabled = busy;
+  editMaterialGraphButton.disabled = busy;
   editCutoutContourButton.disabled = busy || activeCutout === null || activeCutoutSource === null;
   applyCutoutMetadataButton.disabled = busy || activeCutoutSource === null;
   inspectGraphButton.disabled = busy;
@@ -2807,9 +3347,11 @@ const setRegenerationBusy = (busy: boolean) => {
   pruneModeButton.disabled = busy;
   syncPlacementButtons();
   syncCrownVolumeButton();
+  if (currentChainTubeSnapshot) syncChainTubeInputs();
   if (busy) {
     pruneSelectedButton.disabled = true;
     undoPruneButton.disabled = true;
+    resetPruneButton.disabled = true;
   } else {
     syncPruneButtons();
   }
@@ -2854,6 +3396,9 @@ const bindRange = (id: keyof LabState, labelId: string) => {
   if (!input) return;
   input.value = String(state[id]);
   const sync = () => {
+    if (["hybrid", "light", "moisture", "crownWidth", "crownHeight", "crownDepth", "crownDensity"].includes(id)) {
+      clearChainTubeOverrides(`changed-${id}`);
+    }
     state[id] = Number(input.value) as never;
     setText(labelId, Number(input.value).toFixed(2));
     regenerate(120);
@@ -2863,10 +3408,12 @@ const bindRange = (id: keyof LabState, labelId: string) => {
 };
 
 primarySelect.addEventListener("change", () => {
+  clearChainTubeOverrides("changed-primary");
   state.primary = primarySelect.value as SpeciesId;
   regenerate();
 });
 secondarySelect.addEventListener("change", () => {
+  clearChainTubeOverrides("changed-secondary");
   state.secondary = secondarySelect.value as SpeciesId;
   regenerate();
 });
@@ -2908,7 +3455,15 @@ inspectGraphButton.addEventListener("click", () => {
   if (!graphPreview.hidden) void renderGraphPreview();
 });
 
+editMaterialGraphButton.addEventListener("click", () => {
+  materialGraphEditor.hidden = !materialGraphEditor.hidden;
+  editMaterialGraphButton.setAttribute("aria-expanded", String(!materialGraphEditor.hidden));
+  editMaterialGraphButton.textContent = materialGraphEditor.hidden ? "Material Graph" : "Hide Material Graph";
+  if (!materialGraphEditor.hidden) void renderMaterialGraphEditor();
+});
+
 seasonSelect.addEventListener("change", () => {
+  clearChainTubeOverrides("changed-season");
   state.season = seasonSelect.value as ProcPlantSeason;
   syncControlsFromState();
   regenerate();
@@ -2916,6 +3471,7 @@ seasonSelect.addEventListener("change", () => {
 
 for (const button of seasonButtons) {
   button.addEventListener("click", () => {
+    clearChainTubeOverrides("changed-season");
     state.season = button.dataset.season as ProcPlantSeason;
     syncControlsFromState();
     regenerate();
@@ -2923,11 +3479,55 @@ for (const button of seasonButtons) {
 }
 
 randomSeedButton.addEventListener("click", () => {
+  clearChainTubeOverrides("changed-seed");
   state.seed = Math.floor(Math.random() * 1_000_000);
   regenerate();
 });
 
 regenerateButton.addEventListener("click", () => regenerate());
+
+const commitChainTubeControls = () => {
+  const snapshot = currentChainTubeSnapshot;
+  const chainId = chainTubeSelect.value;
+  if (!snapshot || !snapshot.chains.some((chain) => chain.id === chainId) || regenerationBusy) return;
+  const clean = genomeWithoutChainTubeOverrides(selectedGenome());
+  const defaultResolution = Math.max(3, Math.min(8, Math.round(clean.spaceColonization?.radialSegments ?? 5)));
+  const radiusScale = Number(chainTubeRadiusInput.value);
+  const taperScale = Number(chainTubeTaperInput.value);
+  const radialSegments = Number(chainTubeResolutionInput.value);
+  let authored = state.chainTubeOverrides;
+  if (!authored || authored.target.graphSignature !== snapshot.target.graphSignature
+    || authored.target.genomeId !== snapshot.target.genomeId || authored.target.seed !== snapshot.target.seed) {
+    authored = createProcPlantChainTubeOverridePackage(snapshot.target);
+  }
+  state.chainTubeOverrides = setProcPlantChainTubeOverride(authored, {
+    chainId,
+    ...(Math.abs(radiusScale - 1) > 0.001 ? { radiusScale } : {}),
+    ...(Math.abs(taperScale - 1) > 0.001 ? { taperScale } : {}),
+    ...(radialSegments !== defaultResolution ? { radialSegments } : {}),
+  });
+  app.dataset.chainTubeOverrideCount = String(state.chainTubeOverrides.overrides.length);
+  syncChainTubeInputs();
+  regenerate(80);
+};
+
+chainTubeSelect.addEventListener("change", syncChainTubeInputs);
+for (const input of [chainTubeRadiusInput, chainTubeTaperInput, chainTubeResolutionInput]) {
+  input.addEventListener("input", () => {
+    chainTubeRadiusOutput.textContent = Number(chainTubeRadiusInput.value).toFixed(2);
+    chainTubeTaperOutput.textContent = Number(chainTubeTaperInput.value).toFixed(2);
+    chainTubeResolutionOutput.textContent = chainTubeResolutionInput.value;
+  });
+  input.addEventListener("change", commitChainTubeControls);
+}
+chainTubeResetButton.addEventListener("click", () => {
+  if (!state.chainTubeOverrides || !chainTubeSelect.value || regenerationBusy) return;
+  state.chainTubeOverrides = removeProcPlantChainTubeOverride(state.chainTubeOverrides, chainTubeSelect.value);
+  if (state.chainTubeOverrides.overrides.length === 0) state.chainTubeOverrides = null;
+  app.dataset.chainTubeOverrideCount = String(state.chainTubeOverrides?.overrides.length ?? 0);
+  syncChainTubeInputs();
+  regenerate();
+});
 
 const weightedRandomSpecies = (rng: () => number): SpeciesId => {
   const ids = allProcPlantPresetIds();
@@ -2937,6 +3537,7 @@ const weightedRandomSpecies = (rng: () => number): SpeciesId => {
 
 const rollBiomeDice = () => {
   if (regenerationBusy) return;
+  clearChainTubeOverrides("rolled-dice");
   const dice = Math.floor(Math.random() * 1_000_000_000);
   const rng = rand(dice);
   state.seed = Math.floor(rng() * 1_000_000);
@@ -3018,6 +3619,120 @@ debugWindButton.addEventListener("click", () => {
   else void refreshHeroDebugOverlay();
   setSaveStatus(debugWindColors ? "Attachment markers show low-to-high wind weight." : "Attachment markers show organ kind.");
 });
+
+crownSplineAddButton.addEventListener("click", () => {
+  const gene = selectedSourceGenome().spaceColonization;
+  if (!gene || regenerationBusy) return;
+  try {
+    const field = addProcPlantCrownSpline(authoredCrownField(), {
+      center: gene.volume.center,
+      dimensions: gene.volume.dimensions,
+    });
+    selectedCrownSplineId = field.splines[field.splines.length - 1]!.id;
+    selectedCrownSplinePointId = field.splines[field.splines.length - 1]!.points[0]!.id;
+    commitCrownSplineField(field, `Added ${selectedCrownSplineId} with three stable control points.`);
+  } catch (error) {
+    setSaveStatus(error instanceof Error ? error.message : String(error));
+  }
+});
+
+crownSplineSubtractButton.addEventListener("click", () => {
+  const gene = selectedSourceGenome().spaceColonization;
+  if (!gene || regenerationBusy) return;
+  try {
+    const source = authoredCrownField() ?? {
+      contract: PROCPLANT_FREEFORM_CROWN_CONTRACT,
+      version: PROCPLANT_FREEFORM_CROWN_VERSION,
+      volumes: [{
+        id: "volume-1",
+        shape: gene.volume.shape,
+        center: gene.volume.center,
+        dimensions: gene.volume.dimensions,
+      }],
+    } satisfies ProcPlantFreeformCrown;
+    const field = addProcPlantCrownSpline(source, {
+      operation: "subtract",
+      center: gene.volume.center,
+      dimensions: gene.volume.dimensions.map((value) => value * 0.55) as [number, number, number],
+    });
+    selectedCrownSplineId = field.splines[field.splines.length - 1]!.id;
+    selectedCrownSplinePointId = field.splines[field.splines.length - 1]!.points[0]!.id;
+    commitCrownSplineField(field, `Added subtractive ${selectedCrownSplineId}.`);
+  } catch (error) {
+    setSaveStatus(error instanceof Error ? error.message : String(error));
+  }
+});
+
+crownSplineSelect.addEventListener("change", () => {
+  selectedCrownSplineId = crownSplineSelect.value || null;
+  selectedCrownSplinePointId = null;
+  syncCrownSplineControls();
+});
+
+crownSplinePointSelect.addEventListener("change", () => {
+  selectedCrownSplinePointId = crownSplinePointSelect.value || null;
+  syncCrownSplineControls();
+});
+
+crownSplinePointAddButton.addEventListener("click", () => {
+  const field = authoredCrownField();
+  if (!field || !selectedCrownSplineId || regenerationBusy) return;
+  try {
+    const next = addProcPlantCrownSplinePoint(field, selectedCrownSplineId);
+    selectedCrownSplinePointId = next.splines.find((spline) => spline.id === selectedCrownSplineId)!.points.at(-1)!.id;
+    commitCrownSplineField(next, `Added ${selectedCrownSplinePointId}.`);
+  } catch (error) {
+    setSaveStatus(error instanceof Error ? error.message : String(error));
+  }
+});
+
+crownSplinePointRemoveButton.addEventListener("click", () => {
+  const field = authoredCrownField();
+  if (!field || !selectedCrownSplineId || !selectedCrownSplinePointId || regenerationBusy) return;
+  try {
+    const removed = selectedCrownSplinePointId;
+    const next = removeProcPlantCrownSplinePoint(field, selectedCrownSplineId, removed);
+    selectedCrownSplinePointId = next.splines.find((spline) => spline.id === selectedCrownSplineId)!.points[0]!.id;
+    commitCrownSplineField(next, `Removed ${removed}.`);
+  } catch (error) {
+    setSaveStatus(error instanceof Error ? error.message : String(error));
+  }
+});
+
+crownSplineRemoveButton.addEventListener("click", () => {
+  const field = authoredCrownField();
+  if (!field || !selectedCrownSplineId || regenerationBusy) return;
+  try {
+    const removed = selectedCrownSplineId;
+    const next = removeProcPlantCrownSpline(field, removed);
+    selectedCrownSplineId = next?.version === PROCPLANT_FREEFORM_CROWN_SPLINE_VERSION ? next.splines[0]?.id ?? null : null;
+    selectedCrownSplinePointId = next?.version === PROCPLANT_FREEFORM_CROWN_SPLINE_VERSION ? next.splines[0]?.points[0]?.id ?? null : null;
+    commitCrownSplineField(next, `Removed ${removed}.`);
+  } catch (error) {
+    setSaveStatus(error instanceof Error ? error.message : String(error));
+  }
+});
+
+for (const input of Object.values(crownSplinePointInputs)) {
+  input.addEventListener("change", () => {
+    const field = authoredCrownField();
+    if (!field || !selectedCrownSplineId || !selectedCrownSplinePointId || regenerationBusy) return;
+    try {
+      const next = updateProcPlantCrownSplinePoint(field, selectedCrownSplineId, selectedCrownSplinePointId, {
+        position: [
+          Number(crownSplinePointInputs.x.value),
+          Number(crownSplinePointInputs.y.value),
+          Number(crownSplinePointInputs.z.value),
+        ],
+        radius: Number(crownSplinePointInputs.radius.value),
+      });
+      commitCrownSplineField(next, `Updated ${selectedCrownSplinePointId}.`);
+    } catch (error) {
+      setSaveStatus(error instanceof Error ? error.message : String(error));
+      syncCrownSplineControls();
+    }
+  });
+}
 
 crownVolumeModeButton.addEventListener("click", () => {
   if (!selectedSourceGenome().spaceColonization || regenerationBusy) return;
@@ -3120,7 +3835,7 @@ pruneModeButton.addEventListener("click", () => {
   void refreshHeroPruneTool();
   setSaveStatus(
     pruneModeVisible
-      ? heroLodState?.graph
+      ? heroLodState?.graph || selectedGenome().weberPenn
         ? "Trim mode: click, drag a pruning stroke, or Shift-drag a lasso; Ctrl/Command adds to selection."
         : "Trim mode is unavailable for this baked worker-backed tree; choose a graph-backed plant."
       : "Trim mode closed.",
@@ -3179,6 +3894,19 @@ const clearPruneGesture = () => {
   pruneGestureOverlay.classList.remove("active", "lasso");
 };
 
+const stablePruneIdsForPickerSelection = (pickedIds: readonly string[]) => {
+  const trimMetadata = heroLodState?.weberPennTrim;
+  return trimMetadata
+    ? [...new Set(pickedIds.flatMap((pickId) => trimMetadata.pickerStemIds[pickId] ?? []))].sort()
+    : [...pickedIds];
+};
+
+const syncPruneSelectionDataset = () => {
+  const stableIds = stablePruneIdsForPickerSelection(heroPruneTool?.getSelectedSegments() ?? []);
+  if (stableIds.length > 0) app.dataset.heroPruneSelectedIds = stableIds.join(",");
+  else delete app.dataset.heroPruneSelectedIds;
+};
+
 canvas.addEventListener("pointerdown", (event) => {
   if (!pruneModeVisible || !heroPruneTool || event.button !== 0) return;
   const rect = canvas.getBoundingClientRect();
@@ -3217,6 +3945,7 @@ const finishPruneGesture = (event: PointerEvent) => {
       ? heroPruneTool.selectSegmentsFromNdcLasso(points, camera, { mode, edgeToleranceNdc: tolerance * 0.35 })
       : heroPruneTool.selectSegmentsFromNdcStroke(points, camera, { mode, radiusNdc: tolerance });
     suppressPruneClick = true;
+    syncPruneSelectionDataset();
     syncPruneButtons();
     setSaveStatus(
       result.matchedSegmentIds.length > 0
@@ -3242,6 +3971,7 @@ canvas.addEventListener("click", (event) => {
   const rect = canvas.getBoundingClientRect();
   const hit = heroPruneTool.pickFromScreen(event.clientX, event.clientY, rect, camera);
   heroPruneTool.setSelectedSegment(hit?.segmentId ?? null);
+  syncPruneSelectionDataset();
   syncPruneButtons();
   setSaveStatus(hit ? `Selected ${hit.segmentId}.` : "No branch segment selected.");
 });
@@ -3331,15 +4061,22 @@ canvas.addEventListener("click", async (event) => {
 });
 
 pruneSelectedButton.addEventListener("click", () => {
-  const segmentIds = heroPruneTool?.getSelectedSegments() ?? [];
-  if (segmentIds.length === 0) return;
+  const pickedIds = heroPruneTool?.getSelectedSegments() ?? [];
+  if (pickedIds.length === 0) return;
   const key = currentPruneKey();
   const history = pruneOperations.get(key) ?? [];
   const alreadyPruned = new Set(history.flat());
+  const trimMetadata = heroLodState?.weberPennTrim;
+  const segmentIds = stablePruneIdsForPickerSelection(pickedIds);
+  if (trimMetadata && segmentIds.length === 0) {
+    setSaveStatus("The selected picker spans do not map to stable Weber-Penn stem identities; no trim was saved.");
+    return;
+  }
   const group = segmentIds.filter((segmentId) => !alreadyPruned.has(segmentId));
   if (group.length === 0) return;
   history.push(group);
   pruneOperations.set(key, history);
+  if (trimMetadata) weberPennTrimTargets.set(key, trimMetadata.target);
   setSaveStatus(`Pruning ${group.length} selected segment${group.length === 1 ? "" : "s"} and descendants…`);
   regenerate();
 });
@@ -3349,9 +4086,21 @@ undoPruneButton.addEventListener("click", () => {
   const history = pruneOperations.get(key);
   if (!history?.length) return;
   history.pop();
-  if (history.length === 0) pruneOperations.delete(key);
+  if (history.length === 0) {
+    pruneOperations.delete(key);
+    weberPennTrimTargets.delete(key);
+  }
   else pruneOperations.set(key, history);
   setSaveStatus("Restoring the last procedural trim…");
+  regenerate();
+});
+
+resetPruneButton.addEventListener("click", () => {
+  const key = currentPruneKey();
+  if (!pruneOperations.has(key)) return;
+  pruneOperations.delete(key);
+  weberPennTrimTargets.delete(key);
+  setSaveStatus("Resetting all procedural trims to the exact generated source…");
   regenerate();
 });
 
@@ -3382,6 +4131,21 @@ inspectReadinessButton.addEventListener("click", async () => {
         ? [{ id: String(activeCutout.id), width: activeCutout.width, height: activeCutout.height }]
         : undefined,
       providesUvs: Boolean(activeCutout),
+      ...(heroLodState
+        ? {
+            structuralParts: {
+              stems: heroLodState.controller.active.template,
+              instances: [],
+              graph: heroLodState.graph ?? { stems: [], segments: [], organs: [], segmentRecords: [], attachments: [] },
+              stats: {
+                ...heroLodState.stats,
+                triangles: heroLodState.controller.active.template.idx.length / 3,
+                stemTriangles: heroLodState.controller.active.template.idx.length / 3,
+                instances: 0,
+              },
+            },
+          }
+        : {}),
     });
     const structural = report.structural;
     const memoryMb = structural.geometry.estimatedGpuBytes / (1024 * 1024);
@@ -3401,6 +4165,8 @@ inspectReadinessButton.addEventListener("click", async () => {
     ].join(" · ");
     app.dataset.readinessScore = String(report.score);
     app.dataset.readinessReady = String(report.ready);
+    app.dataset.readinessTriangles = String(structural.geometry.triangles);
+    app.dataset.readinessVertices = String(structural.geometry.vertices);
     readinessStatus.dataset.kind = "qa";
   } catch (error) {
     console.error("[procplants] Asset QA failed.", error);
@@ -3429,7 +4195,7 @@ const rebuildHeroImportFromEditor = async (nextState: ProcPlantHeroSpineEditorSt
       import("./procplant-lab-authoring-imports"),
       import("./procplant-hero-spine-editor"),
     ]);
-    const authored = createProcPlantLabHeroPreview(
+    const authored = await createProcPlantLabHeroPreview(
       source,
       fileName,
       selectedGenome(),
@@ -3438,7 +4204,7 @@ const rebuildHeroImportFromEditor = async (nextState: ProcPlantHeroSpineEditorSt
       procPlantHeroSpineEditorStateToSpine(nextState),
     );
     configureWindMesh(authored.trunk);
-    if (authored.leaves) configureWindMesh(authored.leaves, authored.leafMatrices, authored.leafSways);
+    if (authored.leaves) configureWindMesh(authored.leaves, authored.leafMatrices, authored.leafSways, PROCPLANT_WIND_BAND_LEAF);
     if (request !== heroSpineRebuildRequest || source !== heroImportSource) {
       disposeHeroImportGroup(authored.group);
       return;
@@ -3512,7 +4278,7 @@ heroGlbFileInput.addEventListener("change", async () => {
     if (file.size > 64 * 1024 * 1024) throw new Error("Hero GLB exceeds the 64 MiB browser authoring limit.");
     const source = await file.arrayBuffer();
     const { createProcPlantLabHeroPreview } = await import("./procplant-lab-authoring-imports");
-    const authored = createProcPlantLabHeroPreview(
+    const authored = await createProcPlantLabHeroPreview(
       source,
       file.name,
       selectedGenome(),
@@ -3520,13 +4286,16 @@ heroGlbFileInput.addEventListener("change", async () => {
       activeOrganMaterial(),
     );
     configureWindMesh(authored.trunk);
-    if (authored.leaves) configureWindMesh(authored.leaves, authored.leafMatrices, authored.leafSways);
+    if (authored.leaves) configureWindMesh(authored.leaves, authored.leafMatrices, authored.leafSways, PROCPLANT_WIND_BAND_LEAF);
     disposeHeroImportPreview();
     heroImportSource = source;
     heroImportFileName = file.name;
     heroSpineEditorState = null;
     installHeroImportPreview(authored, file.name);
-    heroImportStatus.textContent = `${file.name}: ${authored.audit.vertexCount.toLocaleString()} vertices, ${authored.audit.spineSamples} spine samples, ${authored.audit.attachmentsEmitted} procedural anchors; bark UV, wind, and collars applied.`;
+    const materialSummary = authored.sourceMaterialAudit.sourceMaterialApplied
+      ? `${authored.sourceMaterialAudit.materialName} source bark material with ${authored.sourceMaterialAudit.textureBindings} texture binding${authored.sourceMaterialAudit.textureBindings === 1 ? "" : "s"}`
+      : "fallback bark material";
+    heroImportStatus.textContent = `${file.name}: ${authored.audit.vertexCount.toLocaleString()} vertices, ${authored.audit.spineSamples} spine samples, ${authored.audit.attachmentsEmitted} procedural anchors; ${materialSummary}, UV0, wind, and collars applied.`;
   } catch (error) {
     console.error("[procplants] Hero GLB import failed.", error);
     heroImportStatus.textContent = `Hero import failed: ${error instanceof Error ? error.message : String(error)}`;
@@ -3540,7 +4309,7 @@ bakeMaterialButton.addEventListener("click", async () => {
   bakeMaterialButton.disabled = true;
   materialBakeStatus.textContent = "Evaluating the material DAG, packing deterministic PNG channels, and installing live PBR surfaces...";
   try {
-    const { downloadProcPlantLabMaterials } = await import("./procplant-lab-authoring-imports");
+    const { createProcPlantLabMaterialAuthoringSource, downloadProcPlantLabMaterials } = await import("./procplant-lab-authoring-imports");
     const [materialAdapter, geometryAdapter] = await Promise.all([
       import("./procplant-three-material-adapter"),
       import("./procplant-three-geometry"),
@@ -3551,13 +4320,47 @@ bakeMaterialButton.addEventListener("click", async () => {
     } = materialAdapter;
     const genome = selectedGenome();
     const generatorSeed = selectedGeneratorSeed();
-    const baked = downloadProcPlantLabMaterials(genome, generatorSeed);
+    const editorGraph = materialGraphEditorSourceKey === bakedMaterialSourceKey(genome, generatorSeed)
+      ? materialGraphEditorState?.graph
+      : undefined;
+    const baked = downloadProcPlantLabMaterials(genome, generatorSeed, editorGraph);
     const nextLiveMaterials = createProcPlantThreeBakedMaterials(baked.bundle, { ormUvChannel: 1 });
-    nextLiveMaterials.bark.vertexColors = true;
-    nextLiveMaterials.organ.vertexColors = true;
-    installProcPlantWindShader(nextLiveMaterials.bark, windUniforms);
-    installProcPlantWindShader(nextLiveMaterials.organ, windUniforms);
-    disposeLiveBakedMaterials = disposeProcPlantThreeBakedMaterials;
+    try {
+      nextLiveMaterials.bark.vertexColors = true;
+      nextLiveMaterials.organ.vertexColors = true;
+      installProcPlantWindShader(nextLiveMaterials.bark, windUniforms, hierarchicalWindShaderOptions);
+      installProcPlantWindShader(nextLiveMaterials.organ, windUniforms, hierarchicalWindShaderOptions);
+      if (materialShaderPreviewEnabled) {
+        if (!materialGraphEditorState || materialGraphEditorSourceKey !== bakedMaterialSourceKey(genome, generatorSeed)) {
+          throw new Error("generated shader preview requires the current material editor graph");
+        }
+        const [shaderCompiler, shaderAdapter] = await Promise.all([
+          import("./procplant-material-shader"),
+          import("./procplant-three-material-shader"),
+        ]);
+        const plan = shaderCompiler.compileProcPlantMaterialShaderPlan(materialGraphEditorState.compiled);
+        if (!plan.ready) throw new Error(plan.diagnostics.filter((diagnostic) => diagnostic.blocking).map((diagnostic) => diagnostic.message).join("; "));
+        const source = createProcPlantLabMaterialAuthoringSource(genome, generatorSeed);
+        const resources = shaderAdapter.createProcPlantThreeMaterialShaderResources(plan, source.pixelSources);
+        const installation = shaderAdapter.installProcPlantThreeMaterialShaderSet(nextLiveMaterials.materialsBySlot, plan, resources);
+        liveMaterialShaderInstallations.set(nextLiveMaterials, installation);
+        app.dataset.materialShaderPreviewHash = plan.contentHash;
+        app.dataset.materialShaderPreviewActive = "true";
+      } else {
+        delete app.dataset.materialShaderPreviewHash;
+        app.dataset.materialShaderPreviewActive = "false";
+      }
+    } catch (error) {
+      liveMaterialShaderInstallations.get(nextLiveMaterials)?.dispose();
+      liveMaterialShaderInstallations.delete(nextLiveMaterials);
+      disposeProcPlantThreeBakedMaterials(nextLiveMaterials);
+      throw error;
+    }
+    disposeLiveBakedMaterials = (prepared) => {
+      liveMaterialShaderInstallations.get(prepared)?.dispose();
+      liveMaterialShaderInstallations.delete(prepared);
+      disposeProcPlantThreeBakedMaterials(prepared);
+    };
     if (liveBakedMaterials) retiredBakedMaterials.push(liveBakedMaterials);
     liveBakedMaterials = nextLiveMaterials;
     liveBakedMaterialSourceKey = bakedMaterialSourceKey(genome, generatorSeed);
@@ -3567,6 +4370,7 @@ bakeMaterialButton.addEventListener("click", async () => {
     app.dataset.materialBakeHash = baked.contentHash;
     app.dataset.materialBakeReady = String(baked.ready);
     app.dataset.materialBakeImages = String(baked.imageCount);
+    app.dataset.materialBakeGraphChanged = String(Boolean(editorGraph && materialGraphEditorState?.changed));
     app.dataset.materialLivePbr = "pending";
     app.dataset.materialLiveAudit = nextLiveMaterials.audit.auditHash;
     app.dataset.materialLiveTextureBytes = String(nextLiveMaterials.audit.ownedTextureBytes);
@@ -3624,16 +4428,16 @@ const installActiveCutout = async (contourOverride?: ProcPlantCutout) => {
     alphaTest: 0.38,
     side: THREE.DoubleSide,
     transparent: false,
-  }), windUniforms);
+  }), windUniforms, hierarchicalWindShaderOptions);
   const nextDepthMaterial = installProcPlantWindShader(new THREE.MeshDepthMaterial({
     depthPacking: THREE.RGBADepthPacking,
     map: texture,
     alphaTest: 0.38,
-  }), windUniforms);
+  }), windUniforms, hierarchicalWindShaderOptions);
   const nextDistanceMaterial = installProcPlantWindShader(new THREE.MeshDistanceMaterial({
     map: texture,
     alphaTest: 0.38,
-  }), windUniforms);
+  }), windUniforms, hierarchicalWindShaderOptions);
   const previewTexture = texture.clone();
   previewTexture.needsUpdate = true;
   const material = new THREE.MeshLambertMaterial({
@@ -3995,12 +4799,16 @@ exportGlbButton.addEventListener("click", async () => {
   try {
     if (heroImportPreview) {
       const { downloadProcPlantLabHeroPreview } = await import("./procplant-lab-authoring-imports");
-      await downloadProcPlantLabHeroPreview(
+      const exported = await downloadProcPlantLabHeroPreview(
         heroImportPreview,
         heroImportAudit,
         app.dataset.heroImportHash ?? String(state.seed),
       );
-      setSaveStatus("Imported hero GLB exported with fitted spine, bark UV, wind, collars, and procedural leaf anchors.");
+      app.dataset.heroImportLastExportBytes = String(exported.byteLength);
+      app.dataset.heroImportLastExportMaterials = String(exported.materials);
+      app.dataset.heroImportLastExportTextures = String(exported.textures);
+      app.dataset.heroImportLastExportImages = String(exported.images);
+      setSaveStatus("Imported hero GLB exported with fitted spine, bark UV, wind, collars, and instanced branch, leaf, and accessory anchors.");
       return;
     }
     const exportOptions = {
@@ -4018,6 +4826,19 @@ exportGlbButton.addEventListener("click", async () => {
         lodLabel: activeLod.label,
         lodDistance: activeLod.distance,
         previewScale: heroLodState.scale,
+        authoredTriangles: activeLod.triangles,
+        authoredVertices: activeLod.vertices,
+        ...(heroLodState.weberPennTrim?.trimAudit
+          ? {
+              weberPennTrimContract: "procplants.weber-penn-trim-overrides",
+              weberPennTrimStatus: heroLodState.weberPennTrim.trimAudit.status,
+              weberPennTrimSourceSignature: heroLodState.weberPennTrim.trimAudit.sourceTopologySignature,
+              weberPennTrimResultSignature: heroLodState.weberPennTrim.trimAudit.resultTopologySignature,
+              weberPennTrimOperations: heroLodState.weberPennTrim.trimAudit.operations.length,
+              weberPennTrimRemovedStems: heroLodState.weberPennTrim.trimAudit.removedStemIds.length,
+              weberPennTrimRemovedLeaves: heroLodState.weberPennTrim.trimAudit.removedLeafIds.length,
+            }
+          : {}),
       },
     } as const;
     const authoring = await loadProcPlantAuthoringTools();
@@ -4078,6 +4899,7 @@ document.querySelector<HTMLButtonElement>("#exportJson")!.addEventListener("clic
     graphSourceGenome,
     state.seed,
     generatorOverrides,
+    env,
   );
   const generatorGraph = graphEditorState.graph;
   const generatorApplyAudit = graphEditorState.applyAudit;
@@ -4088,7 +4910,7 @@ document.querySelector<HTMLButtonElement>("#exportJson")!.addEventListener("clic
         maturity: state.maturity,
         wetness: state.wetness,
         snowLoad: state.snow,
-        seed: generatorApplyAudit.executionSeed,
+        seed: state.seed,
       })
     : null;
   const payload = {
@@ -4101,7 +4923,7 @@ document.querySelector<HTMLButtonElement>("#exportJson")!.addEventListener("clic
     },
     stats: { ...currentStats },
     genome,
-    runtime: buildProcPlantRuntimePackage(genome, generatorApplyAudit.executionSeed, env),
+    runtime: buildProcPlantRuntimePackage(genome, state.seed, env),
     authoring: {
       variant: { season: state.season, health: state.health, maturity: state.maturity },
       organVariants,
@@ -4128,6 +4950,21 @@ document.querySelector<HTMLButtonElement>("#exportJson")!.addEventListener("clic
         : null,
       graphOperations: currentPruneOperations().map((segmentId) => ({ operation: "remove", segmentId })),
       graphOperationGroups: currentPruneHistory().map((segmentIds) => ({ operation: "remove", segmentIds: [...segmentIds] })),
+      weberPennTrim: heroLodState?.weberPennTrim
+        ? {
+            target: heroLodState.weberPennTrim.target,
+            operations: currentPruneOperations().length > 0
+              ? createProcPlantWeberPennTrimOverrideSet(
+                  heroLodState.weberPennTrim.target,
+                  [createProcPlantWeberPennTrimOperation("remove", {
+                    kind: "segment-ids",
+                    segmentIds: currentPruneOperations(),
+                  })],
+                )
+              : null,
+            audit: heroLodState.weberPennTrim.trimAudit,
+          }
+        : null,
       generatorGraph,
       generatorOverrides,
       generatorApplyAudit: {
@@ -4136,6 +4973,15 @@ document.querySelector<HTMLButtonElement>("#exportJson")!.addEventListener("clic
         unsupported: generatorApplyAudit.unsupported,
       },
       generatorPreview: graphEditorState.preview,
+      productionDag: graphEditorState.production
+        ? {
+            version: graphEditorState.production.version,
+            path: graphEditorState.production.path,
+            work: graphEditorState.production.work,
+            previewHash: graphEditorState.production.previewHash,
+            records: graphEditorState.production.records,
+          }
+        : null,
     },
     url: currentShareUrl(true),
   };

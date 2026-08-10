@@ -721,6 +721,9 @@ const manifestMetadata = (value: unknown, label: string): ProcPlantCutoutMetadat
     return { x: assertFinite(record.x, `${pointLabel}.x`), y: assertFinite(record.y, `${pointLabel}.y`) };
   };
   const bendAxis = assertRecord(metadata.bendAxis, `${label}.bendAxis`);
+  const normalDirection = metadata.normalDirection === undefined
+    ? undefined
+    : assertRecord(metadata.normalDirection, `${label}.normalDirection`);
   return {
     pivot: point(metadata.pivot, `${label}.pivot`),
     attachment: point(metadata.attachment, `${label}.attachment`),
@@ -728,6 +731,11 @@ const manifestMetadata = (value: unknown, label: string): ProcPlantCutoutMetadat
       origin: point(bendAxis.origin, `${label}.bendAxis.origin`),
       direction: point(bendAxis.direction, `${label}.bendAxis.direction`),
     },
+    ...(normalDirection ? { normalDirection: {
+      x: assertFinite(normalDirection.x, `${label}.normalDirection.x`),
+      y: assertFinite(normalDirection.y, `${label}.normalDirection.y`),
+      z: assertFinite(normalDirection.z, `${label}.normalDirection.z`),
+    } } : {}),
   };
 };
 

@@ -1,5 +1,9 @@
 export const PROCPLANT_GENERATOR_GRAPH_CONTRACT = "procplants.generator-graph" as const;
 export const PROCPLANT_GENERATOR_GRAPH_VERSION = 1 as const;
+export const PROCPLANT_GENERATOR_GRAPH_MAX_NODES = 64 as const;
+export const PROCPLANT_GENERATOR_GRAPH_MAX_EDGES = 256 as const;
+export const PROCPLANT_GENERATOR_GRAPH_MAX_NODE_OPERATIONS = 100_000 as const;
+export const PROCPLANT_GENERATOR_GRAPH_MAX_TOTAL_OPERATIONS = 1_000_000 as const;
 
 export type ProcPlantGeneratorStage =
   | "source"
@@ -272,7 +276,12 @@ export const validateProcPlantGeneratorGraph = (graph: ProcPlantGeneratorGraph):
     || !ID_PATTERN.test(graph.target.id)
   )) throw new ProcPlantGeneratorGraphError("graph.target must be a versioned procplant-genome target");
   if (!Array.isArray(graph.nodes)) throw new ProcPlantGeneratorGraphError("graph.nodes must be an array");
+  if (graph.nodes.length < 1 || graph.nodes.length > PROCPLANT_GENERATOR_GRAPH_MAX_NODES) {
+    throw new ProcPlantGeneratorGraphError(`graph.nodes must contain 1..${PROCPLANT_GENERATOR_GRAPH_MAX_NODES} nodes`);
+  }
   const ids = new Set<string>();
+  let edgeCount = 0;
+  let operationCount = 0;
   for (const node of graph.nodes) {
     if (!ID_PATTERN.test(node.id)) throw new ProcPlantGeneratorGraphError(`invalid stable node ID: ${node.id}`);
     if (ids.has(node.id)) throw new ProcPlantGeneratorGraphError(`duplicate node ID: ${node.id}`);
@@ -284,13 +293,15 @@ export const validateProcPlantGeneratorGraph = (graph: ProcPlantGeneratorGraph):
     if (new Set(node.dependsOn).size !== node.dependsOn.length) {
       throw new ProcPlantGeneratorGraphError(`${node.id}.dependsOn contains duplicates`);
     }
+    edgeCount += node.dependsOn.length;
     if (node.seedOverride !== undefined &&
       (!Number.isInteger(node.seedOverride) || node.seedOverride < 0 || node.seedOverride > 0xffffffff)) {
       throw new ProcPlantGeneratorGraphError(`${node.id}.seedOverride must be a uint32`);
     }
-    if (node.count !== undefined && (!Number.isInteger(node.count) || node.count < 0)) {
-      throw new ProcPlantGeneratorGraphError(`${node.id}.count must be a non-negative integer`);
+    if (node.count !== undefined && (!Number.isInteger(node.count) || node.count < 0 || node.count > PROCPLANT_GENERATOR_GRAPH_MAX_NODE_OPERATIONS)) {
+      throw new ProcPlantGeneratorGraphError(`${node.id}.count must be an integer in 0..${PROCPLANT_GENERATOR_GRAPH_MAX_NODE_OPERATIONS}`);
     }
+    if (node.enabled) operationCount += node.count ?? 1;
     if (node.placement) validatePlacement(node.placement, `${node.id}.placement`);
     if (node.parentScope) validateParentScope(node.parentScope, `${node.id}.parentScope`);
     if (node.curve) {
@@ -323,6 +334,12 @@ export const validateProcPlantGeneratorGraph = (graph: ProcPlantGeneratorGraph):
       }
     }
     if (node.parameters !== undefined) serializableClone(node.parameters);
+  }
+  if (edgeCount > PROCPLANT_GENERATOR_GRAPH_MAX_EDGES) {
+    throw new ProcPlantGeneratorGraphError(`generator graph exceeds the ${PROCPLANT_GENERATOR_GRAPH_MAX_EDGES} edge cap`);
+  }
+  if (operationCount > PROCPLANT_GENERATOR_GRAPH_MAX_TOTAL_OPERATIONS) {
+    throw new ProcPlantGeneratorGraphError(`generator graph exceeds the ${PROCPLANT_GENERATOR_GRAPH_MAX_TOTAL_OPERATIONS} operation cap`);
   }
   for (const node of graph.nodes) {
     for (const dependency of node.dependsOn) {

@@ -112,13 +112,13 @@ try {
       for (let i = 0; i < 100 && (!document.querySelector('#inspectGraph') || document.querySelector('#inspectGraph').disabled); i++) await wait(100);
       const initialLazyAuthoringResources = performance.getEntriesByType('resource')
         .map((entry) => entry.name.split('/').at(-1) ?? entry.name)
-        .filter((name) => /procplant-(?:graph-editor-ui|lab-authoring-imports|three-geometry|three-material-adapter|rules|contour-editor-ui|crown-volume-tool)-/.test(name));
+        .filter((name) => /procplant-(?:graph-editor-ui|material-graph-editor-ui|material-shader|three-material-shader|lab-authoring-imports|three-geometry|three-material-adapter|rules|contour-editor-ui|crown-volume-tool)-/.test(name));
       document.querySelector('#inspectGraph').click();
       for (let i = 0; i < 100 && !document.querySelector('.graph-node-editor'); i++) await wait(100);
       const row = [...document.querySelectorAll('.graph-node-list > li')]
         .find((entry) => entry.querySelector('.graph-node small')?.textContent?.startsWith('architecture'));
       row.querySelector('.graph-node').click();
-      const input = row.querySelector('.graph-node-editor input[type=number]');
+      const input = row.querySelector('.graph-node-editor input[aria-label$=" count"]');
       const before = Number(input.value);
       input.value = String(before + 1);
       input.dispatchEvent(new Event('change', { bubbles: true }));
@@ -145,11 +145,44 @@ try {
       primary.dispatchEvent(new Event('change', { bubbles: true }));
       await waitForIdle();
       for (let i = 0; i < 120 && document.querySelector('#app')?.dataset.heroLodPending !== 'false'; i++) await wait(100);
+      document.querySelector('#editMaterialGraph').click();
+      for (let i = 0; i < 120 && !document.querySelector('#materialGraphEditor .material-node-list'); i++) await wait(100);
+      const materialGraphBaselineHash = document.querySelector('#app')?.dataset.materialGraphHash ?? '';
+      const shaderPreviewPanel = document.querySelector('#materialGraphEditor .material-shader-preview');
+      const shaderPreviewToggle = shaderPreviewPanel?.querySelector('input[type=checkbox]');
+      const shaderPreviewDiagnostics = [...(shaderPreviewPanel?.querySelectorAll('.material-shader-diagnostics li') ?? [])].map((entry) => ({ text: entry.textContent ?? '', blocking: entry.dataset.blocking }));
+      const shaderPreviewLive = shaderPreviewPanel?.querySelector('.material-shader-preview-status')?.getAttribute('aria-live') ?? null;
+      const materialShaderPlanReady = shaderPreviewPanel?.dataset.ready ?? null;
+      const materialShaderBaselinePlanHash = shaderPreviewPanel?.dataset.hash ?? '';
+      shaderPreviewToggle?.click();
+      for (let i = 0; i < 120 && document.querySelector('#app')?.dataset.materialShaderPreviewEnabled !== 'true'; i++) await wait(100);
+      await wait(250);
+      for (let i = 0; i < 120 && !document.querySelector('#materialGraphEditor .material-node-list [data-node-id="barkRoughLow"]'); i++) await wait(100);
+      const barkRoughLow = [...document.querySelectorAll('#materialGraphEditor .material-node-list > li')]
+        .find((entry) => entry.dataset.nodeId === 'barkRoughLow');
+      barkRoughLow.querySelector('.material-node').click();
+      const barkRoughInput = barkRoughLow.querySelector('.material-node-editor input[type=number]');
+      barkRoughInput.value = '0.2';
+      barkRoughInput.dispatchEvent(new Event('change', { bubbles: true }));
+      for (let i = 0; i < 120 && document.querySelector('#app')?.dataset.materialGraphChanged !== 'true'; i++) await wait(100);
+      for (let i = 0; i < 120 && !document.querySelector('#materialGraphEditor .graph-summary'); i++) await wait(100);
+      const materialGraphEditedHash = document.querySelector('#app')?.dataset.materialGraphHash ?? '';
+      const materialGraphSummary = document.querySelector('#materialGraphEditor .graph-summary')?.textContent ?? '';
+      const materialEditStatus = document.querySelector('#materialGraphEditor .graph-editor-status')?.textContent ?? '';
       document.querySelector('#bakeMaterial').click();
       for (let i = 0; i < 120 && !document.querySelector('#app')?.dataset.materialBakeHash; i++) await wait(100);
       for (let i = 0; i < 240 && document.querySelector('#app')?.dataset.materialLivePbr !== 'true'; i++) await wait(100);
       await waitForIdle();
+      const editedMaterialBakeHash = document.querySelector('#app')?.dataset.materialBakeHash ?? '';
+      const editedMaterialGraphFlag = document.querySelector('#app')?.dataset.materialBakeGraphChanged ?? null;
+      document.querySelector('#materialGraphEditor .graph-editor-actions button').click();
+      for (let i = 0; i < 120 && document.querySelector('#app')?.dataset.materialGraphHash !== materialGraphBaselineHash; i++) await wait(100);
+      document.querySelector('#bakeMaterial').click();
+      for (let i = 0; i < 240 && document.querySelector('#app')?.dataset.materialBakeHash === editedMaterialBakeHash; i++) await wait(100);
+      for (let i = 0; i < 240 && document.querySelector('#app')?.dataset.materialLivePbr !== 'true'; i++) await wait(100);
+      await waitForIdle();
       const materialBakeHash = document.querySelector('#app')?.dataset.materialBakeHash ?? '';
+      const undoneMaterialGraphFlag = document.querySelector('#app')?.dataset.materialBakeGraphChanged ?? null;
       const materialBakeReady = document.querySelector('#app')?.dataset.materialBakeReady ?? null;
       const materialBakeImages = Number(document.querySelector('#app')?.dataset.materialBakeImages ?? 0);
       const materialLivePbr = document.querySelector('#app')?.dataset.materialLivePbr ?? null;
@@ -158,30 +191,77 @@ try {
       const materialLiveTangents = document.querySelector('#app')?.dataset.materialLiveTangents ?? null;
       const materialLiveNormalMaps = Number(document.querySelector('#app')?.dataset.materialLiveNormalMaps ?? 0);
       const materialLiveTextureBytes = Number(document.querySelector('#app')?.dataset.materialLiveTextureBytes ?? 0);
+      const materialShaderPreviewActive = document.querySelector('#app')?.dataset.materialShaderPreviewActive ?? null;
+      const materialShaderPreviewHash = document.querySelector('#app')?.dataset.materialShaderPreviewHash ?? '';
+      const materialShaderFinalPlanHash = document.querySelector('#app')?.dataset.materialShaderPlanHash ?? '';
       document.querySelector('#exportGlb').click();
       for (let i = 0; i < 240 && !document.querySelector('#app')?.dataset.lastGlbMaterialHash; i++) await wait(100);
       const lastGlbMaterialHash = document.querySelector('#app')?.dataset.lastGlbMaterialHash ?? '';
       const lastGlbMaterialAssignments = Number(document.querySelector('#app')?.dataset.lastGlbMaterialAssignments ?? 0);
       const lastGlbSurfaceGroups = Number(document.querySelector('#app')?.dataset.lastGlbSurfaceGroups ?? 0);
+      primary.value = 'winterberryShrub';
+      primary.dispatchEvent(new Event('change', { bubbles: true }));
+      await waitForIdle();
       const makeHeroGlb = () => {
-        const binary = new Uint8Array(44);
+        const textureCanvas = document.createElement('canvas');
+        textureCanvas.width = textureCanvas.height = 2;
+        const textureContext = textureCanvas.getContext('2d');
+        textureContext.fillStyle = '#765432';
+        textureContext.fillRect(0, 0, 2, 2);
+        const encodedImage = type => Uint8Array.from(atob(textureCanvas.toDataURL(type).split(',')[1]), value => value.charCodeAt(0));
+        const images = [encodedImage('image/png'), encodedImage('image/jpeg'), encodedImage('image/webp')];
+        const imageOffsets = [];
+        let binaryLength = 68;
+        for (const image of images) {
+          binaryLength = Math.ceil(binaryLength / 4) * 4;
+          imageOffsets.push(binaryLength);
+          binaryLength += image.length;
+        }
+        const binary = new Uint8Array(Math.ceil(binaryLength / 4) * 4);
         new Float32Array(binary.buffer, 0, 9).set([-0.5, 0, 0, 0.5, 0, 0, 0, 2, 0.2]);
         new Uint16Array(binary.buffer, 36, 3).set([0, 1, 2]);
+        new Float32Array(binary.buffer, 44, 6).set([0, 0, 1, 0, 0.5, 1]);
+        images.forEach((image, index) => binary.set(image, imageOffsets[index]));
         const json = {
           asset: { version: '2.0', generator: 'procplants browser smoke' },
+          extensionsUsed: ['KHR_texture_transform', 'EXT_texture_webp'],
           scene: 0,
           scenes: [{ nodes: [0] }],
           nodes: [{ name: 'hero-trunk', mesh: 0 }],
-          meshes: [{ primitives: [{ attributes: { POSITION: 0 }, indices: 1, mode: 4 }] }],
+          meshes: [{ primitives: [{ attributes: { POSITION: 0, TEXCOORD_0: 2 }, indices: 1, material: 0, mode: 4 }] }],
           accessors: [
             { bufferView: 0, componentType: 5126, count: 3, type: 'VEC3', min: [-0.5, 0, 0], max: [0.5, 2, 0.2] },
             { bufferView: 1, componentType: 5123, count: 3, type: 'SCALAR' },
+            { bufferView: 2, componentType: 5126, count: 3, type: 'VEC2' },
           ],
           bufferViews: [
             { buffer: 0, byteOffset: 0, byteLength: 36, target: 34962 },
             { buffer: 0, byteOffset: 36, byteLength: 6, target: 34963 },
+            { buffer: 0, byteOffset: 44, byteLength: 24, target: 34962 },
+            ...images.map((image, index) => ({ buffer: 0, byteOffset: imageOffsets[index], byteLength: image.length })),
           ],
-          buffers: [{ byteLength: 44 }],
+          buffers: [{ byteLength: binary.length }],
+          images: [
+            { name: 'smoke-bark-color', bufferView: 3, mimeType: 'image/png' },
+            { name: 'smoke-bark-normal', bufferView: 4, mimeType: 'image/jpeg' },
+            { name: 'smoke-bark-emissive', bufferView: 5, mimeType: 'image/webp' },
+          ],
+          samplers: [{ magFilter: 9728, minFilter: 9985, wrapS: 33071, wrapT: 33648 }],
+          textures: [
+            { source: 0, sampler: 0 },
+            { source: 1, sampler: 0 },
+            { source: 0, sampler: 0, extensions: { EXT_texture_webp: { source: 2 } } },
+          ],
+          materials: [{
+            name: 'smoke-source-bark',
+            pbrMetallicRoughness: {
+              baseColorFactor: [0.42, 0.31, 0.2, 1], metallicFactor: 0.05, roughnessFactor: 0.78,
+              baseColorTexture: { index: 0, extensions: { KHR_texture_transform: { offset: [0.1, 0.2], scale: [2, 3] } } },
+            },
+            normalTexture: { index: 1, scale: 0.65 },
+            emissiveFactor: [0.02, 0.01, 0.005],
+            emissiveTexture: { index: 2 },
+          }],
         };
         const encoded = new TextEncoder().encode(JSON.stringify(json));
         const jsonLength = Math.ceil(encoded.length / 4) * 4;
@@ -210,8 +290,25 @@ try {
       const heroImportActive = document.querySelector('#app')?.dataset.heroImportActive ?? null;
       const heroImportVertices = Number(document.querySelector('#app')?.dataset.heroImportVertices ?? 0);
       const heroImportAttachments = Number(document.querySelector('#app')?.dataset.heroImportAttachments ?? 0);
+      const heroImportAttachmentHash = document.querySelector('#app')?.dataset.heroImportAttachmentHash ?? '';
+      const heroImportAttachmentInstances = Number(document.querySelector('#app')?.dataset.heroImportAttachmentInstances ?? 0);
+      const heroImportAttachmentDraws = Number(document.querySelector('#app')?.dataset.heroImportAttachmentDraws ?? 0);
+      const heroImportAttachmentVertices = Number(document.querySelector('#app')?.dataset.heroImportAttachmentVertices ?? 0);
+      const heroImportAttachmentTriangles = Number(document.querySelector('#app')?.dataset.heroImportAttachmentTriangles ?? 0);
+      const heroImportBranchInstances = Number(document.querySelector('#app')?.dataset.heroImportBranchInstances ?? 0);
+      const heroImportAccessoryInstances = Number(document.querySelector('#app')?.dataset.heroImportAccessoryInstances ?? 0);
+      const heroImportSourceMaterial = document.querySelector('#app')?.dataset.heroImportSourceMaterial ?? null;
+      const heroImportSourceMaterialTextures = Number(document.querySelector('#app')?.dataset.heroImportSourceMaterialTextures ?? 0);
+      const heroImportSourceMaterialImages = Number(document.querySelector('#app')?.dataset.heroImportSourceMaterialImages ?? 0);
       const heroImportStatus = document.querySelector('#heroImportStatus')?.textContent ?? '';
       const heroImportHashBeforeEdit = document.querySelector('#app')?.dataset.heroImportHash ?? '';
+      document.querySelector('#exportGlb').click();
+      for (let i = 0; i < 240 && !/instanced branch/.test(document.querySelector('#saveStatus')?.textContent ?? ''); i++) await wait(100);
+      const heroImportExportStatus = document.querySelector('#saveStatus')?.textContent ?? '';
+      const heroImportExportBytes = Number(document.querySelector('#app')?.dataset.heroImportLastExportBytes ?? 0);
+      const heroImportExportMaterials = Number(document.querySelector('#app')?.dataset.heroImportLastExportMaterials ?? 0);
+      const heroImportExportTextures = Number(document.querySelector('#app')?.dataset.heroImportLastExportTextures ?? 0);
+      const heroImportExportImages = Number(document.querySelector('#app')?.dataset.heroImportLastExportImages ?? 0);
       document.querySelector('#editHeroSpine').click();
       for (let i = 0; i < 120 && document.querySelector('#editHeroSpine')?.getAttribute('aria-pressed') !== 'true'; i++) await wait(100);
       const heroSpineEditing = document.querySelector('#editHeroSpine')?.getAttribute('aria-pressed') ?? null;
@@ -272,10 +369,10 @@ try {
       for (let i = 0; i < 100 && document.querySelector('#app')?.dataset.crownFieldVolumeCount !== '0'; i++) await wait(100);
       const crownTrianglesRestored = Number(document.querySelector('#triangles').textContent.replaceAll(',', ''));
       return {
-        rows: document.querySelectorAll('.graph-node-list > li').length,
+        rows: document.querySelectorAll('#graphPreview .graph-node-list > li').length,
         before,
-        after: Number(current.querySelector('.graph-node-editor input[type=number]').value),
-        summary: document.querySelector('.graph-summary')?.textContent ?? '',
+        after: Number(current.querySelector('.graph-node-editor input[aria-label$=" count"]').value),
+        summary: document.querySelector('#graphPreview .graph-summary')?.textContent ?? '',
         hash: document.querySelector('#graphPreview')?.dataset.hash ?? '',
         triangles: document.querySelector('#triangles')?.textContent ?? '',
         editContourButton: Boolean(document.querySelector('#editCutoutContour')),
@@ -288,6 +385,14 @@ try {
         visibilityPlacements,
         visibilityFrustumRejected,
         materialBakeHash,
+        materialGraphBaselineHash,
+        materialGraphEditedHash,
+        materialGraphSummary,
+        materialEditStatus,
+        editedMaterialBakeHash,
+        editedMaterialGraphFlag,
+        undoneMaterialGraphFlag,
+        materialGraphEditorLoaded: document.querySelector('#app')?.dataset.materialGraphEditorLoaded ?? null,
         materialBakeReady,
         materialBakeImages,
         materialLivePbr,
@@ -296,12 +401,35 @@ try {
         materialLiveTangents,
         materialLiveNormalMaps,
         materialLiveTextureBytes,
+        materialShaderPlanReady,
+        materialShaderBaselinePlanHash,
+        materialShaderFinalPlanHash,
+        materialShaderPreviewActive,
+        materialShaderPreviewHash,
+        shaderPreviewToggleEnabled: Boolean(shaderPreviewToggle && !shaderPreviewToggle.disabled),
+        shaderPreviewDiagnostics,
+        shaderPreviewLive,
         lastGlbMaterialHash,
         lastGlbMaterialAssignments,
         lastGlbSurfaceGroups,
         heroImportActive,
         heroImportVertices,
         heroImportAttachments,
+        heroImportAttachmentHash,
+        heroImportAttachmentInstances,
+        heroImportAttachmentDraws,
+        heroImportAttachmentVertices,
+        heroImportAttachmentTriangles,
+        heroImportBranchInstances,
+        heroImportAccessoryInstances,
+        heroImportSourceMaterial,
+        heroImportSourceMaterialTextures,
+        heroImportSourceMaterialImages,
+        heroImportExportStatus,
+        heroImportExportBytes,
+        heroImportExportMaterials,
+        heroImportExportTextures,
+        heroImportExportImages,
         heroImportStatus,
         heroSpineEditing,
         heroSpineAddEnabled,
@@ -355,6 +483,16 @@ try {
   assert.ok(result.visibilityFrustumRejected >= 0 && result.visibilityFrustumRejected <= result.visibilityPlacements,
     "frustum rejection count must remain bounded by live placements");
   assert.match(result.materialBakeHash, /^fnv1a32:[0-9a-f]{8}$/);
+  assert.match(result.materialGraphBaselineHash, /^fnv1a32:[0-9a-f]{8}$/);
+  assert.match(result.materialGraphEditedHash, /^fnv1a32:[0-9a-f]{8}$/);
+  assert.notEqual(result.materialGraphEditedHash, result.materialGraphBaselineHash, "visual material edits must change the compiled graph hash");
+  assert.doesNotMatch(result.materialGraphSummary, /Â/);
+  assert.match(result.materialGraphSummary, /nodes \| 2 surfaces \|/);
+  assert.match(result.materialEditStatus, /barkRoughLow\.value updated/);
+  assert.notEqual(result.editedMaterialBakeHash, result.materialBakeHash, "undo and rebake must restore different generated material bytes");
+  assert.equal(result.editedMaterialGraphFlag, "true");
+  assert.equal(result.undoneMaterialGraphFlag, "false");
+  assert.equal(result.materialGraphEditorLoaded, "true");
   assert.equal(result.materialBakeReady, "true");
   assert.equal(result.materialBakeImages, 6, "two PBR surfaces must bake base-color, ORM, and normal resources");
   assert.equal(result.materialLivePbr, "true", "baked bark/organ materials must be adopted by the live generated plant");
@@ -363,14 +501,40 @@ try {
   assert.equal(result.materialLiveTangents, "true", "live normal-mapped geometry must carry explicit tangents");
   assert.equal(result.materialLiveNormalMaps, 2, "both live bark and organ surfaces must bind normal maps");
   assert.equal(result.materialLiveTextureBytes, 6 * 256 * 256 * 4, "live texture ownership audit must be exact");
+  assert.equal(result.materialShaderPlanReady, "true");
+  assert.match(result.materialShaderBaselinePlanHash, /^fnv1a32:[0-9a-f]{8}$/);
+  assert.match(result.materialShaderFinalPlanHash, /^fnv1a32:[0-9a-f]{8}$/);
+  assert.equal(result.materialShaderPreviewActive, "true", "opt-in generated shader must be installed on the live baked materials");
+  assert.equal(result.materialShaderPreviewHash, result.materialShaderFinalPlanHash);
+  assert.equal(result.shaderPreviewToggleEnabled, true);
+  assert.equal(result.shaderPreviewLive, "polite");
+  assert.ok(result.shaderPreviewDiagnostics.length >= 2 && result.shaderPreviewDiagnostics.every((diagnostic) => diagnostic.blocking === "false"));
+  assert.ok(result.shaderPreviewDiagnostics.every((diagnostic) => /normal remains on the validated baked/.test(diagnostic.text)));
   assert.match(result.lastGlbMaterialHash, /^fnv1a32:[0-9a-f]{8}$/, "lab GLB export must embed the active baked material bundle");
   assert.ok(result.lastGlbSurfaceGroups > 0);
   assert.equal(result.lastGlbMaterialAssignments, result.lastGlbSurfaceGroups,
     "lab GLB export must assign every exported bark/organ range to an explicit baked slot");
+  if (result.heroImportActive !== "true") console.error(`hero import diagnostic: ${JSON.stringify({ status: result.heroImportStatus, sourceMaterial: result.heroImportSourceMaterial })}`);
+  if (!result.heroImportAttachmentHash) console.error(`hero attachment diagnostic: ${JSON.stringify({ status: result.heroImportStatus, active: result.heroImportActive, attachments: result.heroImportAttachments, exports: [result.heroImportExportMaterials, result.heroImportExportTextures, result.heroImportExportImages] })}`);
   assert.equal(result.heroImportActive, "true");
   assert.equal(result.heroImportVertices, 3);
   assert.ok(result.heroImportAttachments > 0, "hero import must emit procedural attachment anchors");
-  assert.match(result.heroImportStatus, /bark UV, wind, and collars applied/);
+  assert.match(result.heroImportAttachmentHash, /^fnv1a32:[0-9a-f]{8}$/);
+  assert.equal(result.heroImportAttachmentInstances, result.heroImportBranchInstances + result.heroImportAccessoryInstances);
+  assert.ok(result.heroImportBranchInstances > 0, "hero branch records must materialize as shared instances");
+  assert.ok(result.heroImportAccessoryInstances > 0, "accessory-bearing hero genomes must materialize accessory instances");
+  assert.equal(result.heroImportAttachmentDraws, 2, "winterberry hero branches and berries must use two shared prototype draws");
+  assert.ok(result.heroImportAttachmentVertices > 0);
+  assert.ok(result.heroImportAttachmentTriangles > 0);
+  assert.equal(result.heroImportSourceMaterial, "true", "browser import must adopt the selected GLB source material");
+  assert.equal(result.heroImportSourceMaterialTextures, 3, "PNG color, JPEG normal, and WebP emissive bindings must decode in-browser");
+  assert.equal(result.heroImportSourceMaterialImages, 3);
+  assert.ok(result.heroImportExportBytes > 0, "materialized imported hero content must survive real GLB export");
+  assert.ok(result.heroImportExportMaterials >= 2, "real exported hero GLB must retain source bark plus organ materials");
+  assert.ok(result.heroImportExportTextures >= 3, "real exported hero GLB must contain all adopted bark textures");
+  assert.ok(result.heroImportExportImages >= 3, "real exported hero GLB must embed all adopted bark images");
+  assert.match(result.heroImportExportStatus, /instanced branch, leaf, and accessory anchors/);
+  assert.match(result.heroImportStatus, /smoke-source-bark source bark material with 3 texture bindings, UV0, wind, and collars applied/);
   assert.equal(result.heroSpineEditing, "true");
   assert.equal(result.heroSpineAddEnabled, true);
   assert.notEqual(result.heroImportHashAfterEdit, result.heroImportHashBeforeEdit, "manual spine edits must rebuild authored hero content");

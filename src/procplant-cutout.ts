@@ -24,6 +24,8 @@ export interface ProcPlantCutoutMetadata {
     origin: ProcPlantCutoutPoint;
     direction: ProcPlantCutoutPoint;
   };
+  /** Optional cutout-local unit normal. Omission preserves the legacy +Z card plane exactly. */
+  normalDirection?: { x: number; y: number; z: number };
 }
 
 export interface ProcPlantCutoutTraceOptions {
@@ -160,6 +162,7 @@ const cloneMetadata = (metadata: ProcPlantCutoutMetadata): ProcPlantCutoutMetada
     origin: clonePoint(metadata.bendAxis.origin),
     direction: clonePoint(metadata.bendAxis.direction),
   },
+  ...(metadata.normalDirection ? { normalDirection: { ...metadata.normalDirection } } : {}),
 });
 
 const validatePoint = (point: ProcPlantCutoutPoint, label: string) => {
@@ -173,6 +176,11 @@ const validateMetadata = (metadata: ProcPlantCutoutMetadata) => {
   validatePoint(metadata.bendAxis.direction, "metadata.bendAxis.direction");
   if (Math.hypot(metadata.bendAxis.direction.x, metadata.bendAxis.direction.y) < 1e-8) {
     throw new Error("metadata.bendAxis.direction must be non-zero");
+  }
+  if (metadata.normalDirection) {
+    const { x, y, z } = metadata.normalDirection;
+    if (![x, y, z].every(Number.isFinite)) throw new Error("metadata.normalDirection must be finite");
+    if (Math.hypot(x, y, z) < 1e-8) throw new Error("metadata.normalDirection must be non-zero");
   }
 };
 
@@ -677,6 +685,7 @@ const atlasMetadata = (
       origin: atlasPoint(metadata.bendAxis.origin, uv),
       direction: { x: direction.x / length, y: direction.y / length },
     },
+    ...(metadata.normalDirection ? { normalDirection: { ...metadata.normalDirection } } : {}),
   };
 };
 
@@ -800,6 +809,13 @@ export const buildProcPlantCutoutGeometry = (
   const normals = new Float32Array(orderedPoints.length * 3);
   const uvs = new Float32Array(orderedPoints.length * 2);
   const sway = new Float32Array(orderedPoints.length);
+  const authoredNormal = cutout.metadata.normalDirection;
+  const normal = authoredNormal
+    ? new THREE.Vector3(authoredNormal.x, authoredNormal.y, authoredNormal.z).normalize()
+    : null;
+  const planeRotation = normal
+    ? new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal)
+    : null;
   const axisLength = Math.hypot(cutout.metadata.bendAxis.direction.x, cutout.metadata.bendAxis.direction.y);
   const axis = {
     x: cutout.metadata.bendAxis.direction.x / axisLength,
@@ -814,11 +830,21 @@ export const buildProcPlantCutoutGeometry = (
     );
   }
   const uvRect = options.atlasEntry?.uv ?? { u0: 0, v0: 0, u1: 1, v1: 1 };
+  const rotatedPosition = new THREE.Vector3();
   for (let index = 0; index < orderedPoints.length; index++) {
     const point = orderedPoints[index]!;
-    positions[index * 3] = (point.x - cutout.metadata.pivot.x) * width;
-    positions[index * 3 + 1] = (point.y - cutout.metadata.pivot.y) * height;
-    normals[index * 3 + 2] = 1;
+    rotatedPosition.set(
+      (point.x - cutout.metadata.pivot.x) * width,
+      (point.y - cutout.metadata.pivot.y) * height,
+      0,
+    );
+    if (planeRotation) rotatedPosition.applyQuaternion(planeRotation);
+    positions[index * 3] = rotatedPosition.x;
+    positions[index * 3 + 1] = rotatedPosition.y;
+    positions[index * 3 + 2] = rotatedPosition.z;
+    normals[index * 3] = normal?.x ?? 0;
+    normals[index * 3 + 1] = normal?.y ?? 0;
+    normals[index * 3 + 2] = normal?.z ?? 1;
     uvs[index * 2] = uvRect.u0 + point.x * (uvRect.u1 - uvRect.u0);
     uvs[index * 2 + 1] = uvRect.v0 + point.y * (uvRect.v1 - uvRect.v0);
     const projection =
@@ -834,6 +860,16 @@ export const buildProcPlantCutoutGeometry = (
   geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(indices), 1));
   geometry.computeBoundingBox();
   geometry.computeBoundingSphere();
+  const attachmentPosition = new THREE.Vector3(
+    (cutout.metadata.attachment.x - cutout.metadata.pivot.x) * width,
+    (cutout.metadata.attachment.y - cutout.metadata.pivot.y) * height,
+    0,
+  );
+  const bendAxis = new THREE.Vector3(axis.x * width, axis.y * height, 0);
+  if (planeRotation) {
+    attachmentPosition.applyQuaternion(planeRotation);
+    bendAxis.applyQuaternion(planeRotation);
+  }
   geometry.userData.procplantCutout = {
     contract: cutout.contract,
     version: cutout.version,
@@ -844,12 +880,9 @@ export const buildProcPlantCutoutGeometry = (
     atlasContours: contours.map((contour) => contour.map((point) => atlasPoint(point, uvRect))),
     topology: cloneTopology(topology),
     geometryContours,
-    attachmentPosition: [
-      (cutout.metadata.attachment.x - cutout.metadata.pivot.x) * width,
-      (cutout.metadata.attachment.y - cutout.metadata.pivot.y) * height,
-      0,
-    ],
-    bendAxis: [axis.x * width, axis.y * height, 0],
+    ...(normal ? { normalDirection: normal.toArray() } : {}),
+    attachmentPosition: attachmentPosition.toArray(),
+    bendAxis: bendAxis.toArray(),
   };
   return geometry;
 };

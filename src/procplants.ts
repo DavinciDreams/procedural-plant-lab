@@ -7,6 +7,7 @@ import {
   bakeTree,
   generateTreeData,
   SPECIES,
+  type BakedTree,
   type BakeOptions,
   type SpeciesId,
   type TreeData,
@@ -15,15 +16,31 @@ import { getLeafShape } from "./vendor/proc-tree/LeafShapes";
 import {
   growProcPlantSpaceColonization,
   PROCPLANT_FREEFORM_CROWN_CONTRACT,
+  PROCPLANT_FREEFORM_CROWN_SPLINE_VERSION,
   PROCPLANT_FREEFORM_CROWN_VERSION,
+  type ProcPlantCrownDomain,
   type ProcPlantFreeformCrown,
+  type ProcPlantSpaceColonizationResult,
 } from "./procplant-space-colonization";
+import {
+  inspectProcPlantColonizationChains,
+  validateProcPlantChainTubeOverridePackage,
+  type ProcPlantChainTubeOverridePackage,
+  type ProcPlantColonizationChainSnapshot,
+} from "./procplant-chain-tube-overrides";
 import {
   createProcPlantSweptTubeGeometry,
   PROCPLANT_BRANCH_SWAY_ATTRIBUTE,
   PROCPLANT_BRANCH_TINTABLE_ATTRIBUTE,
 } from "./procplant-tube";
 import { declareProcPlantGeometryUv0 } from "./procplant-uv0";
+import {
+  applyProcPlantWeberPennBakedTrimOverrides,
+  bindProcPlantWeberPennTrimTarget,
+  type ProcPlantWeberPennBakedTrimAudit,
+  type ProcPlantWeberPennTrimOverrideSet,
+  type ProcPlantWeberPennTrimTarget,
+} from "./procplant-weber-penn-trim";
 
 export interface ProcPlantTemplate {
   pos: Float32Array;
@@ -256,6 +273,8 @@ export interface ProcPlantSpaceColonizationGene {
   collarStrength?: number;
   collarLength?: number;
   junctionAo?: number;
+  /** Optional graph-signature-bound per-chain tube edits. Omit for exact legacy meshing. */
+  chainTubeOverrides?: ProcPlantChainTubeOverridePackage;
   /** Place non-terminal foliage every N distal skeleton nodes. */
   foliageSpacing?: number;
   /** Number of leaves placed around each terminal twig. */
@@ -334,6 +353,29 @@ export interface ProcPlantStats {
   flowers: number;
   accessories?: number;
   triangles: number;
+}
+
+export interface ProcPlantWeberPennBuildOptions {
+  /** Signature-bound baked trim operations. Unsupported or stale sets fail closed. */
+  trimOverrides?: ProcPlantWeberPennTrimOverrideSet;
+}
+
+export interface ProcPlantWeberPennBuildMetadata {
+  /** Binding for future trim operations against the exact unedited source bake. */
+  target: ProcPlantWeberPennTrimTarget;
+  /** Picker-only graph whose segment IDs map losslessly to stable source stem IDs. */
+  pickerGraph: ProcPlantGraph;
+  /** Stable picker segment ID to native stem ID mapping. */
+  pickerStemIds: Readonly<Record<string, string>>;
+  /** Present whenever a caller supplied an override set, including fail-closed audits. */
+  trimAudit: ProcPlantWeberPennBakedTrimAudit | null;
+}
+
+export interface ProcPlantBuildResult {
+  template: ProcPlantTemplate;
+  graph: ProcPlantGraph;
+  stats: ProcPlantStats;
+  weberPennTrim?: ProcPlantWeberPennBuildMetadata;
 }
 
 export type ProcPlantBiomeId =
@@ -2946,7 +2988,7 @@ const branchRelativeFoliageFrame = (
   return { direction, right, radial: around };
 };
 
-const buildProcPlantGraphIr = (
+export const buildProcPlantGraphIr = (
   stems: StemNode[],
   segments: Array<[number, number]>,
   organs: Organ[],
@@ -3027,6 +3069,190 @@ const buildProcPlantGraphIr = (
     };
   });
   return { stems, segments, organs, segmentRecords, attachments };
+};
+
+/** Build the deterministic static centerline used by the guided-vine backend. */
+export const buildGuidedVineProcPlantArchitectureGraph = (
+  genome: ProcPlantGenome,
+  nodeCount = genome.nodeCount,
+): ProcPlantGraph => {
+  if (!genome.vine) throw new Error("guided-vine genome options are required");
+  const path = resolveProcPlantVinePath(genome.vine, nodeCount);
+  const rootDirection = path[1]!.clone().sub(path[0]!);
+  if (rootDirection.lengthSq() < 1e-8) rootDirection.copy(UP);
+  rootDirection.normalize();
+  const rootRadius = genome.moss ? 0.004 : 0.012;
+  const stems: StemNode[] = [{
+    position: path[0]!.clone(),
+    direction: rootDirection,
+    radius: genome.moss ? 0.004 : Math.max(0.006, rootRadius),
+    depth: 0,
+    t: 0,
+    index: 0,
+  }];
+  const segments: Array<[number, number]> = [];
+  let previous = stems[0]!;
+  for (let index = 1; index < path.length; index++) {
+    const t = index / Math.max(1, path.length - 1);
+    const position = path[index]!.clone();
+    const direction = position.clone().sub(previous.position);
+    if (direction.lengthSq() < 1e-8) direction.copy(previous.direction);
+    direction.normalize();
+    const node: StemNode = {
+      position,
+      direction,
+      radius: stems[0]!.radius * THREE.MathUtils.lerp(0.92, 0.28, t),
+      depth: 0,
+      t,
+      index: stems.length,
+    };
+    stems.push(node);
+    segments.push([previous.index, node.index]);
+    previous = node;
+  }
+  return buildProcPlantGraphIr(stems, segments, []);
+};
+
+const cloneProcPlantGraphParts = (graph: ProcPlantGraph) => ({
+  stems: graph.stems.map((stem, index) => ({
+    ...stem,
+    index,
+    position: stem.position.clone(),
+    direction: stem.direction.clone(),
+  })),
+  segments: graph.segments.map(([start, end]) => [start, end] as [number, number]),
+  organs: graph.organs.map((organ) => ({
+    ...organ,
+    position: organ.position.clone(),
+    direction: organ.direction.clone(),
+    right: organ.right.clone(),
+  })),
+});
+
+/** Add independently seeded foliage to a completed static guided-vine centerline. */
+export const addGuidedVineProcPlantFoliage = (
+  genome: ProcPlantGenome,
+  graph: ProcPlantGraph,
+  seed: number,
+  maximumOrgans = Number.MAX_SAFE_INTEGER,
+): ProcPlantGraph => {
+  if (!genome.vine) throw new Error("guided-vine genome options are required");
+  const { stems, segments, organs } = cloneProcPlantGraphParts(graph);
+  const rng = rngFromSeed(seed);
+  const leafEvery = Math.max(1, Math.round(genome.vine.leafEvery ?? 1));
+  const organsPerNode = genome.moss
+    ? Math.max(1, Math.min(4, Math.round(genome.moss.tuftsPerClump)))
+    : procPlantPhyllotaxyOrgansPerNode(genome);
+  const maximum = Math.max(0, Math.floor(maximumOrgans));
+  let added = 0;
+  for (let index = 1; index < stems.length && added < maximum; index++) {
+    if (index % leafEvery !== 0) continue;
+    const node = stems[index]!;
+    for (let slot = 0; slot < organsPerNode && added < maximum; slot++) {
+      const sample = resolveProcPlantPhyllotaxy(genome, index, slot);
+      const frame = branchRelativeFoliageFrame(
+        node.direction,
+        sample.azimuth + (rng() - 0.5) * 0.12,
+        genome.moss ? Math.PI / 3.2 : Math.PI / 2.35,
+        genome.vine.mode === "hang" ? -0.05 : genome.moss ? 0.48 : 0.22,
+        tangentBasis(node.direction).right,
+      );
+      const density = THREE.MathUtils.clamp(curve(genome.leaf.density, node.t), 0, 1.5);
+      if (rng() > density) continue;
+      organs.push({
+        kind: genome.moss ? "mossTuft" : "leaf",
+        position: node.position.clone().addScaledVector(frame.radial, node.radius + 0.004),
+        direction: frame.direction,
+        right: frame.right,
+        scale: (genome.moss ? genome.moss.height : curve(genome.leaf.length, node.t)) * (0.86 + rng() * 0.24),
+        t: node.t,
+      });
+      added++;
+    }
+  }
+  return buildProcPlantGraphIr(stems, segments, organs);
+};
+
+/** Add independently seeded flowers/accessories to populated guided-vine foliage. */
+export const addGuidedVineProcPlantReproductiveOrgans = (
+  genome: ProcPlantGenome,
+  graph: ProcPlantGraph,
+  seed: number,
+  maximumOrgans = Number.MAX_SAFE_INTEGER,
+): ProcPlantGraph => {
+  if (!genome.vine) throw new Error("guided-vine genome options are required");
+  const { stems, segments, organs } = cloneProcPlantGraphParts(graph);
+  const rng = rngFromSeed(seed);
+  const maximum = Math.max(0, Math.floor(maximumOrgans));
+  let added = 0;
+  const flowerEvery = Math.max(0, Math.round(genome.vine.flowerEvery ?? 0));
+  const flowerStartT = THREE.MathUtils.clamp(genome.vine.flowerStartT ?? 0.45, 0, 1);
+  if (genome.flower && flowerEvery > 0) {
+    for (let index = 1; index < stems.length && added < maximum; index++) {
+      const node = stems[index]!;
+      if (node.t < flowerStartT || index % flowerEvery !== 0) continue;
+      const frame = branchRelativeFoliageFrame(
+        node.direction,
+        resolveProcPlantPhyllotaxy(genome, index + 0.5).azimuth,
+        Math.PI / 2.55,
+        0.28,
+        tangentBasis(node.direction).right,
+      );
+      organs.push({
+        kind: "flower",
+        position: node.position.clone().addScaledVector(frame.radial, node.radius + 0.01),
+        direction: frame.direction,
+        right: frame.right,
+        scale: 0.72 + rng() * 0.2,
+        t: node.t,
+      });
+      added++;
+    }
+  }
+  for (const gene of genome.accessoryOrgans ?? []) {
+    if (added >= maximum) break;
+    const startT = THREE.MathUtils.clamp(gene.startT ?? 0.2, 0, 1);
+    const endT = THREE.MathUtils.clamp(gene.endT ?? 1, startT, 1);
+    const minDepth = Math.max(0, Math.floor(gene.minDepth ?? 0));
+    const maxDepth = Math.max(minDepth, Math.floor(gene.maxDepth ?? Number.MAX_SAFE_INTEGER));
+    let candidates = stems.filter((node) => node.index !== 0 && node.t >= startT && node.t <= endT && node.depth >= minDepth && node.depth <= maxDepth);
+    if (candidates.length === 0) candidates = stems.filter((node) => node.index !== 0);
+    const count = Math.min(Math.max(0, Math.min(32, Math.round(gene.count))), maximum - added);
+    const size = Math.max(0.003, gene.size);
+    for (let index = 0; index < count && candidates.length > 0; index++) {
+      const stratum = (index + 0.18 + rng() * 0.64) / Math.max(1, count);
+      const node = candidates[Math.min(candidates.length - 1, Math.floor(stratum * candidates.length))]!;
+      const sample = resolveProcPlantPhyllotaxy(genome, node.index + index / Math.max(1, count));
+      const azimuth = sample.azimuth + (rng() - 0.5) * 0.28;
+      const frame = branchRelativeFoliageFrame(
+        node.direction,
+        azimuth,
+        Math.PI / 2.08,
+        gene.kind === "thorn" ? -0.04 : 0.08,
+        tangentBasis(node.direction).right,
+      );
+      let direction = frame.direction.clone();
+      if (gene.kind === "fruit" || gene.kind === "berry") direction.lerp(new THREE.Vector3(0, -1, 0), 0.68).normalize();
+      else if (gene.kind === "cone") direction.lerp(new THREE.Vector3(0, -1, 0), 0.36).normalize();
+      else if (gene.kind === "thorn") direction = frame.radial.clone().addScaledVector(node.direction, -0.16).normalize();
+      else direction = frame.radial.clone().multiplyScalar(0.24).add(new THREE.Vector3(0, -1, 0)).normalize();
+      let right = frame.right.clone().projectOnPlane(direction);
+      if (right.lengthSq() < 0.0001) right = tangentBasis(direction).right;
+      right.normalize();
+      organs.push({
+        kind: gene.kind,
+        position: node.position.clone().addScaledVector(frame.radial, node.radius + size * (gene.kind === "thorn" ? 0.04 : 0.12)),
+        direction,
+        right,
+        scale: size * (0.88 + rng() * 0.24),
+        t: node.t,
+        color: gene.color,
+        secondaryColor: gene.secondaryColor,
+      });
+      added++;
+    }
+  }
+  return buildProcPlantGraphIr(stems, segments, organs);
 };
 
 const flowerLoadBend = (
@@ -5411,12 +5637,23 @@ const templateFromSweptTubeGeometry = (
   return { pos, nrm, uv0, col, tintable, sway, idx };
 };
 
-/** Compile an opt-in volumetric crown into swept branch tubes and leaf instances. */
-const buildSpaceColonizedProcPlantParts = (
+export interface ProcPlantSpaceColonizationStageSeeds {
+  /** Controls attractor sampling, skeleton growth, and swept-tube irregularity. */
+  growth: number;
+  /** Controls only foliage scale variation on the completed skeleton. */
+  foliage: number;
+}
+
+export interface ProcPlantSpaceColonizationStageOptions {
+  /** Omit foliage while retaining the exact structure and swept stem template. */
+  includeFoliage?: boolean;
+}
+
+const growSpaceColonizedProcPlant = (
   genome: ProcPlantGenome,
   seed: number,
   env: ProcPlantEnvironment,
-): ProcPlantInstancedParts => {
+): ProcPlantSpaceColonizationResult => {
   const gene = genome.spaceColonization;
   if (!gene) throw new Error("space-colonization genome options are required");
   const center = new THREE.Vector3(...gene.volume.center);
@@ -5432,10 +5669,7 @@ const buildSpaceColonizedProcPlantParts = (
   const volume = gene.volume.shape === "ellipsoid"
     ? { shape: "ellipsoid" as const, center, radii: dimensions }
     : { shape: "box" as const, center, size: dimensions };
-  const crownDomain = gene.freeform ? {
-    contract: PROCPLANT_FREEFORM_CROWN_CONTRACT,
-    version: PROCPLANT_FREEFORM_CROWN_VERSION,
-    volumes: gene.freeform.volumes.map((control) => ({
+  const transformedCrownVolumes = gene.freeform?.volumes.map((control) => ({
       ...control,
       center: [control.center[0], control.center[1] * centerHeightScale, control.center[2]] as const,
       dimensions: [
@@ -5443,10 +5677,30 @@ const buildSpaceColonizedProcPlantParts = (
         control.dimensions[1] * crownHeightScale,
         control.dimensions[2] * crownHorizontalScale,
       ] as const,
-    })),
-  } satisfies ProcPlantFreeformCrown : volume;
+    }));
+  const crownDomain: ProcPlantCrownDomain = gene.freeform
+    ? gene.freeform.version === PROCPLANT_FREEFORM_CROWN_SPLINE_VERSION
+      ? {
+          contract: PROCPLANT_FREEFORM_CROWN_CONTRACT,
+          version: PROCPLANT_FREEFORM_CROWN_SPLINE_VERSION,
+          volumes: transformedCrownVolumes!,
+          splines: gene.freeform.splines.map((spline) => ({
+            ...spline,
+            points: spline.points.map((point) => ({
+              ...point,
+              position: [point.position[0], point.position[1] * centerHeightScale, point.position[2]] as const,
+              radius: point.radius * (crownHorizontalScale * 2 + crownHeightScale) / 3,
+            })),
+          })),
+        }
+      : {
+          contract: PROCPLANT_FREEFORM_CROWN_CONTRACT,
+          version: PROCPLANT_FREEFORM_CROWN_VERSION,
+          volumes: transformedCrownVolumes!,
+        }
+    : volume;
   const tropism = gene.tropism ? new THREE.Vector3(...gene.tropism) : UP.clone();
-  const growth = growProcPlantSpaceColonization({
+  return growProcPlantSpaceColonization({
     seed,
     volume: crownDomain,
     attractorCount: gene.attractorCount,
@@ -5464,6 +5718,35 @@ const buildSpaceColonizedProcPlantParts = (
     pipeExponent: gene.pipeExponent,
     tipRadius: gene.tipRadius,
   });
+};
+
+export const inspectProcPlantSpaceColonizationChains = (
+  genome: ProcPlantGenome,
+  seed: number,
+  env: ProcPlantEnvironment = defaultPlantEnvironment(),
+): ProcPlantColonizationChainSnapshot => inspectProcPlantColonizationChains(
+  genome.id,
+  seed,
+  growSpaceColonizedProcPlant(genome, seed, env),
+);
+
+/**
+ * Compile the space-colonization backend with explicit, independently seeded
+ * structure and foliage stages. Passing the same seed for both stages is the
+ * canonical legacy path and remains byte-identical.
+ */
+export const buildSpaceColonizedProcPlantStageParts = (
+  genome: ProcPlantGenome,
+  seeds: ProcPlantSpaceColonizationStageSeeds,
+  env: ProcPlantEnvironment = defaultPlantEnvironment(),
+  options: ProcPlantSpaceColonizationStageOptions = {},
+): ProcPlantInstancedParts => {
+  const gene = genome.spaceColonization;
+  if (!gene) throw new Error("space-colonization genome options are required");
+  const growthSeed = seeds.growth >>> 0;
+  const foliageSeed = seeds.foliage >>> 0;
+  const growth = growSpaceColonizedProcPlant(genome, growthSeed, env);
+  const shade = 1 - THREE.MathUtils.clamp(env.light, 0, 1);
   const maxDepth = Math.max(1, ...growth.nodes.map((node) => node.depth));
   const nodeIndexById = new Map<string, number>();
   const stems: StemNode[] = growth.nodes.map((node, index) => {
@@ -5486,9 +5769,9 @@ const buildSpaceColonizedProcPlantParts = (
   const foliageSpacing = Math.max(1, Math.round(gene.foliageSpacing ?? 4));
   const terminalLeafCount = Math.max(1, Math.min(6, Math.round(gene.terminalLeafCount ?? 3)));
   const leafScale = Math.max(0.05, gene.leafScale ?? 1);
-  const rng = rngFromSeed((seed ^ 0x51ed270b) >>> 0);
+  const rng = rngFromSeed((foliageSeed ^ 0x51ed270b) >>> 0);
   const organs: Organ[] = [];
-  for (const node of growth.nodes) {
+  for (const node of options.includeFoliage === false ? [] : growth.nodes) {
     const t = node.depth / maxDepth;
     if (t < foliageStart) continue;
     const terminal = node.childCount === 0;
@@ -5524,6 +5807,15 @@ const buildSpaceColonizedProcPlantParts = (
   let stemTemplate: ProcPlantTemplate = new TemplateBuilder().build();
   const radialSegments = Math.max(3, Math.min(8, Math.round(gene.radialSegments ?? 5)));
   const barkColor = gene.barkColor ?? 0x6d5135;
+  const chainSnapshot = gene.chainTubeOverrides
+    ? inspectProcPlantColonizationChains(genome.id, growthSeed, growth)
+    : null;
+  const chainOverrides = chainSnapshot && gene.chainTubeOverrides
+    ? new Map(validateProcPlantChainTubeOverridePackage(gene.chainTubeOverrides, chainSnapshot).overrides.map((override) => [override.chainId, override]))
+    : null;
+  const chainByFirstEdge = chainSnapshot
+    ? new Map(chainSnapshot.chains.map((chain) => [`${chain.startNodeId}\0${chain.nodeIds[1]}`, chain]))
+    : null;
   const appendChain = (startId: string, firstChildId: string, branchOrder: number) => {
     const chain = [nodeById.get(startId)!, nodeById.get(firstChildId)!];
     let current = chain[1]!;
@@ -5534,16 +5826,21 @@ const buildSpaceColonizedProcPlantParts = (
       children = childrenById.get(current.id) ?? [];
     }
     const baseT = chain[0]!.depth / maxDepth;
+    const chainDescriptor = chainByFirstEdge?.get(`${startId}\0${firstChildId}`);
+    const chainOverride = chainDescriptor ? chainOverrides?.get(chainDescriptor.id) : undefined;
+    if (chainByFirstEdge && !chainDescriptor) throw new Error(`compiled colonization chain is missing ${startId}>${firstChildId}`);
+    const radiusScale = chainOverride?.radiusScale ?? 1;
+    const taperScale = chainOverride?.taperScale ?? 1;
     const geometry = createProcPlantSweptTubeGeometry(
-      chain.map((node) => ({
+      chain.map((node, index) => ({
         position: node.position,
-        radius: node.radius,
+        radius: node.radius * radiusScale * THREE.MathUtils.lerp(1, taperScale, index / Math.max(1, chain.length - 1)),
         age: node.depth / maxDepth,
         branchOrder,
       })),
       {
-        radialSegments,
-        seed: (seed + growth.nodes.indexOf(chain[0]!) * 2654435761 + branchOrder * 2246822519) >>> 0,
+        radialSegments: chainOverride?.radialSegments ?? radialSegments,
+        seed: (growthSeed + growth.nodes.indexOf(chain[0]!) * 2654435761 + branchOrder * 2246822519) >>> 0,
         irregularity: gene.barkIrregularity ?? 0.05,
         irregularityFrequency: 1.6 + branchOrder * 0.17,
         collarStrength: gene.collarStrength === undefined
@@ -5580,6 +5877,17 @@ const buildSpaceColonizedProcPlantParts = (
     },
   };
 };
+
+/** Compile an opt-in volumetric crown through the exact canonical seed path. */
+const buildSpaceColonizedProcPlantParts = (
+  genome: ProcPlantGenome,
+  seed: number,
+  env: ProcPlantEnvironment,
+): ProcPlantInstancedParts => buildSpaceColonizedProcPlantStageParts(
+  genome,
+  { growth: seed, foliage: seed },
+  env,
+);
 
 export const buildProcPlantInstancedParts = (
   genome: ProcPlantGenome,
@@ -5685,46 +5993,109 @@ const buildProcPlantSingleShootParts = (
   };
 };
 
-const buildDaylilyClumpParts = (
+export const PROCPLANT_DAYLILY_STAGE_PLAN_VERSION = 1 as const;
+
+export interface ProcPlantDaylilyCrown {
+  ordinal: number;
+  ringT: number;
+  angle: number;
+  position: THREE.Vector3;
+}
+
+export interface ProcPlantDaylilyCrownStagePlan {
+  version: typeof PROCPLANT_DAYLILY_STAGE_PLAN_VERSION;
+  architectureSeed: number;
+  crowns: ProcPlantDaylilyCrown[];
+}
+
+export interface ProcPlantDaylilyFoliageStagePlan {
+  version: typeof PROCPLANT_DAYLILY_STAGE_PLAN_VERSION;
+  foliageSeed: number;
+  organs: ProcPlantOrgan[];
+}
+
+export interface ProcPlantDaylilyReproductiveStagePlan {
+  version: typeof PROCPLANT_DAYLILY_STAGE_PLAN_VERSION;
+  reproductiveSeed: number;
+  stems: ProcPlantStemNode[];
+  segments: Array<[number, number]>;
+  organs: ProcPlantOrgan[];
+}
+
+const assertDaylilyClump = (genome: ProcPlantGenome) => {
+  const clump = genome.clump;
+  if (authoredProcPlantId(genome) !== "daylilyFlower" || !clump || clump.count <= 1) {
+    throw new Error("daylily stage planning requires the specialized daylily clump backend");
+  }
+  return clump;
+};
+
+const daylilyStageRng = (seed: number) => rngFromSeed(((seed >>> 0) ^ 0x9e3779b9) >>> 0);
+
+const daylilyLeafCount = (env: ProcPlantEnvironment, randomValue: number) =>
+  Math.max(8, Math.round(10 + env.moisture * 4 + randomValue * 4));
+
+/**
+ * Resolve Daylily crown architecture independently from strap-leaf and scape
+ * variation. The skipped draws retain the exact legacy phase alignment when
+ * all three stage seeds equal the canonical seed.
+ */
+export const createProcPlantDaylilyCrownStagePlan = (
   genome: ProcPlantGenome,
-  seed: number,
-  env: ProcPlantEnvironment,
-  clump: NonNullable<ProcPlantGenome["clump"]>,
-): ProcPlantInstancedParts => {
+  architectureSeed: number,
+  env: ProcPlantEnvironment = defaultPlantEnvironment(),
+): ProcPlantDaylilyCrownStagePlan => {
+  const clump = assertDaylilyClump(genome);
   const crownCount = Math.max(1, Math.min(36, Math.round(clump.count)));
   const radius = Math.max(0.02, clump.radius);
   const jitter = THREE.MathUtils.clamp(clump.jitter ?? 0.55, 0, 1);
-  const scaleVar = THREE.MathUtils.clamp(clump.scaleVar ?? 0.24, 0, 1);
-  const lean = THREE.MathUtils.clamp(clump.lean ?? 0.42, 0, 1.4);
-  const flowerDensity = THREE.MathUtils.clamp(clump.flowerDensity ?? 0.32, 0, 1.5);
-  const rng = rngFromSeed((seed ^ 0x9e3779b9) >>> 0);
-  const shade = 1 - THREE.MathUtils.clamp(env.light, 0, 1);
-  const instances: ProcPlantInstance[] = [];
-  const stemBuilder = new TemplateBuilder();
-  const stemColor = new THREE.Color(0x6d5135);
-
-  const crownPositions: THREE.Vector3[] = [];
+  const rng = daylilyStageRng(architectureSeed);
+  const crowns: ProcPlantDaylilyCrown[] = [];
   for (let c = 0; c < crownCount; c++) {
     const ringT = crownCount > 1 ? c / (crownCount - 1) : 0;
     const angle = c * GOLDEN_ANGLE + (rng() - 0.5) * jitter * 1.2;
     const spread = c === 0 ? 0 : radius * (0.25 + Math.sqrt(ringT) * 0.75) * (1 + (rng() - 0.5) * jitter * 0.45);
     const crown = new THREE.Vector3(Math.cos(angle) * spread, 0, Math.sin(angle) * spread);
-    crownPositions.push(crown);
+    crowns.push({ ordinal: c, ringT, angle, position: crown });
+    rng(); // foliage crown-scale draw
+    const leafCount = daylilyLeafCount(env, rng());
+    for (let i = 0; i < leafCount * 4; i++) rng();
+  }
+  return { version: PROCPLANT_DAYLILY_STAGE_PLAN_VERSION, architectureSeed: architectureSeed >>> 0, crowns };
+};
+
+/** Build branch-relative strap-leaf organs from an independently seeded stream. */
+export const createProcPlantDaylilyFoliageStagePlan = (
+  genome: ProcPlantGenome,
+  crowns: ProcPlantDaylilyCrownStagePlan,
+  foliageSeed: number,
+  env: ProcPlantEnvironment = defaultPlantEnvironment(),
+): ProcPlantDaylilyFoliageStagePlan => {
+  const clump = assertDaylilyClump(genome);
+  if (crowns.version !== PROCPLANT_DAYLILY_STAGE_PLAN_VERSION) throw new Error("unsupported daylily crown stage plan version");
+  const scaleVar = THREE.MathUtils.clamp(clump.scaleVar ?? 0.24, 0, 1);
+  const lean = THREE.MathUtils.clamp(clump.lean ?? 0.42, 0, 1.4);
+  const shade = 1 - THREE.MathUtils.clamp(env.light, 0, 1);
+  const rng = daylilyStageRng(foliageSeed);
+  const organs: ProcPlantOrgan[] = [];
+  for (const crownRecord of crowns.crowns) {
+    rng(); // architecture angle draw
+    if (crownRecord.ordinal > 0) rng(); // architecture spread draw
     const crownScale = 1 + (rng() - 0.5) * scaleVar;
-    const leafCount = Math.max(8, Math.round(10 + env.moisture * 4 + rng() * 4));
+    const leafCount = daylilyLeafCount(env, rng());
     for (let i = 0; i < leafCount; i++) {
       const t = i / Math.max(1, leafCount - 1);
-      const yaw = resolveProcPlantPhyllotaxy(genome, i).azimuth + angle * 0.37 + (rng() - 0.5) * 0.35;
+      const yaw = resolveProcPlantPhyllotaxy(genome, i).azimuth + crownRecord.angle * 0.37 + (rng() - 0.5) * 0.35;
       const radial = new THREE.Vector3(Math.cos(yaw), 0, Math.sin(yaw));
-      const outward = crown.lengthSq() > 0.0001 ? crown.clone().normalize() : radial;
+      const outward = crownRecord.position.lengthSq() > 0.0001 ? crownRecord.position.clone().normalize() : radial;
       const dir = UP.clone()
         .add(radial.clone().multiplyScalar(0.34 + rng() * 0.24))
-        .add(outward.multiplyScalar(lean * (0.22 + ringT * 0.32)))
+        .add(outward.multiplyScalar(lean * (0.22 + crownRecord.ringT * 0.32)))
         .normalize();
       const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw)).normalize();
-      const organ: Organ = {
+      organs.push({
         kind: "grassBlade",
-        position: crown.clone().add(radial.clone().multiplyScalar((rng() - 0.5) * 0.05)),
+        position: crownRecord.position.clone().add(radial.clone().multiplyScalar((rng() - 0.5) * 0.05)),
         direction: dir,
         right,
         scale:
@@ -5733,14 +6104,36 @@ const buildDaylilyClumpParts = (
           (1 + shade * genome.lightResponse.leafBoostInShade * 0.28) *
           (0.76 + rng() * 0.24),
         t,
-      };
-      instances.push(grassBladeInstance(genome, organ));
+      });
     }
   }
+  return { version: PROCPLANT_DAYLILY_STAGE_PLAN_VERSION, foliageSeed: foliageSeed >>> 0, organs };
+};
 
-  const scapeCount = Math.max(1, Math.min(18, Math.round(crownCount * flowerDensity)));
+/** Build independently seeded scape topology and terminal flower organs. */
+export const createProcPlantDaylilyReproductiveStagePlan = (
+  genome: ProcPlantGenome,
+  crowns: ProcPlantDaylilyCrownStagePlan,
+  reproductiveSeed: number,
+  env: ProcPlantEnvironment = defaultPlantEnvironment(),
+): ProcPlantDaylilyReproductiveStagePlan => {
+  const clump = assertDaylilyClump(genome);
+  if (crowns.version !== PROCPLANT_DAYLILY_STAGE_PLAN_VERSION) throw new Error("unsupported daylily crown stage plan version");
+  const rng = daylilyStageRng(reproductiveSeed);
+  for (const crown of crowns.crowns) {
+    rng();
+    if (crown.ordinal > 0) rng();
+    rng();
+    const leafCount = daylilyLeafCount(env, rng());
+    for (let i = 0; i < leafCount * 4; i++) rng();
+  }
+  const flowerDensity = THREE.MathUtils.clamp(clump.flowerDensity ?? 0.32, 0, 1.5);
+  const scapeCount = Math.max(1, Math.min(18, Math.round(crowns.crowns.length * flowerDensity)));
+  const stems: ProcPlantStemNode[] = [];
+  const segments: Array<[number, number]> = [];
+  const organs: ProcPlantOrgan[] = [];
   for (let s = 0; s < scapeCount; s++) {
-    const crown = crownPositions[Math.floor(rng() * crownPositions.length)]?.clone() ?? new THREE.Vector3();
+    const crown = crowns.crowns[Math.floor(rng() * crowns.crowns.length)]?.position.clone() ?? new THREE.Vector3();
     const heightScale = 0.78 + rng() * 0.38;
     const bend = new THREE.Vector3((rng() - 0.5) * 0.08, 0, (rng() - 0.5) * 0.08);
     const nodes = Math.max(4, Math.round(genome.nodeCount * (0.72 + rng() * 0.22)));
@@ -5750,8 +6143,9 @@ const buildDaylilyClumpParts = (
       radius: 0.018 * heightScale,
       depth: 0,
       t: 0,
-      index: 0,
+      index: stems.length,
     };
+    stems.push(previous);
     for (let i = 1; i <= nodes; i++) {
       const t = i / nodes;
       const direction = UP.clone()
@@ -5764,32 +6158,68 @@ const buildDaylilyClumpParts = (
         radius: previous.radius * THREE.MathUtils.lerp(0.92, 0.72, t),
         depth: 0,
         t,
-        index: i,
+        index: stems.length,
       };
-      addStemSegment(stemBuilder, previous, node, stemColor);
+      stems.push(node);
+      segments.push([previous.index, node.index]);
       previous = node;
     }
     const basis = tangentBasis(previous.direction);
-    const flowerOrgan: Organ = {
+    organs.push({
       kind: "flower",
       position: previous.position.clone().add(previous.direction.clone().multiplyScalar(0.04)),
       direction: previous.direction.clone(),
       right: basis.right,
       scale: 0.86 + rng() * 0.26,
       t: 1,
-    };
-    instances.push(...flowerInstances(genome, flowerOrgan));
+    });
   }
+  return {
+    version: PROCPLANT_DAYLILY_STAGE_PLAN_VERSION,
+    reproductiveSeed: reproductiveSeed >>> 0,
+    stems,
+    segments,
+    organs,
+  };
+};
 
+/** Materialize the three independently seeded Daylily stage plans. */
+export const buildProcPlantDaylilyStageParts = (
+  genome: ProcPlantGenome,
+  crowns: ProcPlantDaylilyCrownStagePlan,
+  foliage: ProcPlantDaylilyFoliageStagePlan,
+  reproductive: ProcPlantDaylilyReproductiveStagePlan,
+): ProcPlantInstancedParts => {
+  assertDaylilyClump(genome);
+  if (foliage.version !== PROCPLANT_DAYLILY_STAGE_PLAN_VERSION || reproductive.version !== PROCPLANT_DAYLILY_STAGE_PLAN_VERSION) {
+    throw new Error("unsupported daylily stage plan version");
+  }
+  const stemBuilder = new TemplateBuilder();
+  const stemColor = new THREE.Color(0x6d5135);
+  for (const [start, end] of reproductive.segments) {
+    addStemSegment(stemBuilder, reproductive.stems[start]!, reproductive.stems[end]!, stemColor);
+  }
   const stems = stemBuilder.build();
+  const instances: ProcPlantInstance[] = foliage.organs.map((organ) => grassBladeInstance(genome, organ));
+  for (const organ of reproductive.organs) instances.push(...flowerInstances(genome, organ));
+  const graph = buildProcPlantGraphIr(
+    reproductive.stems.map((stem) => ({ ...stem, position: stem.position.clone(), direction: stem.direction.clone() })),
+    reproductive.segments.map(([start, end]) => [start, end]),
+    [...foliage.organs, ...reproductive.organs].map((organ) => ({
+      ...organ,
+      position: organ.position.clone(),
+      direction: organ.direction.clone(),
+      right: organ.right.clone(),
+    })),
+  );
   return {
     stems,
     instances,
-    graph: { stems: [], segments: [], organs: [], segmentRecords: [], attachments: [] },
+    graph,
     stats: {
-      stems: scapeCount * Math.max(1, genome.nodeCount - 1),
-      leaves: instances.filter((inst) => inst.kind === "grassBlade").length,
-      flowers: scapeCount,
+      stems: graph.segments.length,
+      leaves: foliage.organs.length,
+      flowers: reproductive.organs.length,
       stemTriangles: stems.idx.length / 3,
       instances: instances.length,
       triangles: stems.idx.length / 3 + instances.length,
@@ -5797,23 +6227,104 @@ const buildDaylilyClumpParts = (
   };
 };
 
-/**
- * Build a clump: several offset shoots of the same genome merged into one part
- * set. Each shoot gets its own seed, a golden-angle placement inside the clump
- * radius, slight scale variation, and an outward lean so the mound arches.
- */
-const buildProcPlantClumpParts = (
+const buildDaylilyClumpParts = (
   genome: ProcPlantGenome,
   seed: number,
   env: ProcPlantEnvironment,
-  clump: NonNullable<ProcPlantGenome["clump"]>,
+  _clump: NonNullable<ProcPlantGenome["clump"]>,
 ): ProcPlantInstancedParts => {
+  const crowns = createProcPlantDaylilyCrownStagePlan(genome, seed, env);
+  return buildProcPlantDaylilyStageParts(
+    genome,
+    crowns,
+    createProcPlantDaylilyFoliageStagePlan(genome, crowns, seed, env),
+    createProcPlantDaylilyReproductiveStagePlan(genome, crowns, seed, env),
+  );
+};
+
+export const PROCPLANT_CLUMP_STAGE_PLAN_VERSION = 1 as const;
+
+export interface ProcPlantClumpStagePlan {
+  version: typeof PROCPLANT_CLUMP_STAGE_PLAN_VERSION;
+  shootSeed: number;
+  placementSeed: number;
+  shootSeeds: number[];
+  scales: number[];
+  transforms: THREE.Matrix4[];
+}
+
+/**
+ * Resolve the two independently seeded parts of the legacy clump backend.
+ * `shootSeed` controls only shoot generation; `placementSeed` controls only
+ * golden-angle offsets, scale variation, spin, and outward lean.
+ */
+export const createProcPlantClumpStagePlan = (
+  genome: ProcPlantGenome,
+  shootSeed: number,
+  placementSeed: number,
+): ProcPlantClumpStagePlan => {
+  const clump = genome.clump;
+  if (!clump || clump.count <= 1) throw new Error("clump stage planning requires clump.count > 1");
+  if (authoredProcPlantId(genome) === "daylilyFlower") {
+    throw new Error("daylily crown/scapes are not represented by the generic clump stage plan");
+  }
   const count = Math.max(1, Math.min(24, Math.round(clump.count)));
   const radius = Math.max(0, clump.radius);
   const jitter = THREE.MathUtils.clamp(clump.jitter ?? 0.4, 0, 1);
   const scaleVar = THREE.MathUtils.clamp(clump.scaleVar ?? 0.25, 0, 1);
   const lean = clump.lean ?? 0.18;
-  const rng = rngFromSeed((seed ^ 0x27d4eb2f) >>> 0);
+  const normalizedShootSeed = shootSeed >>> 0;
+  const normalizedPlacementSeed = placementSeed >>> 0;
+  const rng = rngFromSeed((normalizedPlacementSeed ^ 0x27d4eb2f) >>> 0);
+  const shootSeeds: number[] = [];
+  const scales: number[] = [];
+  const transforms: THREE.Matrix4[] = [];
+
+  for (let i = 0; i < count; i++) {
+    shootSeeds.push((normalizedShootSeed + i * 2749) >>> 0);
+
+    const ringT = count > 1 ? i / (count - 1) : 0;
+    const spread = i === 0 ? 0 : radius * (0.35 + ringT * 0.65);
+    const angle = i * GOLDEN_ANGLE + (rng() - 0.5) * jitter * 1.4;
+    const jitterR = spread * (1 + (rng() - 0.5) * jitter);
+    const ox = Math.cos(angle) * jitterR;
+    const oz = Math.sin(angle) * jitterR;
+
+    const shootScale = 1 + (rng() - 0.5) * scaleVar;
+    scales.push(shootScale);
+    const leanAxis = new THREE.Vector3(-Math.sin(angle), 0, Math.cos(angle));
+    const leanQuat = new THREE.Quaternion().setFromAxisAngle(leanAxis, lean * ringT);
+    const spinQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rng() * Math.PI * 2, 0));
+    const quat = leanQuat.multiply(spinQuat);
+    transforms.push(new THREE.Matrix4().compose(
+      new THREE.Vector3(ox, 0, oz),
+      quat,
+      new THREE.Vector3(shootScale, shootScale, shootScale),
+    ));
+  }
+  return {
+    version: PROCPLANT_CLUMP_STAGE_PLAN_VERSION,
+    shootSeed: normalizedShootSeed,
+    placementSeed: normalizedPlacementSeed,
+    shootSeeds,
+    scales,
+    transforms,
+  };
+};
+
+/** Materialize a generic clump stage plan without coupling its two random streams. */
+export const buildProcPlantClumpStageParts = (
+  genome: ProcPlantGenome,
+  plan: ProcPlantClumpStagePlan,
+  env: ProcPlantEnvironment = defaultPlantEnvironment(),
+): ProcPlantInstancedParts => {
+  const clump = genome.clump;
+  if (!clump || clump.count <= 1) throw new Error("clump stage materialization requires clump.count > 1");
+  if (plan.version !== PROCPLANT_CLUMP_STAGE_PLAN_VERSION) throw new Error("unsupported clump stage plan version");
+  const count = Math.max(1, Math.min(24, Math.round(clump.count)));
+  if (plan.shootSeeds.length !== count || plan.scales.length !== count || plan.transforms.length !== count) {
+    throw new Error(`clump stage plan must contain exactly ${count} shoots and transforms`);
+  }
 
   let mergedStems: ProcPlantTemplate | null = null;
   const instances: ProcPlantInstance[] = [];
@@ -5826,28 +6337,9 @@ const buildProcPlantClumpParts = (
   let stemTriangles = 0;
 
   for (let i = 0; i < count; i++) {
-    const shoot = buildProcPlantSingleShootParts(genome, (seed + i * 2749) >>> 0, env);
-
-    // Placement: first shoot at center, rest spiralled out via golden angle.
-    const ringT = count > 1 ? i / (count - 1) : 0;
-    const spread = i === 0 ? 0 : radius * (0.35 + ringT * 0.65);
-    const angle = i * GOLDEN_ANGLE + (rng() - 0.5) * jitter * 1.4;
-    const jitterR = spread * (1 + (rng() - 0.5) * jitter);
-    const ox = Math.cos(angle) * jitterR;
-    const oz = Math.sin(angle) * jitterR;
-
-    const shootScale = 1 + (rng() - 0.5) * scaleVar;
-    // Peripheral shoots lean away from clump center for an arching mound.
-    const leanAxis = new THREE.Vector3(-Math.sin(angle), 0, Math.cos(angle));
-    const leanQuat = new THREE.Quaternion().setFromAxisAngle(leanAxis, lean * ringT);
-    const spinQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rng() * Math.PI * 2, 0));
-    const quat = leanQuat.multiply(spinQuat);
-
-    const matrix = new THREE.Matrix4().compose(
-      new THREE.Vector3(ox, 0, oz),
-      quat,
-      new THREE.Vector3(shootScale, shootScale, shootScale),
-    );
+    const shoot = buildProcPlantSingleShootParts(genome, plan.shootSeeds[i]!, env);
+    const matrix = plan.transforms[i]!;
+    const shootScale = plan.scales[i]!;
 
     const transformedStems = transformTemplate(shoot.stems, matrix);
     mergedStems = mergedStems ? combineTemplates(mergedStems, transformedStems) : transformedStems;
@@ -5891,7 +6383,7 @@ const buildProcPlantClumpParts = (
     stemTriangles += shoot.stats.stemTriangles;
   }
 
-  const stems = mergedStems ?? buildProcPlantSingleShootParts(genome, seed, env).stems;
+  const stems = mergedStems ?? buildProcPlantSingleShootParts(genome, plan.shootSeed, env).stems;
   const mergedGraph = buildProcPlantGraphIr(graphStems, graphSegments, graphOrgans);
   return {
     stems,
@@ -5908,6 +6400,18 @@ const buildProcPlantClumpParts = (
     },
   };
 };
+
+/** Preserve the exact legacy stream assignment used by canonical clump builds. */
+const buildProcPlantClumpParts = (
+  genome: ProcPlantGenome,
+  seed: number,
+  env: ProcPlantEnvironment,
+  _clump: NonNullable<ProcPlantGenome["clump"]>,
+): ProcPlantInstancedParts => buildProcPlantClumpStageParts(
+  genome,
+  createProcPlantClumpStagePlan(genome, seed, seed),
+  env,
+);
 
 export const createProcPlantLeafGeometry = (
   shape: LeafShapeKind,
@@ -6319,6 +6823,8 @@ const transformTemplate = (template: ProcPlantTemplate, matrix: THREE.Matrix4): 
 };
 
 interface WeberPennFoliageAnchor {
+  id: string;
+  ownerStemIndex: number;
   position: THREE.Vector3;
   direction: THREE.Vector3;
   right: THREE.Vector3;
@@ -6473,6 +6979,7 @@ const addWeberPennFoliageMass = (
   source: ProcPlantTemplate,
   branchVerts: number,
   fillAnchors: WeberPennFoliageAnchor[] = [],
+  retainedAnchorIds?: ReadonlySet<string>,
 ) => {
   if (!isWeberPennCrownFillEnabled(genome)) return 0;
   const leafVerts = source.pos.length / 3 - branchVerts;
@@ -6561,6 +7068,10 @@ const addWeberPennFoliageMass = (
       normal,
       new THREE.Vector3(scale, scale, scale),
     );
+    // Generate against the complete source-anchor sequence so surviving crown
+    // fill remains byte-stable; removed owner anchors simply suppress their
+    // already-determined organ instead of redistributing it elsewhere.
+    if (anchor && retainedAnchorIds && !retainedAnchorIds.has(anchor.id)) continue;
     addTransformedGeometry(builder, sprayGeometry, matrix, color, 0.38 + t * 0.58);
     added++;
   }
@@ -6575,6 +7086,28 @@ interface BranchModuleAnchor {
   t: number;
   depth: number;
   nodeIndex: number;
+}
+
+export interface ProcPlantBranchModuleStageSeeds {
+  /** Controls trunk/module growth and bark variation. */
+  structure: number;
+  /** Controls only foliage selection, orientation, scale, and color variation. */
+  foliage: number;
+}
+
+export interface ProcPlantBranchModuleStageOptions {
+  /** Omit foliage while retaining the exact structure and attachment graph. */
+  includeFoliage?: boolean;
+}
+
+export interface ProcPlantBranchModuleStageParts {
+  stems: ProcPlantTemplate;
+  foliage: ProcPlantTemplate;
+  graph: ProcPlantGraph;
+  stats: ProcPlantStats & {
+    stemTriangles: number;
+    foliageTriangles: number;
+  };
 }
 
 const branchModuleDefaults = (genome: ProcPlantGenome) => {
@@ -6677,14 +7210,18 @@ const addBranchModuleFoliage = (
   return leaves;
 };
 
-const buildBranchModuleGraphTemplate = (
+export const buildBranchModuleProcPlantStageParts = (
   genome: ProcPlantGenome,
-  seed = 1,
+  seeds: ProcPlantBranchModuleStageSeeds,
   env: ProcPlantEnvironment = defaultPlantEnvironment(),
-): { template: ProcPlantTemplate; graph: ProcPlantGraph; stats: ProcPlantStats } => {
+  stageOptions: ProcPlantBranchModuleStageOptions = {},
+): ProcPlantBranchModuleStageParts => {
+  if (!genome.branchModules) throw new Error("branch-module genome options are required");
+  const structureSeed = seeds.structure >>> 0;
+  const foliageSeed = seeds.foliage >>> 0;
   const options = branchModuleDefaults(genome);
-  const rng = rngFromSeed(seed ^ 0x4f1bbcdc);
-  const builder = new TemplateBuilder();
+  const rng = rngFromSeed(structureSeed ^ 0x4f1bbcdc);
+  const stemBuilder = new TemplateBuilder();
   const stems: StemNode[] = [];
   const segments: Array<[number, number]> = [];
   const organs: Organ[] = [];
@@ -6723,7 +7260,7 @@ const buildBranchModuleGraphTemplate = (
       const t = i / trunkSegments;
       const photo = lightVector.clone().multiplyScalar(options.tropism * shade * t * 0.18);
       const crowdNarrowing = new THREE.Vector3(0, crowding * options.collisionBias * t * 0.18, 0);
-      const bend = new THREE.Vector3(Math.cos(seed * 0.013 + trunk) * realism.trunkBend, 0, Math.sin(seed * 0.017 + trunk) * realism.trunkBend)
+      const bend = new THREE.Vector3(Math.cos(structureSeed * 0.013 + trunk) * realism.trunkBend, 0, Math.sin(structureSeed * 0.017 + trunk) * realism.trunkBend)
         .multiplyScalar(t * 0.035);
       const dir = previous.direction.clone().add(photo).add(crowdNarrowing).add(bend).normalize();
       const length = height / trunkSegments * (options.palette === "shrub" ? 0.74 : 1) * (0.92 + rng() * 0.16);
@@ -6852,13 +7389,17 @@ const buildBranchModuleGraphTemplate = (
     const a = stems[ai]!;
     const b = stems[bi]!;
     const bark = barkColor.clone();
-    const delta = (hashUnit(seed + bi * 19) - 0.5) * realism.colorVariance * 0.5;
+    const delta = (hashUnit(structureSeed + bi * 19) - 0.5) * realism.colorVariance * 0.5;
     if (delta > 0) bark.lerp(new THREE.Color(0xffffff), delta);
     else bark.lerp(new THREE.Color(0x050805), -delta);
-    addStemSegment(builder, a, b, bark);
+    addStemSegment(stemBuilder, a, b, bark);
   }
-  const leaves = addBranchModuleFoliage(builder, genome, seed, env, anchors);
-  const template = builder.build();
+  const stemsTemplate = stemBuilder.build();
+  const foliageBuilder = new TemplateBuilder();
+  const leaves = stageOptions.includeFoliage === false
+    ? 0
+    : addBranchModuleFoliage(foliageBuilder, genome, foliageSeed, env, anchors);
+  const foliageTemplate = foliageBuilder.build();
   const graph = buildProcPlantGraphIr(stems, segments, organs);
   const segmentByEndNode = new Map(graph.segmentRecords.map((segment) => [segment.endNodeIndex, segment]));
   graph.attachments = anchors.map((anchor, index): ProcPlantAttachmentAnchor => {
@@ -6883,22 +7424,75 @@ const buildBranchModuleGraphTemplate = (
     };
   });
   return {
-    template,
+    stems: stemsTemplate,
+    foliage: foliageTemplate,
     graph,
     stats: {
       stems: segments.length,
       leaves,
       flowers: 0,
-      triangles: template.idx.length / 3,
+      triangles: (stemsTemplate.idx.length + foliageTemplate.idx.length) / 3,
+      stemTriangles: stemsTemplate.idx.length / 3,
+      foliageTriangles: foliageTemplate.idx.length / 3,
     },
   };
 };
 
-export const buildWeberPennProcPlantTemplate = (
+export const materializeBranchModuleProcPlantParts = (
+  parts: ProcPlantBranchModuleStageParts,
+): ProcPlantTemplate => combineTemplates(parts.stems, parts.foliage);
+
+const buildBranchModuleGraphTemplate = (
   genome: ProcPlantGenome,
   seed = 1,
   env: ProcPlantEnvironment = defaultPlantEnvironment(),
 ): { template: ProcPlantTemplate; graph: ProcPlantGraph; stats: ProcPlantStats } => {
+  const parts = buildBranchModuleProcPlantStageParts(
+    genome,
+    { structure: seed, foliage: seed },
+    env,
+  );
+  return {
+    template: materializeBranchModuleProcPlantParts(parts),
+    graph: parts.graph,
+    stats: parts.stats,
+  };
+};
+
+export interface ProcPlantWeberPennStageSeeds {
+  /** Drives the vendor Weber-Penn topology and every branch-only deformation. */
+  structure: number;
+  /** Drives leaf-only post-bake variation without perturbing vendor topology. */
+  foliage: number;
+}
+
+export interface ProcPlantWeberPennStageParts {
+  structure: ProcPlantTemplate;
+  nativeFoliage: ProcPlantTemplate;
+  build: { template: ProcPlantTemplate; graph: ProcPlantGraph; stats: ProcPlantStats };
+  sourceStemCount: number;
+  sourceLeafCount: number;
+  structureSeed: number;
+  foliageSeed: number;
+}
+
+interface ProcPlantWeberPennVendorStageSource {
+  treeData: TreeData;
+  baked: BakedTree;
+  bakeKey: string;
+  normalizationBake: BakedTree;
+}
+
+const weberPennStageSources = new WeakMap<ProcPlantWeberPennStageParts, ProcPlantWeberPennVendorStageSource>();
+
+const buildWeberPennProcPlantTemplateInternal = (
+  genome: ProcPlantGenome,
+  seed = 1,
+  env: ProcPlantEnvironment = defaultPlantEnvironment(),
+  stageSeeds: ProcPlantWeberPennStageSeeds = { structure: seed >>> 0, foliage: seed >>> 0 },
+  vendorSource?: ProcPlantWeberPennVendorStageSource,
+  options: ProcPlantWeberPennBuildOptions = {},
+): ProcPlantBuildResult => {
   if (!genome.weberPenn) {
     return buildProcPlantTemplate({ ...genome, weberPenn: undefined }, seed, env);
   }
@@ -6906,20 +7500,32 @@ export const buildWeberPennProcPlantTemplate = (
   const foliageMass = isWeberPennCrownFillEnabled(genome) ? genome.foliage?.mass ?? 0 : 0;
   const bakeOptions = weberPennBakeOptions(genome);
   const generateLeaves = (genome.weberPenn.maxLeaves ?? 1) !== 0 && (nativeLeaves || foliageMass > 0);
-  const treeData = generateTreeData(
+  const treeData = vendorSource?.treeData ?? generateTreeData(
     genome.weberPenn.species,
-    seed >>> 0,
+    stageSeeds.structure >>> 0,
     generateLeaves,
     bakeOptions.maxBranchDepth,
   );
-  const baked = bakeTree(treeData, bakeOptions);
+  const sourceBaked = vendorSource?.baked ?? bakeTree(treeData, bakeOptions);
+  const target = bindProcPlantWeberPennTrimTarget({
+    backend: "weber-penn",
+    genomeId: genome.id,
+    seed: stageSeeds.structure >>> 0,
+  }, sourceBaked);
+  const trimmed = options.trimOverrides
+    ? applyProcPlantWeberPennBakedTrimOverrides({ target, baked: sourceBaked }, options.trimOverrides)
+    : null;
+  const baked = trimmed?.baked ?? sourceBaked;
   const barkColor = new THREE.Color(genome.weberPenn.barkColor ?? 0x5d4327);
   const leafColor = new THREE.Color(genome.weberPenn.leafColor ?? genome.leaf.colorA);
-  const height = Math.max(1e-4, baked.max.y - baked.min.y);
+  // Keep normalization bound to the source bake so removing an outer branch
+  // cannot make the remaining tree jump or invalidate the bound picker.
+  const normalizationBake = vendorSource?.normalizationBake ?? sourceBaked;
+  const height = Math.max(1e-4, normalizationBake.max.y - normalizationBake.min.y);
   const scale = 1 / height;
-  const cx = (baked.min.x + baked.max.x) * 0.5;
-  const cz = (baked.min.z + baked.max.z) * 0.5;
-  const baseY = baked.min.y;
+  const cx = (normalizationBake.min.x + normalizationBake.max.x) * 0.5;
+  const cz = (normalizationBake.min.z + normalizationBake.max.z) * 0.5;
+  const baseY = normalizationBake.min.y;
   const branchVerts = baked.branches.positions.length / 3;
   const leafVerts = baked.leaves.positions.length / 3;
   const totalVerts = branchVerts + leafVerts;
@@ -6935,9 +7541,9 @@ export const buildWeberPennProcPlantTemplate = (
   const realism = treeRealismTraits(genome);
   const conifer = isWeberPennConifer(genome);
   const bendDir = new THREE.Vector3(
-    Math.cos((seed >>> 0) * 0.017),
+    Math.cos((stageSeeds.structure >>> 0) * 0.017),
     0,
-    Math.sin((seed >>> 0) * 0.017),
+    Math.sin((stageSeeds.structure >>> 0) * 0.017),
   ).normalize();
   const bendAmount = realism.trunkBend * (0.035 + (1 - THREE.MathUtils.clamp(env.moisture, 0, 1)) * 0.025);
   const warpPosition = (x: number, y: number, z: number, vertexSeed: number, isLeaf: boolean) => {
@@ -6961,30 +7567,25 @@ export const buildWeberPennProcPlantTemplate = (
     p.add(bendDir.clone().multiplyScalar(Math.pow(h, 1.35) * bendAmount));
     return p;
   };
-  const makeLeafSiteAnchors = (tree: TreeData): WeberPennFoliageAnchor[] => {
-    let leaves = tree.leaves;
-    if (leaves.length > (bakeOptions.maxLeaves ?? Infinity)) {
-      const step = leaves.length / Math.max(1, bakeOptions.maxLeaves ?? 1);
-      const sampled: typeof leaves = [];
-      for (let i = 0; i < (bakeOptions.maxLeaves ?? 0); i++) {
-        sampled.push(leaves[Math.floor(i * step)]!);
-      }
-      leaves = sampled;
-    }
-    return leaves.map((leaf, index) => {
+  const makeLeafSiteAnchors = (tree: TreeData, topology = baked.topology): WeberPennFoliageAnchor[] => {
+    return topology.leaves.map((range) => {
+      const leaf = tree.leaves[range.leafIndex]!;
+      const attachmentIndex = Number(range.attachmentId.slice(range.attachmentId.lastIndexOf(":") + 1));
       const leafYUp = new THREE.Vector3(leaf.position.x, leaf.position.z, -leaf.position.y);
       const ny = (leafYUp.y - baseY) * scale;
       const position = warpPosition(
         (leafYUp.x - cx) * scale,
         ny,
         (leafYUp.z - cz) * scale,
-        seed + index * 31,
+        stageSeeds.foliage + attachmentIndex * 31,
         true,
       );
       const direction = new THREE.Vector3(leaf.direction.x, leaf.direction.z, -leaf.direction.y);
       if (direction.lengthSq() < 0.0001) direction.set(position.x, 0.1, position.z);
       direction.normalize();
       return {
+        id: range.attachmentId,
+        ownerStemIndex: range.parentStemIndex,
         position,
         direction,
         right: tangentBasis(direction).right,
@@ -6993,7 +7594,7 @@ export const buildWeberPennProcPlantTemplate = (
       };
     });
   };
-  const makeBranchTipAnchors = (tree: TreeData): WeberPennFoliageAnchor[] => {
+  const makeBranchTipAnchors = (tree: TreeData, topology = baked.topology): WeberPennFoliageAnchor[] => {
     const maxDepth = bakeOptions.maxBranchDepth ?? Infinity;
     let stems = maxDepth < Infinity
       ? tree.stems.filter((stem) => stem.depth <= maxDepth)
@@ -7004,8 +7605,10 @@ export const buildWeberPennProcPlantTemplate = (
         .slice(0, bakeOptions.maxStems);
     }
     const included = new Set(stems.map((stem) => tree.stems.indexOf(stem)));
+    const retainedStemIndices = new Set(topology.stems.map((stem) => stem.stemIndex));
     const anchors = stems
       .map((stem, index) => ({ stem, index }))
+      .filter(({ stem }) => retainedStemIndices.has(stem.index))
       .filter(({ stem }) => stem.points.length >= 2)
       .filter(({ stem, index }) => stem.depth > 0 || !stems.some((candidate) => candidate.depth > 0))
       .filter(({ stem }) => !stem.childIndices.some((child) => included.has(child)))
@@ -7019,7 +7622,7 @@ export const buildWeberPennProcPlantTemplate = (
           (endYUp.x - cx) * scale,
           ny,
           (endYUp.z - cz) * scale,
-          seed + index * 43,
+          stageSeeds.structure + index * 43,
           false,
         );
         const prevNy = (prevYUp.y - baseY) * scale;
@@ -7027,13 +7630,15 @@ export const buildWeberPennProcPlantTemplate = (
           (prevYUp.x - cx) * scale,
           prevNy,
           (prevYUp.z - cz) * scale,
-          seed + index * 43 - 7,
+          stageSeeds.structure + index * 43 - 7,
           false,
         );
         const direction = position.clone().sub(previous);
         if (direction.lengthSq() < 0.0001) direction.set(position.x, 0.1, position.z);
         direction.normalize();
         return {
+          id: `weber-penn:branch-tip:${index}`,
+          ownerStemIndex: stem.index,
           position,
           direction,
           right: tangentBasis(direction).right,
@@ -7044,12 +7649,12 @@ export const buildWeberPennProcPlantTemplate = (
     if (anchors.length > 0) return anchors;
     return [];
   };
-  const makeFoliageAnchors = (tree: TreeData): WeberPennFoliageAnchor[] => {
+  const makeFoliageAnchors = (tree: TreeData, topology = baked.topology): WeberPennFoliageAnchor[] => {
     if ((genome.weberPenn?.fillAnchor ?? "leaf-sites") === "branch-tips") {
-      return makeBranchTipAnchors(tree);
+      return makeBranchTipAnchors(tree, topology);
     }
-    const leafSiteAnchors = makeLeafSiteAnchors(tree);
-    return leafSiteAnchors.length > 0 ? leafSiteAnchors : makeBranchTipAnchors(tree);
+    const leafSiteAnchors = makeLeafSiteAnchors(tree, topology);
+    return leafSiteAnchors.length > 0 ? leafSiteAnchors : makeBranchTipAnchors(tree, topology);
   };
   const varyColor = (color: THREE.Color, vertexSeed: number, amount = realism.colorVariance) => {
     const out = color.clone();
@@ -7066,7 +7671,7 @@ export const buildWeberPennProcPlantTemplate = (
       (baked.branches.positions[o]! - cx) * scale,
       ny,
       (baked.branches.positions[o + 2]! - cz) * scale,
-      seed + i * 17,
+      stageSeeds.structure + i * 17,
       false,
     );
     pos[o] = warped.x;
@@ -7077,7 +7682,7 @@ export const buildWeberPennProcPlantTemplate = (
     nrm[o + 2] = baked.branches.normals[o + 2]!;
     uv0[i * 2] = Math.atan2(baked.branches.normals[o + 2]!, baked.branches.normals[o]!) / (Math.PI * 2) + 0.5;
     uv0[i * 2 + 1] = THREE.MathUtils.clamp(ny, 0, 1);
-    const bark = varyColor(barkColor, seed + i * 23, realism.colorVariance * 0.55);
+    const bark = varyColor(barkColor, stageSeeds.structure + i * 23, realism.colorVariance * 0.55);
     col[o] = bark.r;
     col[o + 1] = bark.g;
     col[o + 2] = bark.b;
@@ -7094,7 +7699,7 @@ export const buildWeberPennProcPlantTemplate = (
       (baked.leaves.positions[src]! - cx) * scale,
       ny,
       (baked.leaves.positions[src + 2]! - cz) * scale,
-      seed + i * 31,
+      stageSeeds.foliage + i * 31,
       true,
     );
     pos[dst] = warped.x;
@@ -7111,7 +7716,7 @@ export const buildWeberPennProcPlantTemplate = (
     uv0[di * 2 + 1] = THREE.MathUtils.clamp(ny, 0, 1);
     const color = varyColor(
       leafColor.clone().lerp(new THREE.Color(genome.leaf.colorB), THREE.MathUtils.clamp(ny, 0, 1) * 0.55),
-      seed + i * 37,
+      stageSeeds.foliage + i * 37,
     );
     col[dst] = color.r;
     col[dst + 1] = color.g;
@@ -7133,15 +7738,18 @@ export const buildWeberPennProcPlantTemplate = (
 
   const baseTemplate: ProcPlantTemplate = { pos, nrm, uv0, col, tintable, sway, idx };
   const massBuilder = new TemplateBuilder();
-  const foliageAnchors = makeFoliageAnchors(treeData);
+  const sourceFoliageAnchors = makeFoliageAnchors(treeData, sourceBaked.topology);
+  const foliageAnchors = makeFoliageAnchors(treeData, baked.topology);
+  const retainedFoliageAnchorIds = new Set(foliageAnchors.map((anchor) => anchor.id));
   const massLeaves = addWeberPennFoliageMass(
     massBuilder,
     genome,
-    seed,
+    stageSeeds.foliage,
     env,
     baseTemplate,
     branchVerts,
-    foliageAnchors,
+    sourceFoliageAnchors,
+    retainedFoliageAnchorIds,
   );
   const template = combineTemplates(baseTemplate, massBuilder.build());
   const graph = emptyGraph();
@@ -7160,7 +7768,7 @@ export const buildWeberPennProcPlantTemplate = (
       throw new Error(`Invalid Weber-Penn attachment frame: ${anchor.kind}:${index}`);
     }
     return {
-      id: `weber-penn:${anchor.kind}:${index}`,
+      id: anchor.id,
       // The vendor tree exposes stable sites and tangents, but its baked branch
       // indices do not provide a lossless segment-parent mapping.
       parentSegmentId: null,
@@ -7175,6 +7783,57 @@ export const buildWeberPennProcPlantTemplate = (
       organIndex: null,
     };
   });
+  const pickerGraph = emptyGraph();
+  const pickerStemIds: Record<string, string> = {};
+  const retainedBakedStemIndices = new Set(
+    baked.topology.stems.filter((stem) => stem.baked).map((stem) => stem.stemIndex),
+  );
+  const lastPickerSegmentByStem = new Map<number, string>();
+  for (const sourceStem of treeData.stems) {
+    if (!retainedBakedStemIndices.has(sourceStem.index) || sourceStem.points.length < 2) continue;
+    let previousNodeIndex: number | null = null;
+    for (let pointIndex = 0; pointIndex < sourceStem.points.length; pointIndex++) {
+      const point = sourceStem.points[pointIndex]!;
+      const yUp = new THREE.Vector3(point.position.x, point.position.z, -point.position.y);
+      const ny = (yUp.y - baseY) * scale;
+      const position = warpPosition(
+        (yUp.x - cx) * scale,
+        ny,
+        (yUp.z - cz) * scale,
+        seed + sourceStem.index * 977 + pointIndex * 17,
+        false,
+      );
+      const nodeIndex = pickerGraph.stems.length;
+      pickerGraph.stems.push({
+        position,
+        direction: new THREE.Vector3(0, 1, 0),
+        radius: Math.max(0.001, point.radius * scale),
+        depth: sourceStem.depth,
+        t: pointIndex / Math.max(1, sourceStem.points.length - 1),
+        index: nodeIndex,
+      });
+      if (previousNodeIndex !== null) {
+        const pickId = `weber-penn:pick:stem:${sourceStem.index}:span:${pointIndex - 1}`;
+        const ownerId = `weber-penn:stem:${sourceStem.index}`;
+        const parentSegmentId = pointIndex === 1
+          ? sourceStem.parentIndex === null ? null : lastPickerSegmentByStem.get(sourceStem.parentIndex) ?? null
+          : `weber-penn:pick:stem:${sourceStem.index}:span:${pointIndex - 2}`;
+        pickerGraph.segments.push([previousNodeIndex, nodeIndex]);
+        pickerGraph.segmentRecords.push({
+          id: pickId,
+          parentSegmentId,
+          startNodeIndex: previousNodeIndex,
+          endNodeIndex: nodeIndex,
+          depth: sourceStem.depth,
+          axialStart: (pointIndex - 1) / Math.max(1, sourceStem.points.length - 1),
+          axialEnd: pointIndex / Math.max(1, sourceStem.points.length - 1),
+        });
+        pickerStemIds[pickId] = ownerId;
+        lastPickerSegmentByStem.set(sourceStem.index, pickId);
+      }
+      previousNodeIndex = nodeIndex;
+    }
+  }
   return {
     template,
     graph,
@@ -7184,7 +7843,107 @@ export const buildWeberPennProcPlantTemplate = (
       flowers: 0,
       triangles: template.idx.length / 3,
     },
+    weberPennTrim: {
+      target,
+      pickerGraph,
+      pickerStemIds,
+      trimAudit: trimmed?.audit ?? null,
+    },
   };
+};
+
+export const buildWeberPennProcPlantTemplate = (
+  genome: ProcPlantGenome,
+  seed = 1,
+  env: ProcPlantEnvironment = defaultPlantEnvironment(),
+  options: ProcPlantWeberPennBuildOptions = {},
+): ProcPlantBuildResult =>
+  buildWeberPennProcPlantTemplateInternal(
+    genome,
+    seed,
+    env,
+    { structure: seed >>> 0, foliage: seed >>> 0 },
+    undefined,
+    options,
+  );
+
+const copyProcPlantTemplateVertexRange = (
+  source: ProcPlantTemplate,
+  vertexStart: number,
+  vertexCount: number,
+  indices: Uint32Array,
+): ProcPlantTemplate => ({
+  pos: source.pos.slice(vertexStart * 3, (vertexStart + vertexCount) * 3),
+  nrm: source.nrm.slice(vertexStart * 3, (vertexStart + vertexCount) * 3),
+  uv0: source.uv0.slice(vertexStart * 2, (vertexStart + vertexCount) * 2),
+  col: source.col.slice(vertexStart * 3, (vertexStart + vertexCount) * 3),
+  tintable: source.tintable.slice(vertexStart, vertexStart + vertexCount),
+  sway: source.sway.slice(vertexStart, vertexStart + vertexCount),
+  idx: indices,
+});
+
+/**
+ * Expose the two separable soups that the vendored Weber-Penn baker actually
+ * owns. This is deliberately not a topology editor: structure remains one
+ * vendor generation pass, while foliage entropy is limited to leaf-only
+ * post-bake placement/color/crown-fill variation. The exact legacy build is
+ * retained whenever both stage seeds equal `seed`.
+ */
+export const buildWeberPennProcPlantStageParts = (
+  genome: ProcPlantGenome,
+  seed = 1,
+  env: ProcPlantEnvironment = defaultPlantEnvironment(),
+  stageSeeds: ProcPlantWeberPennStageSeeds = { structure: seed >>> 0, foliage: seed >>> 0 },
+  reusableStructure?: ProcPlantWeberPennStageParts,
+): ProcPlantWeberPennStageParts => {
+  if (!genome.weberPenn) throw new Error("Weber-Penn stage parts require genome.weberPenn");
+  const bakeOptions = weberPennBakeOptions(genome);
+  const nativeLeaves = genome.weberPenn.nativeLeaves !== false;
+  const foliageMass = isWeberPennCrownFillEnabled(genome) ? genome.foliage?.mass ?? 0 : 0;
+  const generateLeaves = (genome.weberPenn.maxLeaves ?? 1) !== 0 && (nativeLeaves || foliageMass > 0);
+  const cached = reusableStructure?.structureSeed === (stageSeeds.structure >>> 0)
+    ? weberPennStageSources.get(reusableStructure)
+    : undefined;
+  const bakeKey = JSON.stringify(bakeOptions);
+  const treeData = cached?.treeData ?? generateTreeData(
+    genome.weberPenn.species,
+    stageSeeds.structure >>> 0,
+    generateLeaves,
+    bakeOptions.maxBranchDepth,
+  );
+  const baked = cached?.bakeKey === bakeKey ? cached.baked : bakeTree(treeData, bakeOptions);
+  const vendorSource = {
+    treeData,
+    baked,
+    bakeKey,
+    normalizationBake: cached?.normalizationBake ?? cached?.baked ?? baked,
+  };
+  const build = buildWeberPennProcPlantTemplateInternal(genome, seed, env, stageSeeds, vendorSource);
+  const branchVertexCount = baked.branches.positions.length / 3;
+  const nativeFoliageVertexCount = baked.leaves.positions.length / 3;
+  const structureIndices = build.template.idx.slice(0, baked.branches.indices.length);
+  const nativeFoliageIndices = nativeLeaves
+    ? build.template.idx.slice(
+        baked.branches.indices.length,
+        baked.branches.indices.length + baked.leaves.indices.length,
+      ).map((index) => index - branchVertexCount)
+    : new Uint32Array(0);
+  const result: ProcPlantWeberPennStageParts = {
+    structure: copyProcPlantTemplateVertexRange(build.template, 0, branchVertexCount, structureIndices),
+    nativeFoliage: copyProcPlantTemplateVertexRange(
+      build.template,
+      branchVertexCount,
+      nativeFoliageVertexCount,
+      nativeFoliageIndices,
+    ),
+    build,
+    sourceStemCount: treeData.stems.length,
+    sourceLeafCount: treeData.leaves.length,
+    structureSeed: stageSeeds.structure >>> 0,
+    foliageSeed: stageSeeds.foliage >>> 0,
+  };
+  weberPennStageSources.set(result, vendorSource);
+  return result;
 };
 
 export const createProcPlantPetalGeometry = (): THREE.BufferGeometry => {
@@ -7591,10 +8350,11 @@ export const buildProcPlantTemplate = (
   genome: ProcPlantGenome,
   seed = 1,
   env: ProcPlantEnvironment = defaultPlantEnvironment(),
-): { template: ProcPlantTemplate; graph: ProcPlantGraph; stats: ProcPlantStats } => {
+  options: ProcPlantWeberPennBuildOptions = {},
+): ProcPlantBuildResult => {
   if (genome.spaceColonization) {
     const parts = buildSpaceColonizedProcPlantParts(genome, seed, env);
-    const template = materializeProcPlantParts(genome, parts);
+    const template = materializeProcPlantInstancedParts(genome, parts);
     return {
       template,
       graph: parts.graph,
@@ -7607,7 +8367,7 @@ export const buildProcPlantTemplate = (
     };
   }
   if (genome.branchModules) return buildBranchModuleGraphTemplate(genome, seed, env);
-  if (genome.weberPenn) return buildWeberPennProcPlantTemplate(genome, seed, env);
+  if (genome.weberPenn) return buildWeberPennProcPlantTemplate(genome, seed, env, options);
   const graph = buildProcPlantGraph(genome, seed, env);
   return buildProcPlantTemplateFromGraph(genome, graph, env);
 };
@@ -7694,7 +8454,7 @@ export const buildProcPlantInstancePrototype = (
   }
 };
 
-const materializeProcPlantParts = (
+export const materializeProcPlantParts = (
   genome: ProcPlantGenome,
   parts: ProcPlantInstancedParts,
 ): ProcPlantTemplate => {
@@ -7712,6 +8472,9 @@ const materializeProcPlantParts = (
   for (const geometry of geometries.values()) geometry.dispose();
   return combineTemplates(parts.stems, builder.build());
 };
+
+/** Descriptive alias retained for staged clump materialization consumers. */
+export const materializeProcPlantInstancedParts = materializeProcPlantParts;
 
 const templateBoundsAndColor = (template: ProcPlantTemplate) => {
   const box = new THREE.Box3();
@@ -7846,6 +8609,41 @@ const createPlantClusterTemplate = (source: ProcPlantTemplate): ProcPlantTemplat
   return builder.build();
 };
 
+/** Build bounded runtime LOD artifacts from an already-compiled full template. */
+export const compileProcPlantLodsFromTemplate = (
+  genome: ProcPlantGenome,
+  source: ProcPlantTemplate,
+  levels: readonly (0 | 1 | 2 | 3)[] = [0, 1, 2, 3],
+): ProcPlantCompiledLod[] => {
+  const selected = [...new Set(levels)].sort((left, right) => left - right);
+  if (selected.length < 1 || selected.some((level) => !Number.isInteger(level) || level < 0 || level > 3)) {
+    throw new Error("ProcPlant template LOD levels must contain unique indices 0..3");
+  }
+  const fullTriangles = source.idx.length / 3;
+  if (fullTriangles <= 6) throw new Error(`ProcPlant LOD compilation requires more than 6 source triangles; received ${fullTriangles}`);
+  const treeScale = genome.habit === "tree" || genome.habit === "conifer" || genome.habit === "palm" ? 1.5 : 0.75;
+  const cardOrientation = plantCardOrientation(genome, source);
+  const templates: Record<0 | 1 | 2 | 3, ProcPlantTemplate> = {
+    0: cloneTemplate(source),
+    1: createPlantClusterTemplate(source),
+    2: createPlantCardTemplate(source, true, cardOrientation),
+    3: createPlantCardTemplate(source, false, cardOrientation),
+  };
+  const labels = ["full", "clustered", "billboard-cross", "impostor"] as const;
+  const distances = [0, 18 * treeScale, 42 * treeScale, 86 * treeScale] as const;
+  return selected.map((level) => {
+    const template = templates[level];
+    return {
+      level,
+      label: labels[level],
+      distance: distances[level],
+      template,
+      triangles: template.idx.length / 3,
+      vertices: template.pos.length / 3,
+    };
+  });
+};
+
 const reducedLodGenome = (genome: ProcPlantGenome): ProcPlantGenome => ({
   ...genome,
   nodeCount: Math.max(3, Math.round(genome.nodeCount * 0.72)),
@@ -7893,6 +8691,9 @@ const reducedLodGenome = (genome: ProcPlantGenome): ProcPlantGenome => ({
   spaceColonization: genome.spaceColonization
     ? {
         ...genome.spaceColonization,
+        // A reduced LOD has a different growth signature, so hero-scoped
+        // per-chain edits apply to LOD0 only and cannot leak onto another DAG.
+        chainTubeOverrides: undefined,
         attractorCount: Math.max(48, Math.round(genome.spaceColonization.attractorCount * 0.58)),
         maxSteps: Math.max(24, Math.round(genome.spaceColonization.maxSteps * 0.72)),
         maxNodes: Math.max(48, Math.round(genome.spaceColonization.maxNodes * 0.58)),
@@ -7903,16 +8704,127 @@ const reducedLodGenome = (genome: ProcPlantGenome): ProcPlantGenome => ({
     : undefined,
 });
 
+/** Compile the legacy clump LOD policy while keeping shoot and placement seeds independent. */
+export const compileProcPlantClumpStageLods = (
+  genome: ProcPlantGenome,
+  shootSeed: number,
+  placementSeed: number,
+  env: ProcPlantEnvironment = defaultPlantEnvironment(),
+  levels: readonly (0 | 1 | 2 | 3)[] = [0, 1, 2, 3],
+): ProcPlantCompiledLod[] => {
+  if (!genome.clump || genome.clump.count <= 1) throw new Error("clump stage LOD compilation requires clump.count > 1");
+  const selected = [...new Set(levels)].sort((left, right) => left - right);
+  if (selected.length < 1 || selected.some((level) => !Number.isInteger(level) || level < 0 || level > 3)) {
+    throw new Error("ProcPlant clump LOD levels must contain unique indices 0..3");
+  }
+  const full = materializeProcPlantInstancedParts(
+    genome,
+    buildProcPlantClumpStageParts(genome, createProcPlantClumpStagePlan(genome, shootSeed, placementSeed), env),
+  );
+  const fullTriangles = full.idx.length / 3;
+  if (fullTriangles <= 6) throw new Error(`ProcPlant LOD compilation requires more than 6 source triangles; received ${fullTriangles}`);
+  const reducedGenome = reducedLodGenome(genome);
+  const reduced = reducedGenome.clump && reducedGenome.clump.count > 1
+    ? materializeProcPlantInstancedParts(
+        reducedGenome,
+        buildProcPlantClumpStageParts(
+          reducedGenome,
+          createProcPlantClumpStagePlan(reducedGenome, shootSeed, placementSeed),
+          env,
+        ),
+      )
+    : materializeProcPlantInstancedParts(reducedGenome, buildProcPlantInstancedParts(reducedGenome, shootSeed, env));
+  const reducedTriangles = reduced.idx.length / 3;
+  const clustered = reducedTriangles > 4 && reducedTriangles < fullTriangles
+    ? reduced
+    : createPlantClusterTemplate(full);
+  const cardOrientation = plantCardOrientation(genome, full);
+  const billboard = createPlantCardTemplate(full, true, cardOrientation);
+  const impostor = createPlantCardTemplate(full, false, cardOrientation);
+  const treeScale = genome.habit === "tree" || genome.habit === "conifer" || genome.habit === "palm" ? 1.5 : 0.75;
+  const rows: Array<[ProcPlantCompiledLod["level"], ProcPlantCompiledLod["label"], number, ProcPlantTemplate]> = [
+    [0, "full", 0, full],
+    [1, "clustered", 18 * treeScale, clustered],
+    [2, "billboard-cross", 42 * treeScale, billboard],
+    [3, "impostor", 86 * treeScale, impostor],
+  ];
+  return rows
+    .filter(([level]) => selected.includes(level))
+    .map(([level, label, distance, template]) => ({
+      level,
+      label,
+      distance,
+      template,
+      triangles: template.idx.length / 3,
+      vertices: template.pos.length / 3,
+    }));
+};
+
+/** Compile Daylily LODs while preserving independent crown, foliage, and reproductive streams. */
+export const compileProcPlantDaylilyStageLods = (
+  genome: ProcPlantGenome,
+  architectureSeed: number,
+  foliageSeed: number,
+  reproductiveSeed: number,
+  env: ProcPlantEnvironment = defaultPlantEnvironment(),
+  levels: readonly (0 | 1 | 2 | 3)[] = [0, 1, 2, 3],
+): ProcPlantCompiledLod[] => {
+  assertDaylilyClump(genome);
+  const selected = [...new Set(levels)].sort((left, right) => left - right);
+  if (selected.length < 1 || selected.some((level) => !Number.isInteger(level) || level < 0 || level > 3)) {
+    throw new Error("ProcPlant daylily LOD levels must contain unique indices 0..3");
+  }
+  const materialize = (source: ProcPlantGenome) => {
+    const crowns = createProcPlantDaylilyCrownStagePlan(source, architectureSeed, env);
+    return materializeProcPlantInstancedParts(source, buildProcPlantDaylilyStageParts(
+      source,
+      crowns,
+      createProcPlantDaylilyFoliageStagePlan(source, crowns, foliageSeed, env),
+      createProcPlantDaylilyReproductiveStagePlan(source, crowns, reproductiveSeed, env),
+    ));
+  };
+  const full = materialize(genome);
+  const fullTriangles = full.idx.length / 3;
+  if (fullTriangles <= 6) throw new Error(`ProcPlant LOD compilation requires more than 6 source triangles; received ${fullTriangles}`);
+  const reducedGenome = reducedLodGenome(genome);
+  const reduced = reducedGenome.clump && reducedGenome.clump.count > 1
+    ? materialize(reducedGenome)
+    : materializeProcPlantInstancedParts(reducedGenome, buildProcPlantInstancedParts(reducedGenome, foliageSeed, env));
+  const reducedTriangles = reduced.idx.length / 3;
+  const clustered = reducedTriangles > 4 && reducedTriangles < fullTriangles
+    ? reduced
+    : createPlantClusterTemplate(full);
+  const cardOrientation = plantCardOrientation(genome, full);
+  const billboard = createPlantCardTemplate(full, true, cardOrientation);
+  const impostor = createPlantCardTemplate(full, false, cardOrientation);
+  const rows: Array<[ProcPlantCompiledLod["level"], ProcPlantCompiledLod["label"], number, ProcPlantTemplate]> = [
+    [0, "full", 0, full],
+    [1, "clustered", 13.5, clustered],
+    [2, "billboard-cross", 31.5, billboard],
+    [3, "impostor", 64.5, impostor],
+  ];
+  return rows
+    .filter(([level]) => selected.includes(level))
+    .map(([level, label, distance, template]) => ({
+      level,
+      label,
+      distance,
+      template,
+      triangles: template.idx.length / 3,
+      vertices: template.pos.length / 3,
+    }));
+};
+
 /** Compile deterministic, renderable geometry for every runtime LOD. */
 export const compileProcPlantLods = (
   genome: ProcPlantGenome,
   seed = 1,
   env: ProcPlantEnvironment = defaultPlantEnvironment(),
 ): ProcPlantCompiledLod[] => {
-  const full = materializeProcPlantParts(genome, buildProcPlantInstancedParts(genome, seed, env));
+  const full = materializeProcPlantInstancedParts(genome, buildProcPlantInstancedParts(genome, seed, env));
   const fullTriangles = full.idx.length / 3;
   if (fullTriangles <= 6) throw new Error(`ProcPlant LOD compilation requires more than 6 source triangles; received ${fullTriangles}`);
-  const reduced = materializeProcPlantParts(
+  const reduced = materializeProcPlantInstancedParts(
     reducedLodGenome(genome),
     buildProcPlantInstancedParts(reducedLodGenome(genome), seed, env),
   );
