@@ -55,6 +55,7 @@ export * from "./procplant-placement-decal-three";
 export * from "./procplant-placement-decal-glb";
 export * from "./procplant-vine-guide-authoring";
 export * from "./procplant-vine-surface-authoring";
+export * from "./procplant-vine-live-support";
 export * from "./procplant-organ-variants";
 export * from "./procplant-instance-lod-pool";
 export * from "./procplant-impostor";

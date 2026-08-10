@@ -128,6 +128,7 @@ import type {
 } from "./procplant-placement-decal-three";
 import type { ProcPlantPlacementDecalPixelSource } from "./procplant-placement-decal-glb";
 import type { ProcPlantVineGuidePackage } from "./procplant-vine-guide-authoring";
+import type { ProcPlantVineLiveSupportPackage } from "./procplant-vine-live-support";
 import type { ProcPlantBakedMaterialBundle } from "./procplant-material-bake";
 import type { ProcPlantThreeBakedMaterialSet } from "./procplant-three-material-adapter";
 import type { ProcPlantThreeMaterialShaderSetInstallation } from "./procplant-three-material-shader";
@@ -472,6 +473,11 @@ app.innerHTML = `
         <button id="resetVineGuide" type="button" disabled>Reset Vine Guide</button>
       </div>
       <div class="button-row">
+        <button id="attachVineLiveSupport" type="button" disabled>Attach Guide to Live Trellis</button>
+        <button id="deformVineLiveSupport" type="button" disabled>Move + Rebuild Trellis</button>
+        <button id="resetVineLiveSupport" type="button" disabled>Reset Live Support</button>
+      </div>
+      <div class="button-row">
         <button id="inspectReadiness" type="button">Asset QA</button>
         <button id="importCutout" type="button">Import Cutout</button>
         <button id="editCutoutContour" type="button" disabled>Edit Contour</button>
@@ -752,6 +758,9 @@ let livePlacementDecalPixelSource: ProcPlantPlacementDecalPixelSource | null = n
 let livePlacementDecalFileName = "";
 const retiredPlacementDecalBindings: ProcPlantThreePlacementDecalBindingHandle[] = [];
 let vineGuidePackage: ProcPlantVineGuidePackage | null = null;
+let vineLiveSupportPackage: ProcPlantVineLiveSupportPackage | null = null;
+let vineLiveSupportSourceGuide: ProcPlantVineGuidePackage | null = null;
+let vineLiveSupportTrellis: THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial> | null = null;
 let pruneModeVisible = false;
 let placementModeVisible = false;
 let vineGuideModeVisible = false;
@@ -964,6 +973,9 @@ const vineGuideModeButton = document.querySelector<HTMLButtonElement>("#vineGuid
 const vineGuideSupportModeButton = document.querySelector<HTMLButtonElement>("#vineGuideSupportMode")!;
 const undoVineGuideButton = document.querySelector<HTMLButtonElement>("#undoVineGuide")!;
 const resetVineGuideButton = document.querySelector<HTMLButtonElement>("#resetVineGuide")!;
+const attachVineLiveSupportButton = document.querySelector<HTMLButtonElement>("#attachVineLiveSupport")!;
+const deformVineLiveSupportButton = document.querySelector<HTMLButtonElement>("#deformVineLiveSupport")!;
+const resetVineLiveSupportButton = document.querySelector<HTMLButtonElement>("#resetVineLiveSupport")!;
 let pendingVineGuideSerialized: string | null = null;
 const crownVolumeModeButton = document.querySelector<HTMLButtonElement>("#crownVolumeMode")!;
 const crownVolumeAddButton = document.querySelector<HTMLButtonElement>("#crownVolumeAdd")!;
@@ -1282,6 +1294,7 @@ type ProcPlantPlacementDecalThreeModule = typeof import("./procplant-placement-d
 type ProcPlantVineGuideAuthoringModule = typeof import("./procplant-vine-guide-authoring");
 type ProcPlantVineSurfaceAuthoringModule = typeof import("./procplant-vine-surface-authoring");
 type ProcPlantFiveTierAtlasCatalogUiModule = typeof import("./procplant-five-tier-atlas-catalog-ui");
+type ProcPlantVineLiveSupportModule = typeof import("./procplant-vine-live-support");
 type ProcPlantGeneratorGraphOperation = import("./procplant-generator-graph").ProcPlantGeneratorGraphOperation;
 let procPlantRulesModule: ProcPlantRulesModule | null = null;
 let procPlantRulesPromise: Promise<ProcPlantRulesModule> | null = null;
@@ -1312,6 +1325,8 @@ let procPlantVineSurfaceAuthoringModule: ProcPlantVineSurfaceAuthoringModule | n
 let procPlantVineSurfaceAuthoringPromise: Promise<ProcPlantVineSurfaceAuthoringModule> | null = null;
 let procPlantFiveTierAtlasCatalogUiPromise: Promise<ProcPlantFiveTierAtlasCatalogUiModule> | null = null;
 let procPlantFiveTierAtlasCatalogUi: import("./procplant-five-tier-atlas-catalog-ui").ProcPlantFiveTierAtlasCatalogUi | null = null;
+let procPlantVineLiveSupportModule: ProcPlantVineLiveSupportModule | null = null;
+let procPlantVineLiveSupportPromise: Promise<ProcPlantVineLiveSupportModule> | null = null;
 const graphOverrideOperations = new Map<string, ProcPlantGeneratorGraphOperation[]>();
 const loadProcPlantFiveTierAtlasCatalogUi = () => {
   if (procPlantFiveTierAtlasCatalogUiPromise) return procPlantFiveTierAtlasCatalogUiPromise;
@@ -1456,6 +1471,18 @@ const loadProcPlantVineSurfaceAuthoring = () => {
     procPlantVineSurfaceAuthoringPromise = null;
   });
   return procPlantVineSurfaceAuthoringPromise;
+};
+const loadProcPlantVineLiveSupport = () => {
+  if (procPlantVineLiveSupportModule) return Promise.resolve(procPlantVineLiveSupportModule);
+  if (procPlantVineLiveSupportPromise) return procPlantVineLiveSupportPromise;
+  procPlantVineLiveSupportPromise = import("./procplant-vine-live-support").then((module) => {
+    procPlantVineLiveSupportModule = module;
+    app.dataset.vineLiveSupportLoaded = "true";
+    return module;
+  }).finally(() => {
+    procPlantVineLiveSupportPromise = null;
+  });
+  return procPlantVineLiveSupportPromise;
 };
 const loadProcPlantRules = () => {
   if (procPlantRulesModule) return Promise.resolve(procPlantRulesModule);
@@ -3124,8 +3151,31 @@ const refreshVineGuideVisualization = () => {
   scene.add(group);
 };
 
+const disposeVineLiveSupportTrellis = () => {
+  if (!vineLiveSupportTrellis) return;
+  scene.remove(vineLiveSupportTrellis);
+  vineLiveSupportTrellis.geometry.dispose();
+  vineLiveSupportTrellis.material.dispose();
+  vineLiveSupportTrellis = null;
+  app.dataset.vineLiveSupportDisposed = "true";
+};
+
+const syncVineLiveSupportButtons = () => {
+  const guideReady = Boolean(vineGuidePackage && vineGuidePackage.points.length >= 2 && heroLodState?.mesh);
+  attachVineLiveSupportButton.disabled = regenerationBusy || !guideReady || vineLiveSupportPackage !== null;
+  deformVineLiveSupportButton.disabled = regenerationBusy || !vineLiveSupportPackage || !vineLiveSupportTrellis;
+  resetVineLiveSupportButton.disabled = regenerationBusy || !vineLiveSupportPackage;
+  app.dataset.vineLiveSupportStatus = vineLiveSupportPackage ? (app.dataset.vineLiveSupportStatus ?? "attached") : "canonical";
+  app.dataset.vineLiveSupportBindings = String(vineLiveSupportPackage?.bindings.length ?? 0);
+};
+
 const syncVineGuideButtons = () => {
   const available = Boolean(selectedSourceGenome().vine);
+  if (!available && vineLiveSupportPackage) {
+    vineLiveSupportPackage = null;
+    vineLiveSupportSourceGuide = null;
+    disposeVineLiveSupportTrellis();
+  }
   if (!available && vineGuideModeVisible) {
     vineGuideModeVisible = false;
     disposeVineGuideVisualization();
@@ -3142,6 +3192,7 @@ const syncVineGuideButtons = () => {
   app.dataset.vineGuideAvailable = String(available);
   app.dataset.vineGuideActive = String(vineGuideModeVisible && available);
   app.dataset.vineGuidePointCount = String(vineGuidePackage?.points.length ?? 0);
+  syncVineLiveSupportButtons();
 };
 
 const disposeGroup = (group: THREE.Group | null) => {
@@ -4711,6 +4762,11 @@ vineGuideSupportModeButton.addEventListener("click", async () => {
 
 undoVineGuideButton.addEventListener("click", async () => {
   if (!vineGuidePackage || regenerationBusy) return;
+  if (vineLiveSupportPackage) {
+    vineLiveSupportPackage = null;
+    vineLiveSupportSourceGuide = null;
+    disposeVineLiveSupportTrellis();
+  }
   const module = await loadProcPlantVineGuideAuthoring();
   vineGuidePackage = module.undoLastProcPlantVineGuidePoint(vineGuidePackage);
   if (vineGuidePackage.points.length === 0) vineGuidePackage = null;
@@ -4724,10 +4780,112 @@ undoVineGuideButton.addEventListener("click", async () => {
 
 resetVineGuideButton.addEventListener("click", () => {
   if (!vineGuidePackage || regenerationBusy) return;
+  vineLiveSupportPackage = null;
+  vineLiveSupportSourceGuide = null;
+  disposeVineLiveSupportTrellis();
   vineGuidePackage = null;
   syncVineGuideButtons();
   refreshVineGuideVisualization();
   setSaveStatus("Resetting the vine to its exact canonical guide/support behavior…");
+  regenerate();
+});
+
+attachVineLiveSupportButton.addEventListener("click", async () => {
+  const authored = vineGuidePackage;
+  const guideRoot = heroLodState?.mesh;
+  if (regenerationBusy || !authored || authored.points.length < 2 || !guideRoot || vineLiveSupportPackage) return;
+  const [module, guideModule] = await Promise.all([loadProcPlantVineLiveSupport(), loadProcPlantVineGuideAuthoring()]);
+  if (regenerationBusy || vineGuidePackage !== authored || heroLodState?.mesh !== guideRoot) return;
+  const xs = authored.points.map((point) => point.position[0]);
+  const ys = authored.points.map((point) => point.position[1]);
+  const zs = authored.points.map((point) => point.position[2]);
+  const center = new THREE.Vector3(
+    (Math.min(...xs) + Math.max(...xs)) * 0.5,
+    (Math.min(...ys) + Math.max(...ys)) * 0.5,
+    (Math.min(...zs) + Math.max(...zs)) * 0.5 - 0.04,
+  );
+  const trellis = new THREE.Mesh(
+    new THREE.BoxGeometry(Math.max(0.5, Math.max(...xs) - Math.min(...xs) + 0.35), Math.max(0.8, Math.max(...ys) - Math.min(...ys) + 0.35), 0.06),
+    new THREE.MeshStandardMaterial({ color: 0x8a633f, roughness: 0.82, metalness: 0.02, transparent: true, opacity: 0.78 }),
+  );
+  guideRoot.updateWorldMatrix(true, false);
+  const world = guideRoot.matrixWorld.clone().multiply(new THREE.Matrix4().makeTranslation(center.x, center.y, center.z));
+  world.decompose(trellis.position, trellis.quaternion, trellis.scale);
+  trellis.updateMatrixWorld(true);
+  trellis.name = "procplant-live-vine-trellis";
+  scene.add(trellis);
+  const pose = module.createProcPlantVineLiveSupportPoseFromObject3D(trellis, {
+    id: "lab-live-trellis",
+    kind: "triangle-mesh",
+    supportSignature: "lab-live-trellis-box-v1",
+    guideRoot,
+  });
+  let attachment = module.createProcPlantVineLiveSupportPackage(authored);
+  for (const point of authored.points) {
+    attachment = module.attachProcPlantVineGuidePointToLiveSupport(authored, attachment, point.id, pose);
+  }
+  vineLiveSupportSourceGuide = guideModule.deserializeProcPlantVineGuidePackage(guideModule.serializeProcPlantVineGuidePackage(authored));
+  vineLiveSupportPackage = attachment;
+  vineLiveSupportTrellis = trellis;
+  app.dataset.vineLiveSupportDisposed = "false";
+  app.dataset.vineLiveSupportStatus = "attached";
+  app.dataset.vineLiveSupportSupportId = pose.id;
+  app.dataset.vineLiveSupportGeometrySignature = pose.supportSignature;
+  app.dataset.vineLiveSupportDraws = String(renderer.info.render.calls);
+  app.dataset.vineLiveSupportBackend = renderer.capabilities.isWebGL2 ? "webgl2" : "webgl1";
+  syncVineLiveSupportButtons();
+  setSaveStatus("Attached every guide point to stable trellis-local coordinates. The caller still owns transform updates and rebuild timing.");
+});
+
+deformVineLiveSupportButton.addEventListener("click", async () => {
+  const authored = vineGuidePackage;
+  const attachment = vineLiveSupportPackage;
+  const trellis = vineLiveSupportTrellis;
+  const guideRoot = heroLodState?.mesh;
+  if (regenerationBusy || !authored || !attachment || !trellis || !guideRoot) return;
+  const module = await loadProcPlantVineLiveSupport();
+  if (regenerationBusy || vineGuidePackage !== authored || vineLiveSupportPackage !== attachment || vineLiveSupportTrellis !== trellis) return;
+  trellis.position.x += 0.24;
+  trellis.position.y += 0.08;
+  trellis.scale.y *= 1.12;
+  trellis.updateMatrixWorld(true);
+  guideRoot.updateWorldMatrix(true, false);
+  const pose = module.createProcPlantVineLiveSupportPoseFromObject3D(trellis, {
+    id: "lab-live-trellis",
+    kind: "triangle-mesh",
+    supportSignature: "lab-live-trellis-box-v1",
+    guideRoot,
+  });
+  const rebuilt = module.rebuildProcPlantVineGuideFromLiveSupports(authored, attachment, [pose], { maxPointMotion: 2 });
+  app.dataset.vineLiveSupportStatus = rebuilt.status;
+  app.dataset.vineLiveSupportReason = rebuilt.reason ?? "none";
+  app.dataset.vineLiveSupportTransformedPoints = String(rebuilt.audit.transformedPoints);
+  if (rebuilt.status !== "rebuilt") {
+    setSaveStatus(`Live support rebuild failed closed: ${rebuilt.reason}.`);
+    syncVineLiveSupportButtons();
+    return;
+  }
+  vineGuidePackage = rebuilt.authored;
+  vineLiveSupportPackage = rebuilt.attachment;
+  refreshVineGuideVisualization();
+  syncVineGuideButtons();
+  setSaveStatus(`Rebuilt ${rebuilt.audit.transformedPoints} attached guide points after the caller-owned trellis transform update.`);
+  regenerate();
+});
+
+resetVineLiveSupportButton.addEventListener("click", () => {
+  if (regenerationBusy || !vineLiveSupportPackage) return;
+  if (vineLiveSupportSourceGuide) vineGuidePackage = vineLiveSupportSourceGuide;
+  vineLiveSupportPackage = null;
+  vineLiveSupportSourceGuide = null;
+  disposeVineLiveSupportTrellis();
+  app.dataset.vineLiveSupportStatus = "canonical";
+  app.dataset.vineLiveSupportBindings = "0";
+  delete app.dataset.vineLiveSupportReason;
+  delete app.dataset.vineLiveSupportTransformedPoints;
+  refreshVineGuideVisualization();
+  syncVineGuideButtons();
+  setSaveStatus("Disposed the live trellis and restored the exact pre-attachment V1 guide.");
   regenerate();
 });
 
@@ -4781,6 +4939,11 @@ canvas.addEventListener("click", async (event) => {
   vineGuidePackage ??= module.createProcPlantVineGuidePackage(
     module.createProcPlantVineGuideTarget(sourceGenome, state.seed),
   );
+  if (vineLiveSupportPackage) {
+    vineLiveSupportPackage = null;
+    vineLiveSupportSourceGuide = null;
+    disposeVineLiveSupportTrellis();
+  }
   try {
     if (vineGuideStaticSupportEnabled) {
       const surface = await loadProcPlantVineSurfaceAuthoring();
@@ -6043,6 +6206,7 @@ document.querySelector<HTMLButtonElement>("#exportJson")!.addEventListener("clic
           }
         : null,
       vineGuide: vineGuidePackage,
+      vineLiveSupport: vineLiveSupportPackage,
       weberPennTrim: heroLodState?.weberPennTrim
         ? {
             target: heroLodState.weberPennTrim.target,

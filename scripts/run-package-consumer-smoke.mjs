@@ -105,6 +105,9 @@ import {
   createProcPlantVineGuidePackage,
   createProcPlantVineGuideTarget,
   appendProcPlantVineGuidePointOnStaticSupport,
+  attachProcPlantVineGuidePointToLiveSupport,
+  createProcPlantVineLiveSupportPackage,
+  rebuildProcPlantVineGuideFromLiveSupports,
   type ProcPlantGraph,
   type ProcPlantThreePlacementDecalBindingMetadata,
 } from "procplants";
@@ -150,6 +153,16 @@ const lod5CatalogPlan = createProcPlantFiveTierAtlasCatalogPlan([{
   buildOptions: { width: 16, height: 16, azimuthCount: 2, elevations: [0], maxAtlasSize: 128 },
 }], { maxEntries: 2, maxTotalAtlasBytes: 1024 * 1024 });
 const lod5CatalogCache = createProcPlantFiveTierAtlasMemoryCache({ maxEntries: 2, maxDocumentBytes: 1024 * 1024 });
+let liveVine = createProcPlantVineLiveSupportPackage(vineGuide);
+const livePose = {
+  id: "consumer-trellis",
+  kind: "object3d" as const,
+  supportSignatureVersion: 1 as const,
+  supportSignature: "consumer-trellis-v1",
+  localToGuide: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] as const,
+};
+liveVine = attachProcPlantVineGuidePointToLiveSupport(vineGuide, liveVine, vineGuide.points[0]!.id, livePose);
+const liveRebuild = rebuildProcPlantVineGuideFromLiveSupports(vineGuide, liveVine, [livePose]);
 
 if (PROCPLANT_GENERATOR_CONTRACT_REVISION !== 3) throw new Error("unexpected contract revision");
 if (PROCPLANT_SUPPORTED_INSTANCE_KINDS.length !== 20) throw new Error("unexpected kind registry");
@@ -166,6 +179,7 @@ if (!lod5CatalogPlan.cacheKey.startsWith("procplants-lod5-atlas-catalog-v1-")) t
 if (lod5CatalogCache.stats().entries !== 0) throw new Error("five-tier atlas memory cache export drift");
 if (classifyProcPlantFiveTierAtlasIndexedDbError(new DOMException("full", "QuotaExceededError")) !== "quota") throw new Error("five-tier atlas IndexedDB cache export drift");
 lod5CatalogCache.dispose();
+if (liveRebuild.status !== "rebuilt" || liveVine.bindings.length !== 1) throw new Error("live vine support export drift");
 console.log(JSON.stringify({ revision: PROCPLANT_GENERATOR_CONTRACT_REVISION, kind, triangles: prototype.idx.length / 3 }));
 `);
   await writeFile(join(consumerRoot, "src", "runtime.mjs"), `
