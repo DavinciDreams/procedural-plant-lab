@@ -333,14 +333,35 @@ const productionBackend = (genome: ProcPlantGenome) => genome.weberPenn
 
 type ProcPlantHerbaceousBackend = "grass" | "fern" | "groundcover" | "moss";
 
-const BESPOKE_GROUNDCOVER_IDS = new Set([
-  "maidenhairFernPatch",
-  "woodlandVioletCarpet",
-  "trilliumPatch",
-  "horsetailColony",
-]);
+type ProcPlantBespokeBroadPatch = "maidenhairFernPatch" | "woodlandVioletCarpet" | "trilliumPatch" | "horsetailColony";
+
+const BESPOKE_BROAD_PATCH_FOLIAGE_PER_CLUSTER: Readonly<Record<ProcPlantBespokeBroadPatch, number>> = Object.freeze({
+  maidenhairFernPatch: 7,
+  woodlandVioletCarpet: 3,
+  trilliumPatch: 3,
+  horsetailColony: 15,
+});
 
 const authoredGenomeId = (genome: Pick<ProcPlantGenome, "id">) => genome.id.split("@", 1)[0]!;
+
+const bespokeBroadPatchFor = (genome: ProcPlantGenome): ProcPlantBespokeBroadPatch | null => {
+  const id = authoredGenomeId(genome);
+  if (!genome.groundcover || !Object.prototype.hasOwnProperty.call(BESPOKE_BROAD_PATCH_FOLIAGE_PER_CLUSTER, id)) return null;
+  if (genome.weberPenn || genome.branchModules || genome.spaceColonization || genome.vine || genome.moss || genome.clump) return null;
+  if ((genome.accessoryOrgans?.length ?? 0) > 0) return null;
+  return id as ProcPlantBespokeBroadPatch;
+};
+
+const scaledBespokeBroadPatchCount = (
+  baseline: number,
+  node: ProcPlantGeneratorNode,
+  canonicalNode: ProcPlantGeneratorNode,
+  minimum: number,
+  maximum: number,
+) => {
+  const canonicalCount = Math.max(1, canonicalNode.count ?? 1);
+  return Math.max(minimum, Math.min(maximum, Math.round(baseline * Math.max(1, node.count ?? 1) / canonicalCount)));
+};
 
 /**
  * The typed herbaceous path is intentionally narrower than the legacy graph.
@@ -353,7 +374,7 @@ const herbaceousBackendFor = (genome: ProcPlantGenome): ProcPlantHerbaceousBacke
   if ((genome.accessoryOrgans?.length ?? 0) > 0) return null;
   if ((genome.fern || genome.moss) && genome.flower) return null;
   if (genome.groundcover) {
-    return BESPOKE_GROUNDCOVER_IDS.has(authoredGenomeId(genome)) ? null : "groundcover";
+    return bespokeBroadPatchFor(genome) ? null : "groundcover";
   }
   if (genome.moss) return "moss";
   if (genome.grass && genome.habit === "grass") return "grass";
@@ -363,10 +384,11 @@ const herbaceousBackendFor = (genome: ProcPlantGenome): ProcPlantHerbaceousBacke
 
 const assertSupportedBackend = (genome: ProcPlantGenome) => {
   const herbaceousBackend = herbaceousBackendFor(genome);
+  const bespokeBroadPatch = bespokeBroadPatchFor(genome);
   const unsupported = [
     genome.grass && herbaceousBackend !== "grass" && "grass-specialization",
-    genome.fern && herbaceousBackend !== "fern" && herbaceousBackend !== "groundcover" && "fern-specialization",
-    genome.groundcover && herbaceousBackend !== "groundcover" && "groundcover-specialization",
+    genome.fern && herbaceousBackend !== "fern" && herbaceousBackend !== "groundcover" && !bespokeBroadPatch && "fern-specialization",
+    genome.groundcover && herbaceousBackend !== "groundcover" && !bespokeBroadPatch && "groundcover-specialization",
     genome.moss && !genome.vine && herbaceousBackend !== "moss" && "moss-specialization",
     genome.clump && "clump-specialization",
   ].filter(Boolean);
@@ -756,6 +778,65 @@ const validateWeberPennNodeSemantics = (
   }
 };
 
+const validateBespokeBroadPatchNode = (
+  node: ProcPlantGeneratorNode,
+  canonicalNode: ProcPlantGeneratorNode,
+  genome: ProcPlantGenome,
+  patch: ProcPlantBespokeBroadPatch,
+) => {
+  const unchanged = (key: keyof ProcPlantGeneratorNode) => stableJson(node[key]) === stableJson(canonicalNode[key]);
+  if (!unchanged("dependsOn") || !unchanged("placement") || !unchanged("parentScope")) {
+    throw new ProcPlantProductionDagError(`${node.id} edited dependency/placement/parent-scope semantics are unsupported by the ${patch} adapter`);
+  }
+  if (node.stage === "architecture") {
+    const projected = scaledBespokeBroadPatchCount(genome.groundcover!.clusters, node, canonicalNode, 0, 100_000);
+    if (!node.enabled || !Number.isInteger(node.count) || Number(node.count) < 1 || projected < 3 || projected > 24) {
+      throw new ProcPlantProductionDagError(`${node.id}.count must project to 3..24 enabled broad-patch clusters`);
+    }
+    if (!unchanged("curve") || !unchanged("parameters")) {
+      throw new ProcPlantProductionDagError(`${node.id} edited curve/architecture parameters are unsupported by the ${patch} adapter`);
+    }
+    return;
+  }
+  if (node.stage === "branching") {
+    if (!["enabled", "count", "curve", "parameters", "seedOverride"].every((key) => unchanged(key as keyof ProcPlantGeneratorNode))) {
+      throw new ProcPlantProductionDagError(`${node.id} edited branching is unsupported because ${patch} owns support topology in architecture`);
+    }
+    return;
+  }
+  if (node.stage === "foliage") {
+    const baseline = genome.groundcover!.clusters * BESPOKE_BROAD_PATCH_FOLIAGE_PER_CLUSTER[patch];
+    const projected = scaledBespokeBroadPatchCount(baseline, node, canonicalNode, 0, 1_000_000);
+    if (!node.enabled || !Number.isInteger(node.count) || Number(node.count) < 1 || projected < 1 || projected > 100_000) {
+      throw new ProcPlantProductionDagError(`${node.id}.count must project to 1..100000 enabled broad-patch foliage organs`);
+    }
+    if (node.parameters?.foliageKind !== "leaf" || node.parameters?.phyllotaxy !== canonicalNode.parameters?.phyllotaxy) {
+      throw new ProcPlantProductionDagError(`${node.id} edited foliage kind/phyllotaxy is unsupported by the ${patch} branch-relative placement adapter`);
+    }
+    return;
+  }
+  if (node.stage === "reproductive") {
+    if (!genome.flower) {
+      if (!["enabled", "count", "curve", "parameters", "seedOverride"].every((key) => unchanged(key as keyof ProcPlantGeneratorNode))) {
+        throw new ProcPlantProductionDagError(`${node.id} cannot enable reproductive organs for non-flowering ${patch}`);
+      }
+      return;
+    }
+    const baseline = Math.max(1, Math.round(genome.groundcover!.clusters * (genome.groundcover!.flowerRate ?? 0)));
+    const projected = scaledBespokeBroadPatchCount(baseline, node, canonicalNode, 0, 1_000_000);
+    if (node.enabled && (!Number.isInteger(node.count) || Number(node.count) < 1 || projected < 1 || projected > 24)) {
+      throw new ProcPlantProductionDagError(`${node.id}.count must project to 1..24 broad-patch flowers when enabled`);
+    }
+    if (!unchanged("curve") || !unchanged("parameters")) {
+      throw new ProcPlantProductionDagError(`${node.id} edited reproductive curve/organ semantics are unsupported by the ${patch} adapter`);
+    }
+    return;
+  }
+  if (!unchanged("enabled") || !unchanged("count") || !unchanged("curve") || !unchanged("seedOverride")) {
+    throw new ProcPlantProductionDagError(`${node.id} edited ${node.stage} lifecycle/count/seed semantics are unsupported by the ${patch} adapter`);
+  }
+};
+
 const tangentBasis = (direction: THREE.Vector3) => {
   const forward = direction.clone().normalize();
   const right = Math.abs(forward.y) > 0.92
@@ -964,6 +1045,294 @@ const addHerbaceousReproductiveOrgans = (
     throw new ProcPlantProductionDagError(`${node.id} flower semantics are unsupported for ${backend}`);
   }
   return buildProcPlantGraphIr(graph.stems, graph.segments, graph.organs);
+};
+
+const broadPatchBranchFrame = (
+  support: ProcPlantStemNode,
+  azimuth: number,
+  divergence: number,
+  upBias: number,
+) => {
+  const branch = support.direction.clone().normalize();
+  const basis = tangentBasis(branch);
+  const radial = basis.right.clone().applyAxisAngle(branch, azimuth).normalize();
+  const direction = branch.clone().multiplyScalar(Math.cos(divergence))
+    .addScaledVector(radial, Math.sin(divergence))
+    .add(new THREE.Vector3(0, upBias, 0))
+    .normalize();
+  const desiredNormal = new THREE.Vector3(0, 0.82, 0).addScaledVector(radial, 0.18).projectOnPlane(direction);
+  if (desiredNormal.lengthSq() < 1e-8) desiredNormal.copy(basis.up);
+  desiredNormal.normalize();
+  return { direction, right: desiredNormal.cross(direction).normalize(), radial };
+};
+
+const broadPatchRoot = (): ProcPlantStemNode => ({
+  position: new THREE.Vector3(),
+  direction: new THREE.Vector3(0, 1, 0),
+  radius: 0.018,
+  depth: 0,
+  t: 0,
+  index: 0,
+});
+
+const createBespokeBroadPatchArchitecture = (
+  genome: ProcPlantGenome,
+  environment: ProcPlantEnvironment,
+  patch: ProcPlantBespokeBroadPatch,
+  node: ProcPlantGeneratorNode,
+  canonicalNode: ProcPlantGeneratorNode,
+  seed: number,
+) => {
+  const cover = genome.groundcover!;
+  const clusterCount = scaledBespokeBroadPatchCount(cover.clusters, node, canonicalNode, 3, 24);
+  const random = randomFromSeed(seed);
+  const shade = 1 - THREE.MathUtils.clamp(environment.light, 0, 1);
+  const heightStretch = 1 + shade * genome.lightResponse.shadeAvoidance;
+  const root = broadPatchRoot();
+  const stems: ProcPlantStemNode[] = [root];
+  const segments: Array<[number, number]> = [];
+  const addStem = (
+    previous: ProcPlantStemNode,
+    position: THREE.Vector3,
+    direction: THREE.Vector3,
+    radiusScale: number,
+    t: number,
+  ) => {
+    const stem: ProcPlantStemNode = {
+      position,
+      direction: direction.clone().normalize(),
+      radius: Math.max(0.0015, previous.radius * radiusScale),
+      depth: 0,
+      t,
+      index: stems.length,
+    };
+    stems.push(stem);
+    segments.push([previous.index, stem.index]);
+    return stem;
+  };
+  for (let cluster = 0; cluster < clusterCount; cluster++) {
+    const t = clusterCount > 1 ? cluster / (clusterCount - 1) : 0;
+    const yaw = cluster * 2.399963229728653 + (genome.phyllotaxy?.phase ?? 0) + (random() - 0.5) * 0.28;
+    const spread = cluster === 0 ? 0 : cover.radius * (0.26 + Math.sqrt(t) * 0.74) * (0.9 + random() * 0.18);
+    const radial = new THREE.Vector3(Math.cos(yaw), 0, Math.sin(yaw));
+    const base: ProcPlantStemNode = {
+      position: new THREE.Vector3(radial.x * spread, 0.006, radial.z * spread),
+      direction: new THREE.Vector3(0, 1, 0),
+      radius: root.radius * (patch === "horsetailColony" ? 0.72 : 0.52),
+      depth: 0,
+      t,
+      index: stems.length,
+    };
+    stems.push(base);
+    if (patch === "maidenhairFernPatch") {
+      let previous = base;
+      for (let level = 1; level <= 3; level++) {
+        const levelT = level / 3;
+        const direction = new THREE.Vector3(0, 1, 0).addScaledVector(radial, 0.18 + levelT * 0.22)
+          .add(new THREE.Vector3((random() - 0.5) * 0.06, 0, (random() - 0.5) * 0.06)).normalize();
+        previous = addStem(
+          previous,
+          previous.position.clone().addScaledVector(direction, cover.height * heightStretch / 3 * (0.88 + random() * 0.18)),
+          direction,
+          0.72,
+          levelT,
+        );
+      }
+    } else if (patch === "woodlandVioletCarpet") {
+      const direction = new THREE.Vector3(0, 1, 0).addScaledVector(radial, 0.08).normalize();
+      addStem(base, base.position.clone().addScaledVector(direction, cover.height * 0.28 * (0.82 + random() * 0.2)), direction, 0.58, t);
+    } else if (patch === "trilliumPatch") {
+      const direction = new THREE.Vector3(0, 1, 0).addScaledVector(radial, 0.1)
+        .add(new THREE.Vector3((random() - 0.5) * 0.035, 0, (random() - 0.5) * 0.035)).normalize();
+      addStem(base, base.position.clone().addScaledVector(direction, cover.height * heightStretch * (0.58 + random() * 0.12)), direction, 0.6, 0.64);
+    } else {
+      let previous = base;
+      for (let level = 1; level <= 4; level++) {
+        const levelT = level / 4;
+        const direction = new THREE.Vector3(0, 1, 0).addScaledVector(radial, 0.045 + t * 0.04)
+          .add(new THREE.Vector3((random() - 0.5) * 0.025, 0, (random() - 0.5) * 0.025)).normalize();
+        previous = addStem(
+          previous,
+          previous.position.clone().addScaledVector(direction, cover.height * heightStretch / 4 * (0.9 + random() * 0.16)),
+          direction,
+          0.82,
+          levelT,
+        );
+      }
+    }
+  }
+  return buildProcPlantGraphIr(stems, segments, []);
+};
+
+const broadPatchClusterSupports = (graph: ProcPlantGraph, patch: ProcPlantBespokeBroadPatch) => {
+  const stride = patch === "maidenhairFernPatch" ? 4 : patch === "horsetailColony" ? 5 : 2;
+  const clusters: ProcPlantStemNode[][] = [];
+  for (let offset = 1; offset + stride <= graph.stems.length; offset += stride) {
+    clusters.push(graph.stems.slice(offset, offset + stride));
+  }
+  return clusters;
+};
+
+const addBespokeBroadPatchFoliage = (
+  source: ProcPlantGraph,
+  genome: ProcPlantGenome,
+  patch: ProcPlantBespokeBroadPatch,
+  node: ProcPlantGeneratorNode,
+  canonicalNode: ProcPlantGeneratorNode,
+  seed: number,
+) => {
+  const graph = cloneGraph(source);
+  const clusters = broadPatchClusterSupports(graph, patch);
+  if (clusters.length < 1) throw new ProcPlantProductionDagError(`${node.id} requires broad-patch support stems`);
+  const random = randomFromSeed(seed);
+  const baselinePerCluster = BESPOKE_BROAD_PATCH_FOLIAGE_PER_CLUSTER[patch];
+  const count = scaledBespokeBroadPatchCount(
+    clusters.length * baselinePerCluster,
+    node,
+    canonicalNode,
+    1,
+    100_000,
+  );
+  for (let ordinal = 0; ordinal < count; ordinal++) {
+    const clusterIndex = ordinal % clusters.length;
+    const localOrdinal = Math.floor(ordinal / clusters.length);
+    const local = localOrdinal % baselinePerCluster;
+    const cycle = Math.floor(localOrdinal / baselinePerCluster);
+    const supports = clusters[clusterIndex]!;
+    let support: ProcPlantStemNode;
+    let azimuth: number;
+    let divergence: number;
+    let upBias: number;
+    if (patch === "maidenhairFernPatch") {
+      support = supports[local < 6 ? 1 + Math.floor(local / 2) : 3]!;
+      azimuth = local < 6 ? (local % 2) * Math.PI + (Math.floor(local / 2) + 1) * 0.48 : Math.PI * 0.5;
+      divergence = local < 6 ? 1.04 + support.t * 0.12 : 0.72;
+      upBias = local < 6 ? 0.3 : 0.42;
+    } else if (patch === "woodlandVioletCarpet") {
+      support = supports[1]!;
+      azimuth = local * Math.PI * 2 / 3;
+      divergence = 1.06 + random() * 0.08;
+      upBias = 0.38;
+    } else if (patch === "trilliumPatch") {
+      support = supports[1]!;
+      azimuth = local * Math.PI * 2 / 3;
+      divergence = 1.17;
+      upBias = 0.3;
+    } else {
+      support = supports[1 + Math.floor(local / 5)]!;
+      azimuth = (local % 5) * Math.PI * 2 / 5 + (Math.floor(local / 5) + 1) * 0.34;
+      divergence = 1.22;
+      upBias = -0.04;
+    }
+    azimuth += cycle * 0.27 + (random() - 0.5) * 0.035;
+    const frame = broadPatchBranchFrame(support, azimuth, divergence, upBias);
+    graph.organs.push({
+      kind: "leaf",
+      position: support.position.clone().addScaledVector(frame.radial, support.radius + 0.002),
+      direction: frame.direction,
+      right: frame.right,
+      scale: curveValue(node, genome, support.t) * (0.88 + random() * 0.18),
+      t: support.t,
+    });
+  }
+  return buildProcPlantGraphIr(graph.stems, graph.segments, graph.organs);
+};
+
+const addBespokeBroadPatchFlowers = (
+  source: ProcPlantGraph,
+  genome: ProcPlantGenome,
+  patch: ProcPlantBespokeBroadPatch,
+  node: ProcPlantGeneratorNode,
+  canonicalNode: ProcPlantGeneratorNode,
+  seed: number,
+) => {
+  const graph = cloneGraph(source);
+  if (!node.parameters?.flower || !genome.flower) return graph;
+  if (patch !== "woodlandVioletCarpet" && patch !== "trilliumPatch") {
+    throw new ProcPlantProductionDagError(`${node.id} flowers are unsupported for ${patch}`);
+  }
+  const supports = broadPatchClusterSupports(graph, patch).map((cluster) => cluster[1]!);
+  if (supports.length < 1) throw new ProcPlantProductionDagError(`${node.id} requires broad-patch flower supports`);
+  const random = randomFromSeed(seed);
+  const count = scaledBespokeBroadPatchCount(
+    Math.max(1, Math.round(supports.length * (genome.groundcover!.flowerRate ?? 0))),
+    node,
+    canonicalNode,
+    1,
+    24,
+  );
+  for (let ordinal = 0; ordinal < count; ordinal++) {
+    const support = supports[Math.min(supports.length - 1, Math.floor(((ordinal + random()) / count) * supports.length))]!;
+    const direction = support.direction.clone()
+      .add(new THREE.Vector3((random() - 0.5) * 0.08, 0.16, (random() - 0.5) * 0.08))
+      .normalize();
+    const flowerTip: ProcPlantStemNode = {
+      position: support.position.clone().addScaledVector(
+        direction,
+        genome.groundcover!.height * (patch === "trilliumPatch" ? 0.34 + random() * 0.08 : 0.66 + random() * 0.22),
+      ),
+      direction,
+      radius: Math.max(0.0015, support.radius * 0.42),
+      depth: support.depth,
+      t: 1,
+      index: graph.stems.length,
+    };
+    graph.stems.push(flowerTip);
+    graph.segments.push([support.index, flowerTip.index]);
+    graph.organs.push({
+      kind: "flower",
+      position: flowerTip.position.clone().addScaledVector(direction, flowerTip.radius),
+      direction,
+      right: tangentBasis(direction).right,
+      scale: (patch === "trilliumPatch" ? 0.9 : 0.82) + random() * (patch === "trilliumPatch" ? 0.14 : 0.16),
+      t: 1,
+    });
+  }
+  return buildProcPlantGraphIr(graph.stems, graph.segments, graph.organs);
+};
+
+const mergeBespokeBroadPatchArtifacts = (artifacts: readonly ProcPlantGraphStageArtifact[]) => {
+  const foliage = artifacts.find((artifact) => artifact.stage === "foliage");
+  if (!foliage) throw new ProcPlantProductionDagError("bespoke broad-patch material requires a foliage artifact");
+  const merged = cloneGraph(foliage.graph);
+  const reproductive = artifacts.find((artifact) => artifact.stage === "reproductive");
+  if (!reproductive) return merged;
+  const prefixCount = merged.stems.length;
+  if (reproductive.graph.stems.length < prefixCount) {
+    throw new ProcPlantProductionDagError("bespoke broad-patch reproductive topology lost its architecture prefix");
+  }
+  for (let index = 0; index < prefixCount; index++) {
+    const left = merged.stems[index]!;
+    const right = reproductive.graph.stems[index]!;
+    if (
+      !left.position.equals(right.position) || !left.direction.equals(right.direction) ||
+      left.radius !== right.radius || left.depth !== right.depth || left.t !== right.t
+    ) {
+      throw new ProcPlantProductionDagError("bespoke broad-patch reproductive topology does not share the foliage architecture prefix");
+    }
+  }
+  const remap = (index: number) => index < prefixCount ? index : prefixCount + (index - prefixCount);
+  for (const stem of reproductive.graph.stems.slice(prefixCount)) {
+    merged.stems.push({
+      ...stem,
+      index: merged.stems.length,
+      position: stem.position.clone(),
+      direction: stem.direction.clone(),
+    });
+  }
+  for (const [start, end] of reproductive.graph.segments) {
+    if (end < prefixCount) continue;
+    merged.segments.push([remap(start), remap(end)]);
+  }
+  for (const organ of reproductive.graph.organs) {
+    merged.organs.push({
+      ...organ,
+      position: organ.position.clone(),
+      direction: organ.direction.clone(),
+      right: organ.right.clone(),
+    });
+  }
+  return buildProcPlantGraphIr(merged.stems, merged.segments, merged.organs);
 };
 
 const createArchitectureGraph = (
@@ -1581,6 +1950,7 @@ export const compileProcPlantProductionDag = (
   }
   assertSupportedBackend(genome);
   const herbaceousBackend = herbaceousBackendFor(genome);
+  const bespokeBroadPatch = bespokeBroadPatchFor(genome);
   const canonicalNodeByStage = new Map(canonical.nodes.map((node) => [node.stage, node]));
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
   const canonicalNodeById = new Map(canonical.nodes.map((node) => [node.id, node]));
@@ -1595,6 +1965,9 @@ export const compileProcPlantProductionDag = (
       validateHerbaceousNodeSemantics(node, canonicalNodeByStage.get(node.stage) ?? node, genome, herbaceousBackend);
     }
     if (genome.weberPenn) validateWeberPennNodeSemantics(node, canonicalNodeById.get(node.id));
+    if (bespokeBroadPatch) {
+      validateBespokeBroadPatchNode(node, canonicalNodeByStage.get(node.stage) ?? node, genome, bespokeBroadPatch);
+    }
     const unsupported = node.dependsOn
       .map((id) => nodeById.get(id)!)
       .filter((dependency) => !ALLOWED_ARTIFACT_STAGES[node.stage].includes(dependency.stage));
@@ -1680,7 +2053,16 @@ export const compileProcPlantProductionDag = (
                 canonicalNodeByStage.get("architecture")!,
                 seed,
               )
-            : createArchitectureGraph(architectureGenome, source.environment, node, seed);
+            : bespokeBroadPatch
+              ? createBespokeBroadPatchArchitecture(
+                  architectureGenome,
+                  source.environment,
+                  bespokeBroadPatch,
+                  node,
+                  canonicalNodeByStage.get("architecture")!,
+                  seed,
+                )
+              : createArchitectureGraph(architectureGenome, source.environment, node, seed);
         artifact = withArtifactHash({
           kind: "graph", stage: "architecture", nodeId, seed, lineage: lineageFor(node, sources),
           genome: architectureGenome, environment: source.environment, graph: builtGraph, runtime,
@@ -1743,7 +2125,7 @@ export const compileProcPlantProductionDag = (
         artifact = withArtifactHash({
           kind: "graph", stage: "branching", nodeId, seed, lineage: lineageFor(node, inputs),
           genome: inputs[0]!.genome, environment: inputs[0]!.environment,
-          graph: herbaceousBackend ? base : addBranches(base, inputs[0]!.genome, node, seed),
+          graph: herbaceousBackend || bespokeBroadPatch ? base : addBranches(base, inputs[0]!.genome, node, seed),
           runtime: inputs[0]!.runtime,
         });
       }
@@ -1835,7 +2217,16 @@ export const compileProcPlantProductionDag = (
                 canonicalNodeByStage.get("foliage")!,
                 seed,
               )
-            : addFoliage(base, foliageGenome, node, seed);
+            : bespokeBroadPatch
+              ? addBespokeBroadPatchFoliage(
+                  base,
+                  foliageGenome,
+                  bespokeBroadPatch,
+                  node,
+                  canonicalNodeByStage.get("foliage")!,
+                  seed,
+                )
+              : addFoliage(base, foliageGenome, node, seed);
         artifact = withArtifactHash({
           kind: "graph", stage: "foliage", nodeId, seed, lineage: lineageFor(node, inputs),
           genome: foliageGenome, environment: inputs[0]!.environment,
@@ -1844,7 +2235,9 @@ export const compileProcPlantProductionDag = (
       }
     } else if (node.stage === "reproductive") {
       const inputs = graphArtifacts(node, dependencies);
-      const base = mergeGraphArtifacts(inputs);
+      const base = bespokeBroadPatch
+        ? mergeGraphArtifacts(inputs.filter((entry) => entry.stage !== "foliage"))
+        : mergeGraphArtifacts(inputs);
       const reproductiveGraph = inputs[0]!.genome.vine
         ? addGuidedVineProcPlantReproductiveOrgans(inputs[0]!.genome, base, seed, node.count)
         : herbaceousBackend
@@ -1856,7 +2249,16 @@ export const compileProcPlantProductionDag = (
               canonicalNodeByStage.get("reproductive")!,
               seed,
             )
-          : addReproductiveOrgans(base, inputs[0]!.genome, node, seed);
+          : bespokeBroadPatch
+            ? addBespokeBroadPatchFlowers(
+                base,
+                inputs[0]!.genome,
+                bespokeBroadPatch,
+                node,
+                canonicalNodeByStage.get("reproductive")!,
+                seed,
+              )
+            : addReproductiveOrgans(base, inputs[0]!.genome, node, seed);
       artifact = withArtifactHash({
         kind: "graph", stage: "reproductive", nodeId, seed, lineage: lineageFor(node, inputs),
         genome: inputs[0]!.genome, environment: inputs[0]!.environment,
@@ -1963,7 +2365,11 @@ export const compileProcPlantProductionDag = (
       } else {
         const inputs = graphArtifacts(node, dependencies);
         const terminal = genome.vine ? guidedVineTerminalGraphArtifact(node, dependencies) : null;
-        const base = terminal ? cloneGraph(terminal.graph) : mergeGraphArtifacts(inputs);
+        const base = terminal
+          ? cloneGraph(terminal.graph)
+          : bespokeBroadPatch
+            ? mergeBespokeBroadPatchArtifacts(inputs)
+            : mergeGraphArtifacts(inputs);
         const materialGenome = cloneGenomeForMaterial(terminal?.genome ?? inputs[0]!.genome, node);
         const materialEnvironment = terminal?.environment ?? inputs[0]!.environment;
         const build = buildProcPlantTemplateFromGraph(materialGenome, base, materialEnvironment);

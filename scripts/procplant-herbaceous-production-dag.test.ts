@@ -157,10 +157,7 @@ assert.throws(
   "specialized instance-kind edits must fail closed instead of silently changing semantics",
 );
 
-for (const genome of [
-  procPlantPresets.phiFern!,
-  procPlantPresets.maidenhairFernPatch!,
-] as const) {
+for (const genome of [procPlantPresets.phiFern!] as const) {
   const graph = createProcPlantAuthoringGraph(genome, seed);
   const foliage = graph.nodes.find((node) => node.stage === "foliage")!;
   const edited = applyProcPlantGeneratorGraphOperations(graph, [{ op: "set-seed", nodeId: foliage.id, value: 9001 }]);
