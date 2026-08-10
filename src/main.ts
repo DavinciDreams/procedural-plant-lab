@@ -3192,17 +3192,20 @@ const performRegeneration = async (request: number) => {
   nextHero.scale.setScalar(heroScale);
   nextHero.visible = heroImportPreview === null;
   configureWindMesh(nextHero);
+  const weberPennTrim: ProcPlantWeberPennBuildMetadata | null = heroBuild && "weberPennTrim" in heroBuild
+    ? (heroBuild.weberPennTrim as ProcPlantWeberPennBuildMetadata | null | undefined) ?? null
+    : null;
   const nextHeroLodState: HeroLodState = {
     mesh: nextHero,
     graph: heroBuild?.graph ?? null,
-    weberPennTrim: heroBuild?.weberPennTrim ?? null,
+    weberPennTrim,
     stats: heroBuild?.stats ?? biome.heroStats ?? {
       stems: 0,
       leaves: 0,
       flowers: 0,
       triangles: template.idx.length / 3,
     },
-    authoringGeometryLocked: Boolean(heroBuild?.weberPennTrim),
+    authoringGeometryLocked: Boolean(weberPennTrim),
     lods: heroLods,
     geometries: heroGeometries,
     controller: nextController,
