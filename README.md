@@ -96,7 +96,7 @@ Good starting experiments:
 - Native headless GLB output for one selected LOD or the complete LOD set, with deterministic bytes and optional bounds-box/trunk-capsule collision proxies.
 - A typed deterministic material DAG validates bark/leaf PBR channels, texture roles/color spaces/transforms, procedural descriptors, constant folding, direct bindings, and explicit bake-required expressions. Its glTF planner maps lossless direct base/alpha/normal/ORM/AO/emissive bindings, while the CPU baker emits color-correct PNG and embedded glTF material bytes. Generated templates retain deterministic UV0 across every real LOD and are partitioned without index copies into explicit bark/stem and organ ranges. The lazy lab `Bake PBR Material` action downloads and installs deterministic bark/leaf base-color, packed ORM, and procedural normal resources on live wind-compatible MeshStandard materials; normal-mapped geometry gains an explicit normalized tangent frame only on this lazy path.
 - Optional deterministic lossless `EXT_meshopt_compression` for GLB geometry: required mode produces real transfer savings for decoder-aware consumers, while fallback mode retains ordinary core buffers for compatibility. Texture compression and triangle simplification are intentionally separate.
-- Deterministic ASCII USDA output for one real LOD or a standard four-choice `LOD` variant set, preserving topology, normals, display colors, sway/tintability primvars, typed metadata, and optional physics-enabled bounds-box/trunk-capsule collision proxies.
+- Deterministic ASCII USDA output for one real LOD or a standard four-choice `LOD` variant set, preserving topology, normals, display colors, sway/tintability primvars, typed metadata, and optional physics-enabled bounds-box/trunk-capsule collision proxies. An opt-in library path binds one explicit ready baked slot through `UsdPreviewSurface`, exports t-flipped `st`, color-correct `UsdUVTexture` base/ORM/normal/emissive inputs, and copied package-relative PNG assets. A companion deterministic USDZ writer stores the USDA default layer first and every dependency uncompressed on required 64-byte boundaries with path, entry, byte, and work caps.
 - Headless atlas manifests accept bounded dependency-free PNG alpha input, including non-interlaced and Adam7 images: 1/2/4/8/16-bit grayscale, 8/16-bit RGB/gray-alpha/RGBA, and 1/2/4/8-bit indexed color, with strict native-precision grayscale/RGB or indexed `tRNS`, in addition to legacy inline masks.
 - Optional bounds-box or trunk-capsule GLB collision proxies.
 - Deterministic season, health, and maturity variants that never mutate authored presets.
@@ -237,6 +237,7 @@ npm run test:tellus-contract
 - `src/procplant-png-alpha.ts` strictly decodes bounded non-interlaced or Adam7 packed/8/16-bit PNG masks for headless atlas builds.
 - `src/procplant-export.ts` validates and lazily exports Procplant templates/LOD sets as GLB.
 - `src/procplant-usd-export.ts` serializes deterministic ASCII USDA meshes, LOD variants, primvars, metadata, and conservative collision proxies.
+- `src/procplant-usdz-export.ts` packages USDA plus copied PNG dependencies as bounded, deterministic, standards-aligned USDZ without claiming binary USDC.
 - `src/index.ts` is the versioned public library surface.
 - `src/core.ts` is the smaller runtime/Tellus library surface with stable `procplants/core` package exports.
 - `src/plant-variants.ts` derives seasonal, health, and maturity forms.
@@ -246,6 +247,8 @@ npm run test:tellus-contract
 - `docs/PRD_IMPLEMENTATION_STATUS.md` tracks implemented and remaining PRD work.
 - `docs/PERFORMANCE_REVIEW.md` records current bundle, geometry, and live placement-LOD evidence.
 - `docs/TELLUS_INTEGRATION.md` records the audited downstream boundary and safe adoption sequence.
+
+The existing `procplants usda` CLI remains intentionally geometry-only: its durable input contract is a genome JSON and its I/O adapter writes text. Textured USDA/USDZ require an explicit in-memory ready material-bake bundle and binary output ownership, so they are exposed through the library API instead of guessing external files or mislabeled `.usd`/USDC bytes. `npm run test:usd-openusd` uses pinned `usd-core==26.8` through `uv` to parse and compose every all/single LOD and collision selection and to validate package storage, CRC, allowed types, default-layer order, and 64-byte payload alignment.
 
 ## Generator Output
 

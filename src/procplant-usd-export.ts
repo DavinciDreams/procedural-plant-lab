@@ -4,9 +4,12 @@ import {
   validateProcPlantTemplateForGlb,
 } from "./procplant-export";
 import type { ProcPlantCompiledLod, ProcPlantTemplate } from "./procplants";
+import type { ProcPlantBakedMaterialBundle, ProcPlantBakedMaterialImage } from "./procplant-material-bake";
 
 export const PROCPLANT_USDA_EXPORT_CONTRACT = "procplants.usda-export" as const;
 export const PROCPLANT_USDA_EXPORT_VERSION = 1 as const;
+export const PROCPLANT_USDA_MATERIAL_CONTRACT = "procplants.usda-preview-material" as const;
+export const PROCPLANT_USDA_MATERIAL_VERSION = 1 as const;
 
 export type ProcPlantUsdSource = ProcPlantTemplate | readonly ProcPlantCompiledLod[];
 
@@ -25,6 +28,30 @@ export interface ProcPlantUsdaExportOptions {
   };
   /** Hard UTF-8 output guard. Defaults to 256 MiB and cannot exceed 1 GiB. */
   maxBytes?: number;
+  /**
+   * Bind one ready baked material slot through UsdPreviewSurface. The current
+   * geometry contract has no face-to-slot partition, so multi-slot bundles must
+   * select exactly one slot explicitly.
+   */
+  material?: ProcPlantUsdaMaterialOptions;
+}
+
+export interface ProcPlantUsdaMaterialOptions {
+  baked: ProcPlantBakedMaterialBundle;
+  slot?: string;
+  /** Package-relative texture directory. Safe relative paths only. */
+  assetDirectory?: string;
+  maxAssets?: number;
+  maxAssetBytes?: number;
+  maxTotalAssetBytes?: number;
+}
+
+export interface ProcPlantUsdaAsset {
+  path: string;
+  mimeType: "image/png";
+  colorSpace: "srgb" | "linear";
+  contentHash: string;
+  bytes: Uint8Array;
 }
 
 export interface ProcPlantUsdaLodManifestEntry {
@@ -44,6 +71,8 @@ export interface ProcPlantUsdaExport {
   text: string;
   bytes: number;
   lods: ProcPlantUsdaLodManifestEntry[];
+  /** Files that must be written beside the USDA at their package-relative paths. */
+  assets: ProcPlantUsdaAsset[];
 }
 
 interface Bounds {
@@ -57,6 +86,13 @@ interface UsdaEntry {
   template: ProcPlantTemplate;
   lod?: ProcPlantCompiledLod;
   variant: string | null;
+}
+
+interface PreparedUsdMaterial {
+  path: string;
+  block: string;
+  assets: ProcPlantUsdaAsset[];
+  hasTextures: boolean;
 }
 
 const stableIdentifier = (value: string) => {
@@ -88,6 +124,209 @@ const formatNumber = (value: number) => {
 };
 
 const quote = (value: string) => JSON.stringify(value);
+
+const finite = (value: unknown, fallback: number, min: number, max: number, label: string) => {
+  const resolved = value === undefined ? fallback : value;
+  if (typeof resolved !== "number" || !Number.isFinite(resolved) || resolved < min || resolved > max) {
+    throw new Error(`${label} must be finite in [${min}, ${max}]`);
+  }
+  return resolved;
+};
+
+const vector = (value: unknown, fallback: readonly number[], label: string) => {
+  const resolved = value === undefined ? [...fallback] : value;
+  if (!Array.isArray(resolved) || resolved.length !== fallback.length) throw new Error(`${label} must have ${fallback.length} components`);
+  return resolved.map((entry, index) => finite(entry, fallback[index]!, 0, 1, `${label}[${index}]`));
+};
+
+const safeAssetDirectory = (value: string | undefined) => {
+  const resolved = value ?? "textures";
+  if (!resolved || resolved.length > 128 || resolved.includes("\\") || resolved.startsWith("/") || /^[A-Za-z]:/.test(resolved)) {
+    throw new Error("material assetDirectory must be a safe package-relative POSIX path");
+  }
+  const segments = resolved.split("/");
+  if (segments.some((segment) => !segment || segment === "." || segment === ".." || !/^[A-Za-z0-9._-]+$/.test(segment))) {
+    throw new Error("material assetDirectory must be a safe package-relative POSIX path");
+  }
+  return segments.join("/");
+};
+
+const pngSignature = [137, 80, 78, 71, 13, 10, 26, 10] as const;
+const assertPng = (image: ProcPlantBakedMaterialImage) => {
+  if (image.mimeType !== "image/png" || image.bytes.length < pngSignature.length
+    || pngSignature.some((byte, index) => image.bytes[index] !== byte)) {
+    throw new Error(`material image ${image.name} must be a valid PNG asset; KTX2 and external resources are unsupported`);
+  }
+};
+
+const record = (value: unknown, label: string): Record<string, unknown> => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an object`);
+  return value as Record<string, unknown>;
+};
+
+const textureIndex = (value: unknown, label: string) => {
+  if (value === undefined) return null;
+  const index = record(value, label).index;
+  if (!Number.isInteger(index) || (index as number) < 0) throw new Error(`${label}.index must be a non-negative integer`);
+  return index as number;
+};
+
+const prepareMaterial = (rootPath: string, options: ProcPlantUsdaMaterialOptions | undefined): PreparedUsdMaterial | null => {
+  if (!options) return null;
+  const { baked } = options;
+  if (!baked || baked.contract !== "procplants.material-bake" || baked.version !== 1 || !baked.ready || baked.diagnostics.length > 0) {
+    throw new Error("USDA material export requires one ready procplants material bake with no blocking diagnostics");
+  }
+  const maxAssets = options.maxAssets ?? 16;
+  const maxAssetBytes = options.maxAssetBytes ?? 64 * 1024 * 1024;
+  const maxTotalAssetBytes = options.maxTotalAssetBytes ?? 128 * 1024 * 1024;
+  if (!Number.isInteger(maxAssets) || maxAssets < 0 || maxAssets > 64) throw new Error("material maxAssets must be an integer in [0, 64]");
+  if (!Number.isInteger(maxAssetBytes) || maxAssetBytes < 1 || maxAssetBytes > 256 * 1024 * 1024) throw new Error("material maxAssetBytes must be an integer in [1, 268435456]");
+  if (!Number.isInteger(maxTotalAssetBytes) || maxTotalAssetBytes < 1 || maxTotalAssetBytes > 512 * 1024 * 1024) throw new Error("material maxTotalAssetBytes must be an integer in [1, 536870912]");
+  const materials = baked.gltf.materials;
+  let materialIndex = -1;
+  if (options.slot !== undefined) materialIndex = materials.findIndex((entry) => entry.name === options.slot);
+  else if (materials.length === 1) materialIndex = 0;
+  else throw new Error("multi-slot material bake requires an explicit slot because USDA geometry has no face-to-slot partition");
+  if (materialIndex < 0) throw new Error(`material slot ${options.slot} is not present in the baked bundle`);
+  const source = record(materials[materialIndex], `material[${materialIndex}]`);
+  const slot = typeof source.name === "string" && source.name ? source.name : `material-${materialIndex}`;
+  const pbr = record(source.pbrMetallicRoughness, `${slot}.pbrMetallicRoughness`);
+  const baseIndex = textureIndex(pbr.baseColorTexture, `${slot}.baseColorTexture`);
+  const ormIndex = textureIndex(pbr.metallicRoughnessTexture, `${slot}.metallicRoughnessTexture`);
+  const occlusion = source.occlusionTexture === undefined ? null : record(source.occlusionTexture, `${slot}.occlusionTexture`);
+  const occlusionIndex = occlusion ? textureIndex(occlusion, `${slot}.occlusionTexture`) : null;
+  if (ormIndex !== occlusionIndex) throw new Error("USDA material requires the baked ORM texture to share metallic-roughness and occlusion channels");
+  const normal = source.normalTexture === undefined ? null : record(source.normalTexture, `${slot}.normalTexture`);
+  const normalIndex = normal ? textureIndex(normal, `${slot}.normalTexture`) : null;
+  const emissiveIndex = textureIndex(source.emissiveTexture, `${slot}.emissiveTexture`);
+  const expectedByIndex = new Map<number, { usage: ProcPlantBakedMaterialImage["usage"]; colorSpace: ProcPlantBakedMaterialImage["colorSpace"] }>();
+  const expectImage = (index: number | null, usage: ProcPlantBakedMaterialImage["usage"], colorSpace: ProcPlantBakedMaterialImage["colorSpace"]) => {
+    if (index === null) return;
+    const prior = expectedByIndex.get(index);
+    if (prior && (prior.usage !== usage || prior.colorSpace !== colorSpace)) {
+      throw new Error(`material texture ${index} is reused across incompatible USD PBR semantics`);
+    }
+    expectedByIndex.set(index, { usage, colorSpace });
+  };
+  expectImage(baseIndex, "baseColor", "srgb");
+  expectImage(ormIndex, "metallicRoughnessOcclusion", "linear");
+  expectImage(normalIndex, "normal", "linear");
+  expectImage(emissiveIndex, "emissive", "srgb");
+  const used = [...new Set([baseIndex, ormIndex, normalIndex, emissiveIndex].filter((index): index is number => index !== null))].sort((a, b) => a - b);
+  if (used.length > maxAssets) throw new Error(`USDA material exceeds maxAssets (${used.length} > ${maxAssets})`);
+  const directory = safeAssetDirectory(options.assetDirectory);
+  const assets: ProcPlantUsdaAsset[] = [];
+  const imageFor = (index: number) => {
+    const image = baked.images.find((entry) => entry.textureIndex === index);
+    if (!image) throw new Error(`material texture ${index} has no baked image`);
+    assertPng(image);
+    if (image.bytes.byteLength > maxAssetBytes) throw new Error(`material image ${image.name} exceeds maxAssetBytes`);
+    return image;
+  };
+  const pathByIndex = new Map<number, string>();
+  for (const index of used) {
+    const image = imageFor(index);
+    const expected = expectedByIndex.get(index)!;
+    if (image.usage !== expected.usage || image.colorSpace !== expected.colorSpace) {
+      throw new Error(`material image ${image.name} does not match ${expected.usage}/${expected.colorSpace} USD semantics`);
+    }
+    const stem = fileStem(`${image.name}-${image.contentHash.replace(/[^A-Za-z0-9]+/g, "-")}`);
+    const path = `${directory}/${stem}.png`;
+    if (path.length > 255) throw new Error(`material asset path exceeds 255 portable characters: ${path}`);
+    if (assets.some((asset) => asset.path === path)) throw new Error(`material asset path collision: ${path}`);
+    pathByIndex.set(index, path);
+    assets.push({ path, mimeType: "image/png", colorSpace: image.colorSpace, contentHash: image.contentHash, bytes: image.bytes.slice() });
+  }
+  const totalAssetBytes = assets.reduce((sum, asset) => sum + asset.bytes.byteLength, 0);
+  if (!Number.isSafeInteger(totalAssetBytes) || totalAssetBytes > maxTotalAssetBytes) {
+    throw new Error(`USDA material exceeds maxTotalAssetBytes (${totalAssetBytes} > ${maxTotalAssetBytes})`);
+  }
+  const materialName = stableIdentifier(slot);
+  const materialPath = `${rootPath}/Looks/${materialName}`;
+  const previewPath = `${materialPath}/PreviewSurface`;
+  const stPath = `${materialPath}/PrimvarSt`;
+  const baseFactor = vector(pbr.baseColorFactor, [1, 1, 1, 1], `${slot}.baseColorFactor`);
+  const metallicFactor = finite(pbr.metallicFactor, 1, 0, 1, `${slot}.metallicFactor`);
+  const roughnessFactor = finite(pbr.roughnessFactor, 1, 0, 1, `${slot}.roughnessFactor`);
+  const emissiveFactor = vector(source.emissiveFactor, [0, 0, 0], `${slot}.emissiveFactor`);
+  const normalScale = normal ? finite(normal.scale, 1, 0, 16, `${slot}.normalTexture.scale`) : 1;
+  const aoStrength = occlusion ? finite(occlusion.strength, 1, 0, 1, `${slot}.occlusionTexture.strength`) : 1;
+  const alphaMode = source.alphaMode === undefined ? "OPAQUE" : source.alphaMode;
+  if (alphaMode !== "OPAQUE" && alphaMode !== "MASK" && alphaMode !== "BLEND") throw new Error(`${slot}.alphaMode is unsupported`);
+  const alphaCutoff = finite(source.alphaCutoff, 0.5, 0, 1, `${slot}.alphaCutoff`);
+  const textureNode = (name: string, index: number, colorSpace: "sRGB" | "raw", outputs: readonly string[], scale?: readonly number[], bias?: readonly number[]) => [
+    `            def Shader ${quote(name)}`,
+    `            {`,
+    `                uniform token info:id = "UsdUVTexture"`,
+    `                asset inputs:file = @${pathByIndex.get(index)}@`,
+    `                token inputs:sourceColorSpace = ${quote(colorSpace)}`,
+    `                float2 inputs:st.connect = <${stPath}.outputs:result>`,
+    `                token inputs:wrapS = "repeat"`,
+    `                token inputs:wrapT = "repeat"`,
+    ...(scale ? [`                float4 inputs:scale = (${scale.map(formatNumber).join(", ")})`] : []),
+    ...(bias ? [`                float4 inputs:bias = (${bias.map(formatNumber).join(", ")})`] : []),
+    ...outputs.map((output) => `                ${output}`),
+    `            }`,
+  ];
+  const previewInputs = [
+    `                int inputs:useSpecularWorkflow = 0`,
+    baseIndex === null
+      ? `                color3f inputs:diffuseColor = (${baseFactor.slice(0, 3).map(formatNumber).join(", ")})`
+      : `                color3f inputs:diffuseColor.connect = <${materialPath}/BaseColor.outputs:rgb>`,
+    ormIndex === null
+      ? `                float inputs:metallic = ${formatNumber(metallicFactor)}`
+      : `                float inputs:metallic.connect = <${materialPath}/Orm.outputs:b>`,
+    ormIndex === null
+      ? `                float inputs:roughness = ${formatNumber(roughnessFactor)}`
+      : `                float inputs:roughness.connect = <${materialPath}/Orm.outputs:g>`,
+    ormIndex === null
+      ? `                float inputs:occlusion = 1`
+      : `                float inputs:occlusion.connect = <${materialPath}/Orm.outputs:r>`,
+    normalIndex === null
+      ? `                normal3f inputs:normal = (0, 0, 1)`
+      : `                normal3f inputs:normal.connect = <${materialPath}/Normal.outputs:rgb>`,
+    emissiveIndex === null
+      ? `                color3f inputs:emissiveColor = (${emissiveFactor.map(formatNumber).join(", ")})`
+      : `                color3f inputs:emissiveColor.connect = <${materialPath}/Emissive.outputs:rgb>`,
+    baseIndex !== null && alphaMode !== "OPAQUE"
+      ? `                float inputs:opacity.connect = <${materialPath}/BaseColor.outputs:a>`
+      : `                float inputs:opacity = ${formatNumber(alphaMode === "OPAQUE" ? 1 : baseFactor[3]!)}`,
+    `                float inputs:opacityThreshold = ${formatNumber(alphaMode === "MASK" ? alphaCutoff : 0)}`,
+    `                token outputs:surface`,
+  ];
+  const block = [
+    `    def Scope "Looks"`,
+    `    {`,
+    `        def Material ${quote(materialName)}`,
+    `        {`,
+    `            custom string procplant:contract = ${quote(PROCPLANT_USDA_MATERIAL_CONTRACT)}`,
+    `            custom int procplant:contractVersion = ${PROCPLANT_USDA_MATERIAL_VERSION}`,
+    `            token outputs:surface.connect = <${previewPath}.outputs:surface>`,
+    ``,
+    `            def Shader "PreviewSurface"`,
+    `            {`,
+    `                uniform token info:id = "UsdPreviewSurface"`,
+    ...previewInputs,
+    `            }`,
+    ...(used.length ? [
+      ``,
+      `            def Shader "PrimvarSt"`,
+      `            {`,
+      `                uniform token info:id = "UsdPrimvarReader_float2"`,
+      `                string inputs:varname = "st"`,
+      `                float2 outputs:result`,
+      `            }`,
+    ] : []),
+    ...(baseIndex === null ? [] : [``, ...textureNode("BaseColor", baseIndex, "sRGB", ["float3 outputs:rgb", "float outputs:a"], baseFactor)]),
+    ...(ormIndex === null ? [] : [``, ...textureNode("Orm", ormIndex, "raw", ["float outputs:r", "float outputs:g", "float outputs:b"], [aoStrength, roughnessFactor, metallicFactor, 1])]),
+    ...(normalIndex === null ? [] : [``, ...textureNode("Normal", normalIndex, "raw", ["float3 outputs:rgb"], [2 * normalScale, 2 * normalScale, 2, 1], [-normalScale, -normalScale, -1, 0])]),
+    ...(emissiveIndex === null ? [] : [``, ...textureNode("Emissive", emissiveIndex, "sRGB", ["float3 outputs:rgb"], [...emissiveFactor, 1])]),
+    `        }`,
+    `    }`,
+  ].join("\n");
+  return { path: materialPath, block, assets, hasTextures: used.length > 0 };
+};
 
 const metadataJson = (metadata: ProcPlantUsdaExportOptions["metadata"]) => JSON.stringify(
   Object.fromEntries(Object.entries(metadata ?? {}).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)),
@@ -212,15 +451,27 @@ const collisionBlock = (
   ].join("\n");
 };
 
-const meshBlock = (entry: UsdaEntry, options: ProcPlantUsdaExportOptions, indent: string) => {
+const meshBlock = (
+  entry: UsdaEntry,
+  options: ProcPlantUsdaExportOptions,
+  indent: string,
+  material: PreparedUsdMaterial | null,
+) => {
   const { template, lod } = entry;
   const bounds = boundsFor(template);
   const vertices = template.pos.length / 3;
   const triangles = template.idx.length / 3;
   const child = `${indent}    `;
   const lines = [
-    `${indent}def Mesh "Geometry"`,
+    ...(material ? [
+      `${indent}def Mesh "Geometry" (`,
+      `${indent}    prepend apiSchemas = ["MaterialBindingAPI"]`,
+      `${indent})`,
+    ] : [`${indent}def Mesh "Geometry"`]),
     `${indent}{`,
+    ...(material ? [
+      `${child}rel material:binding = <${material.path}>`,
+    ] : []),
     `${child}custom string procplant:contract = ${quote(PROCPLANT_USDA_EXPORT_CONTRACT)}`,
     `${child}custom int procplant:contractVersion = ${PROCPLANT_USDA_EXPORT_VERSION}`,
     `${child}custom int procplant:generatorContractRevision = ${PROCPLANT_GENERATOR_CONTRACT_REVISION}`,
@@ -241,6 +492,15 @@ const meshBlock = (entry: UsdaEntry, options: ProcPlantUsdaExportOptions, indent
     `${child}normal3f[] normals = ${formatTupleArray(template.nrm, 3, `${child}    `)} (`,
     `${child}    interpolation = "vertex"`,
     `${child})`,
+    ...(material?.hasTextures ? [
+      `${child}texCoord2f[] primvars:st = ${formatTupleArray(
+        Array.from({ length: template.uv0.length }, (_, index) => index % 2 === 0 ? template.uv0[index]! : 1 - template.uv0[index]!),
+        2,
+        `${child}    `,
+      )} (`,
+      `${child}    interpolation = "vertex"`,
+      `${child})`,
+    ] : []),
     `${child}color3f[] primvars:displayColor = ${formatTupleArray(template.col, 3, `${child}    `)} (`,
     `${child}    interpolation = "vertex"`,
     `${child})`,
@@ -288,6 +548,14 @@ export const exportProcPlantUsda = (
   const rawName = options.name ?? options.genomeId ?? "plant";
   const defaultPrim = `ProcPlant_${stableIdentifier(rawName)}`;
   const fileName = `procplant-${fileStem(rawName)}.usda`;
+  const material = prepareMaterial(`/${defaultPrim}`, options.material);
+  if (material?.hasTextures) {
+    for (const entry of entries) {
+      if (entry.template.uv0.length !== entry.template.pos.length / 3 * 2) {
+        throw new Error(`USDA textured material requires one UV0 pair per position vertex for ${entry.lod?.label ?? "template"}`);
+      }
+    }
+  }
   const serializedMetadata = metadataJson(options.metadata);
   const rootSpec = entries.length > 1
     ? [
@@ -314,18 +582,24 @@ export const exportProcPlantUsda = (
     ...(options.seed !== undefined ? [`    custom int64 procplant:seed = ${options.seed >>> 0}`] : []),
     `    custom string procplant:lodSelection = ${quote(entries.length > 1 ? "variant-set" : String(selected.lod?.level ?? "template"))}`,
     `    custom string procplant:metadataJson = ${quote(serializedMetadata)}`,
+    ...(material ? [
+      `    custom string procplant:materialContract = ${quote(PROCPLANT_USDA_MATERIAL_CONTRACT)}`,
+      `    custom int procplant:materialContractVersion = ${PROCPLANT_USDA_MATERIAL_VERSION}`,
+      ``,
+      material.block,
+    ] : []),
     ...(entries.length > 1
       ? [
           ``,
           `    variantSet "LOD" = {`,
           ...entries.flatMap((entry) => [
             `        ${quote(entry.variant!)} {`,
-            meshBlock(entry, options, "            "),
+            meshBlock(entry, options, "            ", material),
             `        }`,
           ]),
           `    }`,
         ]
-      : ["", meshBlock(selected, options, "    ")]),
+      : ["", meshBlock(selected, options, "    ", material)]),
     `}`,
     ``,
   ];
@@ -348,6 +622,7 @@ export const exportProcPlantUsda = (
     defaultPrim,
     text,
     bytes,
+    assets: material?.assets.map((asset) => ({ ...asset, bytes: asset.bytes.slice() })) ?? [],
     lods: entries.map((entry) => ({
       level: entry.lod?.level ?? null,
       label: entry.lod?.label ?? "template",
