@@ -41,6 +41,11 @@ import {
   type ProcPlantWeberPennTrimOverrideSet,
   type ProcPlantWeberPennTrimTarget,
 } from "./procplant-weber-penn-trim";
+import { applyProcPlantWeberPennOrganPlacementOverrides } from "./procplant-weber-penn-organ-placement-apply";
+import type {
+  ProcPlantWeberPennOrganPlacementAudit,
+  ProcPlantWeberPennOrganPlacementPackage,
+} from "./procplant-weber-penn-organ-placement";
 
 export interface ProcPlantTemplate {
   pos: Float32Array;
@@ -358,6 +363,8 @@ export interface ProcPlantStats {
 export interface ProcPlantWeberPennBuildOptions {
   /** Signature-bound baked trim operations. Unsupported or stale sets fail closed. */
   trimOverrides?: ProcPlantWeberPennTrimOverrideSet;
+  /** Exact native attachment-frame organ placements. Unsupported or stale sets fail closed. */
+  placementOverrides?: ProcPlantWeberPennOrganPlacementPackage;
 }
 
 export interface ProcPlantWeberPennBuildMetadata {
@@ -367,8 +374,12 @@ export interface ProcPlantWeberPennBuildMetadata {
   pickerGraph: ProcPlantGraph;
   /** Stable picker segment ID to native stem ID mapping. */
   pickerStemIds: Readonly<Record<string, string>>;
+  /** Stable native attachment ID to exact baked owner stem ID mapping. */
+  attachmentStemIds: Readonly<Record<string, string>>;
   /** Present whenever a caller supplied an override set, including fail-closed audits. */
   trimAudit: ProcPlantWeberPennBakedTrimAudit | null;
+  /** Present whenever a caller supplied exact-frame organ placements. */
+  placementAudit: ProcPlantWeberPennOrganPlacementAudit | null;
 }
 
 export interface ProcPlantBuildResult {
@@ -7847,8 +7858,8 @@ const buildWeberPennProcPlantTemplateInternal = (
     sourceFoliageAnchors,
     retainedFoliageAnchorIds,
   );
-  const template = combineTemplates(baseTemplate, massBuilder.build());
-  const graph = emptyGraph();
+  let template = combineTemplates(baseTemplate, massBuilder.build());
+  let graph = emptyGraph();
   graph.attachments = foliageAnchors.map((anchor, index) => {
     const tangent = anchor.direction.clone().normalize();
     // An anchor right that is parallel to the tangent projects to zero, so fall back
@@ -7879,6 +7890,30 @@ const buildWeberPennProcPlantTemplateInternal = (
       organIndex: null,
     };
   });
+  const attachmentStemIds = Object.fromEntries(foliageAnchors.map((anchor) => [
+    anchor.id,
+    `weber-penn:stem:${anchor.ownerStemIndex}`,
+  ]));
+  const placement = options.placementOverrides && target.topologySignature
+    ? applyProcPlantWeberPennOrganPlacementOverrides({
+        target: { ...target, topologySignature: target.topologySignature },
+        graph,
+        attachmentStemIds,
+        flowerAvailable: Boolean(genome.flower),
+      }, options.placementOverrides)
+    : null;
+  let placedLeaves = 0;
+  let placedFlowers = 0;
+  let placedAccessories = 0;
+  if (placement?.changed) {
+    const placedOrgans = placement.graph.organs.slice(graph.organs.length);
+    const overlay = buildProcPlantOrganOverlayTemplate(genome, placedOrgans, env);
+    template = combineTemplates(template, overlay.template);
+    graph = placement.graph;
+    placedLeaves = overlay.leaves;
+    placedFlowers = overlay.flowers;
+    placedAccessories = overlay.accessories;
+  }
   const pickerGraph = emptyGraph();
   const pickerStemIds: Record<string, string> = {};
   const retainedBakedStemIndices = new Set(
@@ -7935,15 +7970,18 @@ const buildWeberPennProcPlantTemplateInternal = (
     graph,
     stats: {
       stems: baked.branches.indices.length / 6,
-      leaves: (nativeLeaves ? Math.round(baked.leaves.indices.length / 6) : 0) + massLeaves,
-      flowers: 0,
+      leaves: (nativeLeaves ? Math.round(baked.leaves.indices.length / 6) : 0) + massLeaves + placedLeaves,
+      flowers: placedFlowers,
+      ...(placedAccessories > 0 ? { accessories: placedAccessories } : {}),
       triangles: template.idx.length / 3,
     },
     weberPennTrim: {
       target,
       pickerGraph,
       pickerStemIds,
+      attachmentStemIds,
       trimAudit: trimmed?.audit ?? null,
+      placementAudit: placement?.audit ?? null,
     },
   };
 };
@@ -8357,6 +8395,40 @@ const geometryForAccessoryKind = (kind: ProcPlantAccessoryKind): THREE.BufferGeo
   if (kind === "cone") return createProcPlantConeGeometry();
   if (kind === "thorn") return createProcPlantThornGeometry();
   return createProcPlantAerialRootGeometry();
+};
+
+/** Materialize organ-only geometry without inventing a graph stem backend. */
+const buildProcPlantOrganOverlayTemplate = (
+  genome: ProcPlantGenome,
+  organs: readonly ProcPlantOrgan[],
+  env: ProcPlantEnvironment,
+): { template: ProcPlantTemplate; leaves: number; flowers: number; accessories: number } => {
+  const builder = new TemplateBuilder();
+  const shade = 1 - THREE.MathUtils.clamp(env.light, 0, 1);
+  let leaves = 0;
+  let flowers = 0;
+  let accessories = 0;
+  const accessoryGeometries = new Map<ProcPlantAccessoryKind, THREE.BufferGeometry>();
+  for (const organ of organs) {
+    if (organ.kind === "flower") {
+      addFlower(builder, genome, organ);
+      flowers++;
+    } else if (isAccessoryOrganKind(organ.kind)) {
+      const instance = accessoryInstance(organ);
+      let geometry = accessoryGeometries.get(organ.kind);
+      if (!geometry) {
+        geometry = geometryForAccessoryKind(organ.kind);
+        accessoryGeometries.set(organ.kind, geometry);
+      }
+      addTransformedGeometry(builder, geometry, instance.matrix, instance.color, instance.sway);
+      accessories++;
+    } else {
+      addLeaf(builder, genome, organ, shade);
+      leaves++;
+    }
+  }
+  for (const geometry of accessoryGeometries.values()) geometry.dispose();
+  return { template: builder.build(), leaves, flowers, accessories };
 };
 
 /**

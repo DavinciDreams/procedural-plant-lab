@@ -120,6 +120,9 @@ import type {
   ProcPlantPlaceableOrganKind,
 } from "./procplant-organ-placement-overrides";
 import type {
+  ProcPlantWeberPennOrganPlacementPackage,
+} from "./procplant-weber-penn-organ-placement";
+import type {
   ProcPlantThreePlacementDecalBindingHandle,
   ProcPlantThreePlacementDecalDrawPackage,
 } from "./procplant-placement-decal-three";
@@ -738,7 +741,8 @@ let activeCutoutSource: ActiveCutoutSource | null = null;
 let activeCutout: ProcPlantCutout | null = null;
 const pruneOperations = new Map<string, string[][]>();
 const weberPennTrimTargets = new Map<string, ProcPlantWeberPennTrimTarget>();
-const organPlacementPackages = new Map<string, ProcPlantOrganPlacementPackage>();
+type AuthoredOrganPlacementPackage = ProcPlantOrganPlacementPackage | ProcPlantWeberPennOrganPlacementPackage;
+const organPlacementPackages = new Map<string, AuthoredOrganPlacementPackage>();
 let livePlacementDecalBinding: ProcPlantThreePlacementDecalBindingHandle | null = null;
 let livePlacementDecalPixelSource: ProcPlantPlacementDecalPixelSource | null = null;
 let livePlacementDecalFileName = "";
@@ -1397,6 +1401,7 @@ const loadProcPlantOrganPlacement = () => {
   });
   return procPlantOrganPlacementPromise;
 };
+const loadProcPlantWeberPennOrganPlacement = () => import("./procplant-weber-penn-organ-placement");
 const loadProcPlantPlacementDecalThree = () => {
   if (procPlantPlacementDecalThreeModule) return Promise.resolve(procPlantPlacementDecalThreeModule);
   if (procPlantPlacementDecalThreePromise) return procPlantPlacementDecalThreePromise;
@@ -2949,20 +2954,48 @@ const placementKind = (): ProcPlantPlaceableOrganKind => {
   }
 };
 
+const placementScale: Record<ProcPlantPlaceableOrganKind, number> = {
+  leaf: 1,
+  flower: 1,
+  fruit: 0.16,
+  berry: 0.14,
+  cone: 0.22,
+  thorn: 0.18,
+  aerialRoot: 0.38,
+  coniferSpray: 0.72,
+  fernFrond: 0.86,
+  palmFrond: 1,
+  mossTuft: 0.28,
+  branch: 0.48,
+  knot: 0.18,
+  decal: 0.18,
+};
+const placementColors: Partial<Record<ProcPlantPlaceableOrganKind, { color: number; secondaryColor?: number }>> = {
+  fruit: { color: 0xc7472f, secondaryColor: 0x6e281c },
+  berry: { color: 0x92324d, secondaryColor: 0x4b1728 },
+  cone: { color: 0x76502d, secondaryColor: 0x3f2a19 },
+  thorn: { color: 0x6f5a3c, secondaryColor: 0x3d2f20 },
+  aerialRoot: { color: 0x6a5438, secondaryColor: 0x3b3024 },
+};
+
 const syncPlacementButtons = () => {
-  const graphAvailable = Boolean(heroLodState?.graph);
+  const weberPenn = Boolean(selectedGenome().weberPenn);
+  const graphAvailable = Boolean(heroLodState?.graph || (heroLodState && weberPenn));
   if (!graphAvailable && placementModeVisible) {
     placementModeVisible = false;
     disposeHeroPlacementTool();
     controls.enabled = !pruneModeVisible;
   }
   const genome = selectedGenome();
+  for (const option of placementKindSelect.options) {
+    option.disabled = weberPenn && !["leaf", "flower", "fruit", "berry", "cone"].includes(option.value);
+  }
   const flowerOption = placementKindSelect.querySelector<HTMLOptionElement>('option[value="flower"]');
-  if (flowerOption) flowerOption.disabled = !genome.flower;
+  if (flowerOption) flowerOption.disabled = flowerOption.disabled || !genome.flower;
   if (!genome.flower && placementKindSelect.value === "flower") placementKindSelect.value = "leaf";
   const decalOption = placementKindSelect.querySelector<HTMLOptionElement>('option[value="decal"]');
   const decalReady = Boolean(livePlacementDecalBinding && !livePlacementDecalBinding.disposed);
-  if (decalOption) decalOption.disabled = !decalReady;
+  if (decalOption) decalOption.disabled = decalOption.disabled || !decalReady;
   if (!decalReady && placementKindSelect.value === "decal") placementKindSelect.value = "leaf";
   placementModeButton.disabled = regenerationBusy || !graphAvailable;
   placementModeButton.setAttribute("aria-pressed", String(placementModeVisible));
@@ -2981,13 +3014,43 @@ const refreshHeroPlacementTool = async () => {
   disposeHeroPlacementTool();
   const request = ++heroPlacementToolRequest;
   const target = heroLodState;
-  if (!placementModeVisible || !target?.graph) {
+  if (!placementModeVisible || !target || (!target.graph && !selectedGenome().weberPenn)) {
     syncPlacementButtons();
     return;
   }
   const { createProcPlantPruneTool } = await loadProcPlantAuthoringTools();
-  if (request !== heroPlacementToolRequest || !placementModeVisible || heroLodState !== target || !target.graph) return;
-  const tool = createProcPlantPruneTool(target.graph, { visible: true, opacity: 0.2, radiusScale: 2.4 });
+  if (request !== heroPlacementToolRequest || !placementModeVisible || heroLodState !== target) return;
+  if (!target.weberPennTrim && selectedGenome().weberPenn) {
+    const built = buildProcPlantTemplate(selectedGenome(), selectedGeneratorSeed(), envFromState());
+    if (request !== heroPlacementToolRequest || !placementModeVisible || heroLodState !== target) return;
+    const sourceLod: ProcPlantCompiledLod = {
+      level: 0,
+      label: "full",
+      distance: 0,
+      template: built.template,
+      triangles: built.template.idx.length / 3,
+      vertices: built.template.pos.length / 3,
+    };
+    const sourceGeometry = templateToGeometry(built.template);
+    for (const geometry of target.geometries) geometry.dispose();
+    target.mesh.geometry = sourceGeometry;
+    target.lods = [sourceLod];
+    target.geometries = [sourceGeometry];
+    target.controller = new ProcPlantLodController([sourceLod], camera.position.distanceTo(target.mesh.position) / target.scale);
+    target.graph = built.graph;
+    target.weberPennTrim = built.weberPennTrim ?? null;
+    target.stats = built.stats;
+    target.authoringGeometryLocked = true;
+    app.dataset.heroLod = "full";
+    app.dataset.heroLodLevel = "0";
+    app.dataset.heroLodPending = "false";
+    app.dataset.heroTemplateTriangles = String(sourceLod.triangles);
+    app.dataset.heroTemplateVertices = String(sourceLod.vertices);
+    refreshPreviewGeometryStats();
+  }
+  const pickerGraph = target.weberPennTrim?.pickerGraph ?? target.graph;
+  if (request !== heroPlacementToolRequest || !placementModeVisible || heroLodState !== target || !pickerGraph) return;
+  const tool = createProcPlantPruneTool(pickerGraph, { visible: true, opacity: 0.2, radiusScale: 2.4 });
   tool.object.position.copy(target.mesh.position);
   tool.object.quaternion.copy(target.mesh.quaternion);
   tool.object.scale.copy(target.mesh.scale);
@@ -3559,8 +3622,14 @@ const performRegeneration = async (request: number) => {
       )
     : undefined;
   const authoredPlacements = currentPlacementPackage();
+  const authoredWeberPlacements = authoredPlacements?.contract === "procplants.weber-penn-organ-placement-overrides"
+    ? authoredPlacements
+    : null;
+  const authoredGraphPlacements = authoredPlacements?.contract === "procplants.organ-placement-overrides"
+    ? authoredPlacements
+    : null;
   const authoringToolsPromise = authoredPrunes.length > 0 ? loadProcPlantAuthoringTools() : null;
-  const placementModulePromise = authoredPlacements?.operations.length ? loadProcPlantOrganPlacement() : null;
+  const placementModulePromise = authoredGraphPlacements?.operations.length ? loadProcPlantOrganPlacement() : null;
   const shouldCompileHeroLods = authoredPrunes.length === 0 && !authoredPlacements?.operations.length && !productionDag && !spatialForcesActive;
   const lodResultPromise = shouldCompileHeroLods
     ? heroLodCompiler.compile(genome, generatorSeed, env).then(
@@ -3579,9 +3648,12 @@ const performRegeneration = async (request: number) => {
 
   // Finish both replacements before removing the visible scene. This keeps a
   // failed or superseded build from leaving a partially-empty preview.
-  let heroBuild = productionDag?.build ?? (biome.heroTemplate && !weberPennTrimOverrides && !spatialForcesActive
+  let heroBuild = productionDag?.build ?? (biome.heroTemplate && !weberPennTrimOverrides && !authoredWeberPlacements?.operations.length && !spatialForcesActive
     ? null
-    : buildProcPlantTemplate(genome, generatorSeed, env, { trimOverrides: weberPennTrimOverrides }));
+    : buildProcPlantTemplate(genome, generatorSeed, env, {
+        trimOverrides: weberPennTrimOverrides,
+        placementOverrides: authoredWeberPlacements ?? undefined,
+      }));
   if (heroBuild && authoredPrunes.length > 0 && !genome.weberPenn && !genome.branchModules) {
     const { pruneProcPlantGraph } = await authoringToolsPromise!;
     if (request !== regenerationRequest) {
@@ -3595,14 +3667,14 @@ const performRegeneration = async (request: number) => {
     heroBuild = buildProcPlantTemplateFromGraph(genome, pruned.graph, env);
   }
   let materializedPlacementDecals: ProcPlantMaterializedPlacementDecal[] = [];
-  if (heroBuild && authoredPlacements?.operations.length && !genome.weberPenn && !genome.branchModules && !genome.spaceColonization) {
+  if (heroBuild && authoredGraphPlacements?.operations.length && !genome.weberPenn && !genome.branchModules && !genome.spaceColonization) {
     const placementModule = await placementModulePromise!;
     if (request !== regenerationRequest) {
       disposeGroup(biome.group);
       return;
     }
     const source = placementModule.createProcPlantOrganPlacementTarget(genome.id, state.seed, heroBuild.graph);
-    const applied = placementModule.applyProcPlantOrganPlacementOverrides(heroBuild.graph, source, authoredPlacements, {
+    const applied = placementModule.applyProcPlantOrganPlacementOverrides(heroBuild.graph, source, authoredGraphPlacements, {
       decalBindings: livePlacementDecalBinding && !livePlacementDecalBinding.disposed
         ? [livePlacementDecalBinding.binding]
         : [],
@@ -3761,6 +3833,18 @@ const performRegeneration = async (request: number) => {
     delete app.dataset.weberPennTrimRemovedLeaves;
     delete app.dataset.weberPennTrimBeforeTriangles;
     delete app.dataset.weberPennTrimAfterTriangles;
+  }
+  const weberPlacementAudit = nextHeroLodState.weberPennTrim?.placementAudit;
+  if (weberPlacementAudit) {
+    app.dataset.organPlacementTargetMatched = String(weberPlacementAudit.status !== "target-mismatch");
+    app.dataset.organPlacementApplied = String(weberPlacementAudit.appliedOperationIds.length);
+    app.dataset.organPlacementUnsupported = String(weberPlacementAudit.operations.filter((operation) => operation.status === "unsupported").length);
+    app.dataset.weberPennOrganPlacementStatus = weberPlacementAudit.status;
+  } else if (genome.weberPenn) {
+    delete app.dataset.organPlacementTargetMatched;
+    delete app.dataset.organPlacementApplied;
+    delete app.dataset.organPlacementUnsupported;
+    delete app.dataset.weberPennOrganPlacementStatus;
   }
 
   const previousBiome = biomeGroup;
@@ -4516,7 +4600,7 @@ pruneModeButton.addEventListener("click", () => {
 });
 
 placementModeButton.addEventListener("click", () => {
-  if (regenerationBusy || !heroLodState?.graph) return;
+  if (regenerationBusy || !heroLodState || (!heroLodState.graph && !selectedGenome().weberPenn)) return;
   placementModeVisible = !placementModeVisible;
   if (placementModeVisible && pruneModeVisible) {
     pruneModeVisible = false;
@@ -4536,11 +4620,9 @@ placementModeButton.addEventListener("click", () => {
   controls.enabled = !placementModeVisible && !pruneModeVisible && !vineGuideModeVisible;
   syncPlacementButtons();
   void refreshHeroPlacementTool();
-  setSaveStatus(
-    placementModeVisible
-      ? "Place mode: choose a supported plant part, then click a highlighted source segment. Branches, clusters, and organs regenerate from the segment frame."
-      : "Place mode closed.",
-  );
+  setSaveStatus(placementModeVisible
+    ? "Place mode: choose a part, then click a highlighted branch."
+    : "Place mode closed.");
 });
 
 vineGuideModeButton.addEventListener("click", async () => {
@@ -4830,6 +4912,44 @@ canvas.addEventListener("click", async (event) => {
     setSaveStatus("No branch segment selected for placement.");
     return;
   }
+  tool.object.updateMatrixWorld(true);
+  const localPoint = tool.object.worldToLocal(hit.point.clone());
+  const weberMetadata = target.weberPennTrim;
+  if (weberMetadata) {
+    const kind = placementKind();
+    const key = currentPruneKey();
+    const existing = organPlacementPackages.get(key);
+    if (existing && existing.contract !== "procplants.weber-penn-organ-placement-overrides") {
+      setSaveStatus("Undo placements for the prior plant first.");
+      return;
+    }
+    const placementModule = await loadProcPlantWeberPennOrganPlacement();
+    if (!placementModeVisible || heroLodState !== target || target.graph !== heroLodState.graph) return;
+    const appended = placementModule.appendProcPlantWeberPennOrganPlacementFromPicker({
+      placementPackage: existing ?? null,
+      target: weberMetadata.target,
+      attachments: target.graph.attachments,
+      pickerStemIds: weberMetadata.pickerStemIds,
+      attachmentStemIds: weberMetadata.attachmentStemIds,
+      pickerSegmentId: hit.segmentId,
+      localPoint,
+      kind,
+      flowerAvailable: Boolean(selectedGenome().flower),
+      scale: placementScale[kind],
+      ...placementColors[kind],
+    });
+    if (!appended.operation) {
+      setSaveStatus("Placement rejected.");
+      return;
+    }
+    organPlacementPackages.set(key, appended.package);
+    app.dataset.weberPennOrganPlacementAttachment = appended.attachmentId!;
+    app.dataset.weberPennOrganPlacementOwner = appended.ownerStemId!;
+    syncPlacementButtons();
+    setSaveStatus("Placement added.");
+    regenerate();
+    return;
+  }
   const segment = target.graph.segmentRecords.find((candidate) => candidate.id === hit.segmentId);
   const start = segment ? target.graph.stems[segment.startNodeIndex] : null;
   const end = segment ? target.graph.stems[segment.endNodeIndex] : null;
@@ -4841,8 +4961,6 @@ canvas.addEventListener("click", async (event) => {
     setSaveStatus("Place additional parts on a source branch; authored outputs are regenerated rather than stable placement targets.");
     return;
   }
-  tool.object.updateMatrixWorld(true);
-  const localPoint = tool.object.worldToLocal(hit.point.clone());
   const axis = end.position.clone().sub(start.position);
   const axisLengthSq = axis.lengthSq();
   if (axisLengthSq < 1e-10) {
@@ -4861,6 +4979,10 @@ canvas.addEventListener("click", async (event) => {
   const source = placementModule.createProcPlantOrganPlacementTarget(genome.id, state.seed, target.graph);
   const key = currentPruneKey();
   let placementPackage = organPlacementPackages.get(key);
+  if (placementPackage?.contract === "procplants.weber-penn-organ-placement-overrides") {
+    setSaveStatus("Undo placements for the prior plant first.");
+    return;
+  }
   if (placementPackage && (
     placementPackage.target.genomeId !== source.genomeId
     || placementPackage.target.seed !== source.seed
@@ -4882,29 +5004,6 @@ canvas.addEventListener("click", async (event) => {
       return;
     }
   }
-  const placementScale: Record<ProcPlantPlaceableOrganKind, number> = {
-    leaf: 1,
-    flower: 1,
-    fruit: 0.16,
-    berry: 0.14,
-    cone: 0.22,
-    thorn: 0.18,
-    aerialRoot: 0.38,
-    coniferSpray: 0.72,
-    fernFrond: 0.86,
-    palmFrond: 1,
-    mossTuft: 0.28,
-    branch: 0.48,
-    knot: 0.18,
-    decal: 0.18,
-  };
-  const placementColors: Partial<Record<ProcPlantPlaceableOrganKind, { color: number; secondaryColor?: number }>> = {
-    fruit: { color: 0xc7472f, secondaryColor: 0x6e281c },
-    berry: { color: 0x92324d, secondaryColor: 0x4b1728 },
-    cone: { color: 0x76502d, secondaryColor: 0x3f2a19 },
-    thorn: { color: 0x6f5a3c, secondaryColor: 0x3d2f20 },
-    aerialRoot: { color: 0x6a5438, secondaryColor: 0x3b3024 },
-  };
   const appended = placementModule.appendProcPlantOrganPlacement(placementPackage, {
     kind,
     segmentId: segment.id,
@@ -4980,8 +5079,9 @@ undoPlacementButton.addEventListener("click", async () => {
   const key = currentPruneKey();
   const placementPackage = organPlacementPackages.get(key);
   if (!placementPackage?.operations.length || regenerationBusy) return;
-  const { undoLastProcPlantOrganPlacement } = await loadProcPlantOrganPlacement();
-  const next = undoLastProcPlantOrganPlacement(placementPackage);
+  const next = placementPackage.contract === "procplants.weber-penn-organ-placement-overrides"
+    ? (await loadProcPlantWeberPennOrganPlacement()).undoLastProcPlantWeberPennOrganPlacement(placementPackage)
+    : (await loadProcPlantOrganPlacement()).undoLastProcPlantOrganPlacement(placementPackage);
   if (next.operations.length === 0) organPlacementPackages.delete(key);
   else organPlacementPackages.set(key, next);
   syncPlacementButtons();
@@ -5729,6 +5829,14 @@ exportGlbButton.addEventListener("click", async () => {
               weberPennTrimOperations: heroLodState.weberPennTrim.trimAudit.operations.length,
               weberPennTrimRemovedStems: heroLodState.weberPennTrim.trimAudit.removedStemIds.length,
               weberPennTrimRemovedLeaves: heroLodState.weberPennTrim.trimAudit.removedLeafIds.length,
+            }
+          : {}),
+        ...(heroLodState.weberPennTrim?.placementAudit
+          ? {
+              weberPennOrganPlacementContract: "procplants.weber-penn-organ-placement-overrides",
+              weberPennOrganPlacementStatus: heroLodState.weberPennTrim.placementAudit.status,
+              weberPennOrganPlacementSignature: heroLodState.weberPennTrim.placementAudit.sourceTopologySignature,
+              weberPennOrganPlacementApplied: heroLodState.weberPennTrim.placementAudit.appliedOperationIds.length,
             }
           : {}),
       },

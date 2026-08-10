@@ -79,5 +79,6 @@ export * from "./procplant-visibility-clusters";
 export * from "./procplant-webgpu-visibility";
 export * from "./procplant-three-visibility-lod-adapter";
 export * from "./procplant-weber-penn-trim";
+export * from "./procplant-weber-penn-organ-placement";
 export * from "./procplant-wind";
 export * from "./tellus-export";

@@ -43,6 +43,7 @@ export {
 export * from "./procplant-chain-tube-overrides";
 export * from "./procplant-spline-crown";
 export * from "./procplant-production-dag";
+export * from "./procplant-weber-penn-organ-placement";
 export * from "./plant-readiness";
 export * from "./plant-variants";
 export * from "./procplant-organ-variants";
