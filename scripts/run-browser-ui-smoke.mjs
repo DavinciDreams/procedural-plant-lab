@@ -167,24 +167,65 @@ try {
       primary.dispatchEvent(new Event('change', { bubbles: true }));
       await waitForIdle();
       const makeHeroGlb = () => {
-        const binary = new Uint8Array(44);
+        const textureCanvas = document.createElement('canvas');
+        textureCanvas.width = textureCanvas.height = 2;
+        const textureContext = textureCanvas.getContext('2d');
+        textureContext.fillStyle = '#765432';
+        textureContext.fillRect(0, 0, 2, 2);
+        const encodedImage = type => Uint8Array.from(atob(textureCanvas.toDataURL(type).split(',')[1]), value => value.charCodeAt(0));
+        const images = [encodedImage('image/png'), encodedImage('image/jpeg'), encodedImage('image/webp')];
+        const imageOffsets = [];
+        let binaryLength = 68;
+        for (const image of images) {
+          binaryLength = Math.ceil(binaryLength / 4) * 4;
+          imageOffsets.push(binaryLength);
+          binaryLength += image.length;
+        }
+        const binary = new Uint8Array(Math.ceil(binaryLength / 4) * 4);
         new Float32Array(binary.buffer, 0, 9).set([-0.5, 0, 0, 0.5, 0, 0, 0, 2, 0.2]);
         new Uint16Array(binary.buffer, 36, 3).set([0, 1, 2]);
+        new Float32Array(binary.buffer, 44, 6).set([0, 0, 1, 0, 0.5, 1]);
+        images.forEach((image, index) => binary.set(image, imageOffsets[index]));
         const json = {
           asset: { version: '2.0', generator: 'procplants browser smoke' },
+          extensionsUsed: ['KHR_texture_transform', 'EXT_texture_webp'],
           scene: 0,
           scenes: [{ nodes: [0] }],
           nodes: [{ name: 'hero-trunk', mesh: 0 }],
-          meshes: [{ primitives: [{ attributes: { POSITION: 0 }, indices: 1, mode: 4 }] }],
+          meshes: [{ primitives: [{ attributes: { POSITION: 0, TEXCOORD_0: 2 }, indices: 1, material: 0, mode: 4 }] }],
           accessors: [
             { bufferView: 0, componentType: 5126, count: 3, type: 'VEC3', min: [-0.5, 0, 0], max: [0.5, 2, 0.2] },
             { bufferView: 1, componentType: 5123, count: 3, type: 'SCALAR' },
+            { bufferView: 2, componentType: 5126, count: 3, type: 'VEC2' },
           ],
           bufferViews: [
             { buffer: 0, byteOffset: 0, byteLength: 36, target: 34962 },
             { buffer: 0, byteOffset: 36, byteLength: 6, target: 34963 },
+            { buffer: 0, byteOffset: 44, byteLength: 24, target: 34962 },
+            ...images.map((image, index) => ({ buffer: 0, byteOffset: imageOffsets[index], byteLength: image.length })),
           ],
-          buffers: [{ byteLength: 44 }],
+          buffers: [{ byteLength: binary.length }],
+          images: [
+            { name: 'smoke-bark-color', bufferView: 3, mimeType: 'image/png' },
+            { name: 'smoke-bark-normal', bufferView: 4, mimeType: 'image/jpeg' },
+            { name: 'smoke-bark-emissive', bufferView: 5, mimeType: 'image/webp' },
+          ],
+          samplers: [{ magFilter: 9728, minFilter: 9985, wrapS: 33071, wrapT: 33648 }],
+          textures: [
+            { source: 0, sampler: 0 },
+            { source: 1, sampler: 0 },
+            { source: 0, sampler: 0, extensions: { EXT_texture_webp: { source: 2 } } },
+          ],
+          materials: [{
+            name: 'smoke-source-bark',
+            pbrMetallicRoughness: {
+              baseColorFactor: [0.42, 0.31, 0.2, 1], metallicFactor: 0.05, roughnessFactor: 0.78,
+              baseColorTexture: { index: 0, extensions: { KHR_texture_transform: { offset: [0.1, 0.2], scale: [2, 3] } } },
+            },
+            normalTexture: { index: 1, scale: 0.65 },
+            emissiveFactor: [0.02, 0.01, 0.005],
+            emissiveTexture: { index: 2 },
+          }],
         };
         const encoded = new TextEncoder().encode(JSON.stringify(json));
         const jsonLength = Math.ceil(encoded.length / 4) * 4;
@@ -220,12 +261,18 @@ try {
       const heroImportAttachmentTriangles = Number(document.querySelector('#app')?.dataset.heroImportAttachmentTriangles ?? 0);
       const heroImportBranchInstances = Number(document.querySelector('#app')?.dataset.heroImportBranchInstances ?? 0);
       const heroImportAccessoryInstances = Number(document.querySelector('#app')?.dataset.heroImportAccessoryInstances ?? 0);
+      const heroImportSourceMaterial = document.querySelector('#app')?.dataset.heroImportSourceMaterial ?? null;
+      const heroImportSourceMaterialTextures = Number(document.querySelector('#app')?.dataset.heroImportSourceMaterialTextures ?? 0);
+      const heroImportSourceMaterialImages = Number(document.querySelector('#app')?.dataset.heroImportSourceMaterialImages ?? 0);
       const heroImportStatus = document.querySelector('#heroImportStatus')?.textContent ?? '';
       const heroImportHashBeforeEdit = document.querySelector('#app')?.dataset.heroImportHash ?? '';
       document.querySelector('#exportGlb').click();
       for (let i = 0; i < 240 && !/instanced branch/.test(document.querySelector('#saveStatus')?.textContent ?? ''); i++) await wait(100);
       const heroImportExportStatus = document.querySelector('#saveStatus')?.textContent ?? '';
       const heroImportExportBytes = Number(document.querySelector('#app')?.dataset.heroImportLastExportBytes ?? 0);
+      const heroImportExportMaterials = Number(document.querySelector('#app')?.dataset.heroImportLastExportMaterials ?? 0);
+      const heroImportExportTextures = Number(document.querySelector('#app')?.dataset.heroImportLastExportTextures ?? 0);
+      const heroImportExportImages = Number(document.querySelector('#app')?.dataset.heroImportLastExportImages ?? 0);
       document.querySelector('#editHeroSpine').click();
       for (let i = 0; i < 120 && document.querySelector('#editHeroSpine')?.getAttribute('aria-pressed') !== 'true'; i++) await wait(100);
       const heroSpineEditing = document.querySelector('#editHeroSpine')?.getAttribute('aria-pressed') ?? null;
@@ -323,8 +370,14 @@ try {
         heroImportAttachmentTriangles,
         heroImportBranchInstances,
         heroImportAccessoryInstances,
+        heroImportSourceMaterial,
+        heroImportSourceMaterialTextures,
+        heroImportSourceMaterialImages,
         heroImportExportStatus,
         heroImportExportBytes,
+        heroImportExportMaterials,
+        heroImportExportTextures,
+        heroImportExportImages,
         heroImportStatus,
         heroSpineEditing,
         heroSpineAddEnabled,
@@ -390,6 +443,8 @@ try {
   assert.ok(result.lastGlbSurfaceGroups > 0);
   assert.equal(result.lastGlbMaterialAssignments, result.lastGlbSurfaceGroups,
     "lab GLB export must assign every exported bark/organ range to an explicit baked slot");
+  if (result.heroImportActive !== "true") console.error(`hero import diagnostic: ${JSON.stringify({ status: result.heroImportStatus, sourceMaterial: result.heroImportSourceMaterial })}`);
+  if (!result.heroImportAttachmentHash) console.error(`hero attachment diagnostic: ${JSON.stringify({ status: result.heroImportStatus, active: result.heroImportActive, attachments: result.heroImportAttachments, exports: [result.heroImportExportMaterials, result.heroImportExportTextures, result.heroImportExportImages] })}`);
   assert.equal(result.heroImportActive, "true");
   assert.equal(result.heroImportVertices, 3);
   assert.ok(result.heroImportAttachments > 0, "hero import must emit procedural attachment anchors");
@@ -400,9 +455,15 @@ try {
   assert.equal(result.heroImportAttachmentDraws, 2, "winterberry hero branches and berries must use two shared prototype draws");
   assert.ok(result.heroImportAttachmentVertices > 0);
   assert.ok(result.heroImportAttachmentTriangles > 0);
+  assert.equal(result.heroImportSourceMaterial, "true", "browser import must adopt the selected GLB source material");
+  assert.equal(result.heroImportSourceMaterialTextures, 3, "PNG color, JPEG normal, and WebP emissive bindings must decode in-browser");
+  assert.equal(result.heroImportSourceMaterialImages, 3);
   assert.ok(result.heroImportExportBytes > 0, "materialized imported hero content must survive real GLB export");
+  assert.ok(result.heroImportExportMaterials >= 2, "real exported hero GLB must retain source bark plus organ materials");
+  assert.ok(result.heroImportExportTextures >= 3, "real exported hero GLB must contain all adopted bark textures");
+  assert.ok(result.heroImportExportImages >= 3, "real exported hero GLB must embed all adopted bark images");
   assert.match(result.heroImportExportStatus, /instanced branch, leaf, and accessory anchors/);
-  assert.match(result.heroImportStatus, /bark UV, wind, and collars applied/);
+  assert.match(result.heroImportStatus, /smoke-source-bark source bark material with 3 texture bindings, UV0, wind, and collars applied/);
   assert.equal(result.heroSpineEditing, "true");
   assert.equal(result.heroSpineAddEnabled, true);
   assert.notEqual(result.heroImportHashAfterEdit, result.heroImportHashBeforeEdit, "manual spine edits must rebuild authored hero content");

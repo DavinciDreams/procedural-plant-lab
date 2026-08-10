@@ -2283,6 +2283,7 @@ const installHeroImportPreview = (authored: ProcPlantLabHeroPreview, fileName: s
     sourceContentHash: authored.sourceContentHash,
     contentHash: authored.contentHash,
     attachmentMaterialization: authored.attachmentMaterialization.audit,
+    sourceMaterial: authored.sourceMaterialAudit,
   };
   scene.add(authored.group);
   if (heroMesh) heroMesh.visible = false;
@@ -2297,6 +2298,9 @@ const installHeroImportPreview = (authored: ProcPlantLabHeroPreview, fileName: s
   app.dataset.heroImportAttachmentTriangles = String(authored.attachmentMaterialization.audit.materializedTriangles);
   app.dataset.heroImportBranchInstances = String(authored.attachmentMaterialization.audit.branchInstances);
   app.dataset.heroImportAccessoryInstances = String(authored.attachmentMaterialization.audit.accessoryInstances);
+  app.dataset.heroImportSourceMaterial = String(authored.sourceMaterialAudit.sourceMaterialApplied);
+  app.dataset.heroImportSourceMaterialTextures = String(authored.sourceMaterialAudit.textureBindings);
+  app.dataset.heroImportSourceMaterialImages = String(authored.sourceMaterialAudit.decodedImages);
   if (heroSpineEditor) {
     heroSpineEditor.setTarget(authored.trunk);
     heroSpineEditor.copyDisplayTransform(authored.group);
@@ -2329,7 +2333,13 @@ const disposeHeroImportPreview = () => {
   delete app.dataset.heroImportAttachmentTriangles;
   delete app.dataset.heroImportBranchInstances;
   delete app.dataset.heroImportAccessoryInstances;
+  delete app.dataset.heroImportSourceMaterial;
+  delete app.dataset.heroImportSourceMaterialTextures;
+  delete app.dataset.heroImportSourceMaterialImages;
   delete app.dataset.heroImportLastExportBytes;
+  delete app.dataset.heroImportLastExportMaterials;
+  delete app.dataset.heroImportLastExportTextures;
+  delete app.dataset.heroImportLastExportImages;
   syncHeroSpineButtons();
 };
 
@@ -3444,7 +3454,7 @@ const rebuildHeroImportFromEditor = async (nextState: ProcPlantHeroSpineEditorSt
       import("./procplant-lab-authoring-imports"),
       import("./procplant-hero-spine-editor"),
     ]);
-    const authored = createProcPlantLabHeroPreview(
+    const authored = await createProcPlantLabHeroPreview(
       source,
       fileName,
       selectedGenome(),
@@ -3527,7 +3537,7 @@ heroGlbFileInput.addEventListener("change", async () => {
     if (file.size > 64 * 1024 * 1024) throw new Error("Hero GLB exceeds the 64 MiB browser authoring limit.");
     const source = await file.arrayBuffer();
     const { createProcPlantLabHeroPreview } = await import("./procplant-lab-authoring-imports");
-    const authored = createProcPlantLabHeroPreview(
+    const authored = await createProcPlantLabHeroPreview(
       source,
       file.name,
       selectedGenome(),
@@ -3541,7 +3551,10 @@ heroGlbFileInput.addEventListener("change", async () => {
     heroImportFileName = file.name;
     heroSpineEditorState = null;
     installHeroImportPreview(authored, file.name);
-    heroImportStatus.textContent = `${file.name}: ${authored.audit.vertexCount.toLocaleString()} vertices, ${authored.audit.spineSamples} spine samples, ${authored.audit.attachmentsEmitted} procedural anchors; bark UV, wind, and collars applied.`;
+    const materialSummary = authored.sourceMaterialAudit.sourceMaterialApplied
+      ? `${authored.sourceMaterialAudit.materialName} source bark material with ${authored.sourceMaterialAudit.textureBindings} texture binding${authored.sourceMaterialAudit.textureBindings === 1 ? "" : "s"}`
+      : "fallback bark material";
+    heroImportStatus.textContent = `${file.name}: ${authored.audit.vertexCount.toLocaleString()} vertices, ${authored.audit.spineSamples} spine samples, ${authored.audit.attachmentsEmitted} procedural anchors; ${materialSummary}, UV0, wind, and collars applied.`;
   } catch (error) {
     console.error("[procplants] Hero GLB import failed.", error);
     heroImportStatus.textContent = `Hero import failed: ${error instanceof Error ? error.message : String(error)}`;
@@ -4010,12 +4023,15 @@ exportGlbButton.addEventListener("click", async () => {
   try {
     if (heroImportPreview) {
       const { downloadProcPlantLabHeroPreview } = await import("./procplant-lab-authoring-imports");
-      const exportedBytes = await downloadProcPlantLabHeroPreview(
+      const exported = await downloadProcPlantLabHeroPreview(
         heroImportPreview,
         heroImportAudit,
         app.dataset.heroImportHash ?? String(state.seed),
       );
-      app.dataset.heroImportLastExportBytes = String(exportedBytes);
+      app.dataset.heroImportLastExportBytes = String(exported.byteLength);
+      app.dataset.heroImportLastExportMaterials = String(exported.materials);
+      app.dataset.heroImportLastExportTextures = String(exported.textures);
+      app.dataset.heroImportLastExportImages = String(exported.images);
       setSaveStatus("Imported hero GLB exported with fitted spine, bark UV, wind, collars, and instanced branch, leaf, and accessory anchors.");
       return;
     }

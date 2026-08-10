@@ -16,6 +16,10 @@ import {
 } from "./procplant-attachment-materializer";
 import { importProcPlantHeroGlb } from "./procplant-hero-glb-import";
 import {
+  prepareProcPlantHeroSourceMaterial,
+  type ProcPlantHeroSourceMaterialAudit,
+} from "./procplant-hero-source-material";
+import {
   authorProcPlantHeroSpine,
   createProcPlantHeroSpineGeometry,
   type ProcPlantHeroSpineAuthoringAudit,
@@ -39,6 +43,7 @@ export interface ProcPlantLabHeroPreview {
   leafMatrices: THREE.Matrix4[];
   leafSways: number[];
   attachmentMaterialization: ProcPlantAttachmentMaterialization;
+  sourceMaterialAudit: ProcPlantHeroSourceMaterialAudit;
   spine: ProcPlantMeshSpine;
 }
 
@@ -69,14 +74,14 @@ const createProcPlantHeroAccessoryPrototype = (kind: ProcPlantAccessoryKind) => 
   return geometry;
 };
 
-export const createProcPlantLabHeroPreview = (
+export const createProcPlantLabHeroPreview = async (
   source: ArrayBuffer,
   fileName: string,
   genome: ProcPlantGenome,
   seed: number,
   organMaterial: THREE.Material,
   manualSpine?: ProcPlantMeshSpine,
-): ProcPlantLabHeroPreview => {
+): Promise<ProcPlantLabHeroPreview> => {
   if (source.byteLength > 64 * 1024 * 1024) throw new Error("Hero GLB exceeds the 64 MiB browser authoring limit.");
   const accessoryGroups = (genome.accessoryOrgans ?? []).map((gene, index) => ({
     gene,
@@ -118,6 +123,8 @@ export const createProcPlantLabHeroPreview = (
     attachmentOptions: { seed, maxCandidatesPerAttachment: 48 },
     collars: { enabled: true, includeBranchAttachments: true, strength: 0.32 },
   });
+  const sourceMaterial = await prepareProcPlantHeroSourceMaterial(imported, selected.materialIndex);
+  try {
   const group = new THREE.Group();
   group.name = `procplant-imported-hero-${authored.contentHash}`;
   group.userData.procplantHeroSpine = {
@@ -128,7 +135,7 @@ export const createProcPlantLabHeroPreview = (
     audit: authored.audit,
   };
   const trunkGeometry = createProcPlantHeroSpineGeometry(authored);
-  const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x72523b, roughness: 0.86, metalness: 0 });
+  const trunkMaterial = sourceMaterial.material;
   const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
   trunk.name = "procplant-imported-hero-trunk";
   trunk.castShadow = true;
@@ -226,8 +233,13 @@ export const createProcPlantLabHeroPreview = (
     leafMatrices,
     leafSways,
     attachmentMaterialization,
+    sourceMaterialAudit: sourceMaterial.audit,
     spine: authored.spine,
   };
+  } catch (error) {
+    sourceMaterial.dispose();
+    throw error;
+  }
 };
 
 export const bakeProcPlantLabMaterials = (
@@ -384,13 +396,29 @@ export const downloadProcPlantLabHeroPreview = async (
   audit: Record<string, unknown> | null,
   contentHash: string,
 ) => {
-  const exportScene = createProcPlantLabHeroExportScene(preview, audit);
-  const glb = await exportProcPlantScenesGlb(exportScene);
+  const glb = await exportProcPlantLabHeroPreview(preview, audit);
   const url = URL.createObjectURL(new Blob([glb], { type: "model/gltf-binary" }));
   const link = document.createElement("a");
   link.href = url;
   link.download = `procplant-imported-hero-${contentHash}.glb`;
   link.click();
   URL.revokeObjectURL(url);
-  return glb.byteLength;
+  const view = new DataView(glb);
+  const jsonLength = view.getUint32(12, true);
+  const json = JSON.parse(new TextDecoder().decode(new Uint8Array(glb, 20, jsonLength)).trimEnd()) as {
+    materials?: unknown[];
+    textures?: unknown[];
+    images?: unknown[];
+  };
+  return {
+    byteLength: glb.byteLength,
+    materials: json.materials?.length ?? 0,
+    textures: json.textures?.length ?? 0,
+    images: json.images?.length ?? 0,
+  };
 };
+
+export const exportProcPlantLabHeroPreview = async (
+  preview: THREE.Group,
+  audit: Record<string, unknown> | null,
+) => exportProcPlantScenesGlb(createProcPlantLabHeroExportScene(preview, audit));
