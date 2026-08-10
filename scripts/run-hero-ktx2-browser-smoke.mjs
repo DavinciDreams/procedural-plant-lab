@@ -161,6 +161,20 @@ try {
     socket.send(JSON.stringify({ id, method, params }));
   });
   await command("Runtime.enable");
+  await command("Page.enable");
+  let appReady = false;
+  for (let attempt = 0; attempt < 120; attempt++) {
+    const probe = await command("Runtime.evaluate", {
+      expression: "document.readyState === 'complete' && Boolean(document.querySelector('#app'))",
+      returnByValue: true,
+    });
+    if (probe.result?.result?.value === true) {
+      appReady = true;
+      break;
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+  }
+  assert.ok(appReady, "headless browser app context must finish navigation before KTX2 import");
   const expression = `
     (async () => {
       const wait = (ms) => new Promise((resolveWait) => setTimeout(resolveWait, ms));
@@ -192,6 +206,7 @@ try {
   const response = await command("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
   if (response.result?.exceptionDetails) throw new Error(response.result.exceptionDetails.text);
   const result = response.result?.result?.value;
+  if (!result) throw new Error(`KTX2 browser evaluation returned no value: ${JSON.stringify(response)}`);
   assert.equal(result.active, "true", `KTX2 hero import failed: ${result.status}`);
   assert.equal(result.decoded, 1);
   assert.equal(result.decoder, "three-ktx2-loader+basis");
