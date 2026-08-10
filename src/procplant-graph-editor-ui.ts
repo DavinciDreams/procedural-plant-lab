@@ -1,6 +1,7 @@
-import type { ProcPlantGenome } from "./procplants";
+import { defaultPlantEnvironment, type ProcPlantEnvironment, type ProcPlantGenome } from "./procplants";
 import * as authoringGraphModule from "./procplant-authoring-graph";
 import * as generatorGraphModule from "./procplant-generator-graph";
+import * as productionDagModule from "./procplant-production-dag";
 import type { ProcPlantGeneratorGraphOperation } from "./procplant-generator-graph";
 
 export { authoringGraphModule, generatorGraphModule };
@@ -10,6 +11,7 @@ export interface ProcPlantGraphEditorState {
   graph: ReturnType<typeof authoringGraphModule.createProcPlantAuthoringGraph>;
   preview: ReturnType<typeof generatorGraphModule.summarizeProcPlantGeneratorGraph>;
   applyAudit: ReturnType<typeof authoringGraphModule.applyProcPlantAuthoringGraphToGenome>;
+  production: ReturnType<typeof productionDagModule.compileProcPlantProductionDag> | null;
 }
 
 export interface ProcPlantGraphEditorRenderOptions {
@@ -25,6 +27,7 @@ export const compileProcPlantGraphEditorState = (
   sourceGenome: ProcPlantGenome,
   seed: number,
   operations: readonly ProcPlantGeneratorGraphOperation[],
+  environment: ProcPlantEnvironment = defaultPlantEnvironment(),
 ): ProcPlantGraphEditorState => {
   const canonicalGraph = authoringGraphModule.createProcPlantAuthoringGraph(sourceGenome, seed);
   const graph = operations.length
@@ -35,6 +38,9 @@ export const compileProcPlantGraphEditorState = (
     graph,
     preview: generatorGraphModule.summarizeProcPlantGeneratorGraph(graph),
     applyAudit: authoringGraphModule.applyProcPlantAuthoringGraphToGenome(sourceGenome, graph, seed),
+    production: operations.length > 0
+      ? productionDagModule.compileProcPlantProductionDag(sourceGenome, graph, environment, { canonicalSeed: seed })
+      : null,
   };
 };
 
@@ -53,7 +59,7 @@ const operationMatches = (
 };
 
 export const renderProcPlantGraphEditor = (options: ProcPlantGraphEditorRenderOptions) => {
-  const { canonicalGraph, graph, preview, applyAudit } = compileProcPlantGraphEditorState(
+  const { canonicalGraph, graph, preview, applyAudit, production } = compileProcPlantGraphEditorState(
     options.sourceGenome,
     options.seed,
     options.operations,
@@ -62,10 +68,11 @@ export const renderProcPlantGraphEditor = (options: ProcPlantGraphEditorRenderOp
   summary.className = "graph-summary";
   summary.textContent = `${preview.enabledNodeCount}/${preview.nodeCount} stages \u00b7 ${preview.dependencyCount} dependencies \u00b7 ${preview.estimatedOperationCount.toLocaleString()} estimated operations \u00b7 ${preview.hash}`;
   summary.textContent += ` \u00b7 ${applyAudit.applied.length} compiler controls applied \u00b7 ${applyAudit.unsupported.length} preview-only changes`;
+  if (production) summary.textContent += ` \u00b7 ${production.records.filter((record) => record.status === "executed").length} typed artifacts`;
 
   const editorNote = document.createElement("p");
   editorNote.className = "graph-editor-note";
-  editorNote.textContent = "All nine canonical stages run through built-in handlers. Supported foliage wiring consumes architecture/branch outputs; stage seed overrides project into the generator's single global seed. Controls without a monolithic compiler seam remain explicitly preview-only in the audit.";
+  editorNote.textContent = "Edited standard graph backends compile through typed stage artifacts. Stage seeds drive independent architecture, branch, foliage, and reproductive streams; compatible rewires and parent scopes select real dependency and stem outputs. Specialized backends and invalid artifact edges fail closed.";
   const editorActions = document.createElement("div");
   editorActions.className = "graph-editor-actions";
   const resetGraphButton = document.createElement("button");
@@ -390,5 +397,7 @@ export const renderProcPlantGraphEditor = (options: ProcPlantGraphEditorRenderOp
 
   options.container.replaceChildren(summary, editorNote, editorActions, editorStatus, list);
   options.container.dataset.hash = preview.hash;
-  return { graph, preview, applyAudit };
+  options.container.dataset.productionPath = production?.path ?? "legacy-canonical";
+  options.container.dataset.productionArtifacts = String(production?.records.filter((record) => record.status === "executed").length ?? 0);
+  return { graph, preview, applyAudit, production };
 };

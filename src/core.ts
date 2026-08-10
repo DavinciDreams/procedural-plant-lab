@@ -16,10 +16,12 @@ export {
   procPlantPresetIds,
   hybridizePlantGenomes,
   buildProcPlantGraph,
+  buildProcPlantGraphIr,
   buildProcPlantInstancedParts,
   buildProcPlantTemplateFromGraph,
   buildProcPlantTemplate,
   compileProcPlantLods,
+  compileProcPlantLodsFromTemplate,
   procPlantEcologyProfiles,
   scoreProcPlantForEcology,
   resolveProcPlantCommunity,
@@ -27,6 +29,7 @@ export {
   estimateProcPlantLods,
   buildProcPlantRuntimePackage,
 } from "./procplants";
+export * from "./procplant-production-dag";
 export * from "./plant-readiness";
 export * from "./plant-variants";
 export * from "./procplant-organ-variants";
