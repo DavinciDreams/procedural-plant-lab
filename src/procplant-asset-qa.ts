@@ -47,6 +47,25 @@ export interface ProcPlantAssetQaProfile {
   maxEstimatedOverdraw: number;
   requireUvs: boolean;
   requireTangents: boolean;
+  exportContract: {
+    texture: {
+      maxDimension: number;
+      packing: "separate-pbr" | "base-orm-normal" | "rgba-atlas";
+      mipmaps: boolean;
+      compression: "png" | "ktx2-etc1s-uastc";
+    };
+    /** Default-scale generator distances; scaled plant packages retain their authored distances. */
+    lodDistances: readonly [number, number, number, number];
+    windPacking: "explicit-sway-phase" | "vertex-color-rgb" | "none";
+    billboard: {
+      enabled: boolean;
+      views: number;
+      channels: readonly ("color" | "normal" | "depth")[];
+      maxAtlasDimension: number;
+    };
+    collision: "none" | "bounds-box" | "trunk-capsule";
+    metadataSchema: "procplants.glb-export.v1" | "procplants.runtime-package.v1";
+  };
 }
 
 export const PROCPLANT_ASSET_QA_PROFILES: Readonly<Record<ProcPlantAssetQaProfileId, ProcPlantAssetQaProfile>> = {
@@ -57,6 +76,12 @@ export const PROCPLANT_ASSET_QA_PROFILES: Readonly<Record<ProcPlantAssetQaProfil
     maxEstimatedOverdraw: 2.5,
     requireUvs: false,
     requireTangents: false,
+    exportContract: {
+      texture: { maxDimension: 2048, packing: "base-orm-normal", mipmaps: true, compression: "ktx2-etc1s-uastc" },
+      lodDistances: [0, 18, 42, 86], windPacking: "explicit-sway-phase",
+      billboard: { enabled: true, views: 16, channels: ["color", "normal", "depth"], maxAtlasDimension: 2048 },
+      collision: "trunk-capsule", metadataSchema: "procplants.runtime-package.v1",
+    },
   },
   "threejs-glb": {
     id: "threejs-glb",
@@ -65,6 +90,12 @@ export const PROCPLANT_ASSET_QA_PROFILES: Readonly<Record<ProcPlantAssetQaProfil
     maxEstimatedOverdraw: 3,
     requireUvs: false,
     requireTangents: false,
+    exportContract: {
+      texture: { maxDimension: 4096, packing: "separate-pbr", mipmaps: true, compression: "ktx2-etc1s-uastc" },
+      lodDistances: [0, 18, 42, 86], windPacking: "explicit-sway-phase",
+      billboard: { enabled: true, views: 16, channels: ["color", "normal", "depth"], maxAtlasDimension: 4096 },
+      collision: "bounds-box", metadataSchema: "procplants.glb-export.v1",
+    },
   },
   "unity-urp": {
     id: "unity-urp",
@@ -73,6 +104,12 @@ export const PROCPLANT_ASSET_QA_PROFILES: Readonly<Record<ProcPlantAssetQaProfil
     maxEstimatedOverdraw: 2.5,
     requireUvs: true,
     requireTangents: true,
+    exportContract: {
+      texture: { maxDimension: 4096, packing: "base-orm-normal", mipmaps: true, compression: "ktx2-etc1s-uastc" },
+      lodDistances: [0, 18, 42, 86], windPacking: "vertex-color-rgb",
+      billboard: { enabled: true, views: 16, channels: ["color", "normal"], maxAtlasDimension: 4096 },
+      collision: "trunk-capsule", metadataSchema: "procplants.glb-export.v1",
+    },
   },
   "unreal-foliage": {
     id: "unreal-foliage",
@@ -81,6 +118,12 @@ export const PROCPLANT_ASSET_QA_PROFILES: Readonly<Record<ProcPlantAssetQaProfil
     maxEstimatedOverdraw: 2.5,
     requireUvs: true,
     requireTangents: true,
+    exportContract: {
+      texture: { maxDimension: 4096, packing: "base-orm-normal", mipmaps: true, compression: "ktx2-etc1s-uastc" },
+      lodDistances: [0, 18, 42, 86], windPacking: "vertex-color-rgb",
+      billboard: { enabled: true, views: 16, channels: ["color", "normal"], maxAtlasDimension: 4096 },
+      collision: "trunk-capsule", metadataSchema: "procplants.glb-export.v1",
+    },
   },
   "cinema-hero": {
     id: "cinema-hero",
@@ -89,6 +132,12 @@ export const PROCPLANT_ASSET_QA_PROFILES: Readonly<Record<ProcPlantAssetQaProfil
     maxEstimatedOverdraw: 4,
     requireUvs: true,
     requireTangents: true,
+    exportContract: {
+      texture: { maxDimension: 8192, packing: "separate-pbr", mipmaps: true, compression: "png" },
+      lodDistances: [0, 24, 60, 120], windPacking: "explicit-sway-phase",
+      billboard: { enabled: false, views: 0, channels: [], maxAtlasDimension: 0 },
+      collision: "none", metadataSchema: "procplants.glb-export.v1",
+    },
   },
   "mobile-low-poly": {
     id: "mobile-low-poly",
@@ -97,6 +146,12 @@ export const PROCPLANT_ASSET_QA_PROFILES: Readonly<Record<ProcPlantAssetQaProfil
     maxEstimatedOverdraw: 1.9,
     requireUvs: false,
     requireTangents: false,
+    exportContract: {
+      texture: { maxDimension: 1024, packing: "rgba-atlas", mipmaps: true, compression: "ktx2-etc1s-uastc" },
+      lodDistances: [0, 12, 28, 54], windPacking: "explicit-sway-phase",
+      billboard: { enabled: true, views: 8, channels: ["color"], maxAtlasDimension: 1024 },
+      collision: "bounds-box", metadataSchema: "procplants.runtime-package.v1",
+    },
   },
   "billboard-only": {
     id: "billboard-only",
@@ -105,11 +160,17 @@ export const PROCPLANT_ASSET_QA_PROFILES: Readonly<Record<ProcPlantAssetQaProfil
     maxEstimatedOverdraw: 1.6,
     requireUvs: true,
     requireTangents: false,
+    exportContract: {
+      texture: { maxDimension: 2048, packing: "rgba-atlas", mipmaps: true, compression: "ktx2-etc1s-uastc" },
+      lodDistances: [0, 0, 0, 0], windPacking: "none",
+      billboard: { enabled: true, views: 16, channels: ["color", "normal", "depth"], maxAtlasDimension: 2048 },
+      collision: "none", metadataSchema: "procplants.glb-export.v1",
+    },
   },
 };
 
 export interface ProcPlantAssetQaReport {
-  version: 1;
+  version: 2;
   profile: ProcPlantAssetQaProfileId;
   ready: boolean;
   score: number;
@@ -136,6 +197,7 @@ export interface ProcPlantAssetQaReport {
     branchLeaf: number;
     method: "caller-supplied";
   };
+  exportContract: ProcPlantAssetQaProfile["exportContract"];
   warnings: string[];
 }
 
@@ -206,7 +268,7 @@ export const inspectProcPlantAssetQa = (
   score = Math.max(0, score);
 
   return {
-    version: 1,
+    version: 2,
     profile: profileId,
     ready: structural.ready && warnings.length === 0 && score >= 80,
     score,
@@ -226,6 +288,7 @@ export const inspectProcPlantAssetQa = (
       branchLeaf: intersections,
       method: "caller-supplied",
     },
+    exportContract: profile.exportContract,
     warnings,
   };
 };
