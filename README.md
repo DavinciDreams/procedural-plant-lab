@@ -196,6 +196,7 @@ npm run test:tellus-contract
 - `src/procplant-dense-impostor-pool.ts` batches dense static billboard placements into deterministic atlas-view buckets.
 - `src/procplant-generator-graph.ts` defines deterministic typed generator DAGs and serializable manual operations.
 - `src/procplant-authoring-graph.ts` derives a live nine-stage graph and preview from any authored genome.
+- `src/procplant-production-dag.ts` executes typed artifacts for ordinary graphs and a bounded non-clumped grass/generic-groundcover/standalone-fern/non-vine-moss family, while canonical bytes stay legacy-exact and unsupported specialized forms fail closed.
 - `src/procplant-rules.ts` applies safe environmental and authoring macro rules to allow-listed genome fields.
 - `src/procplant-guide-query.ts` samples primitive scene guides, obstacle clearance, and deterministic growth-tip steering.
 - `src/procplant-mesh-query.ts` builds bounded deterministic triangle BVHs for imported-mesh clearance and obstacle queries.

@@ -108,11 +108,15 @@ export const createProcPlantAuthoringGraph = (
         phyllotaxy: genome.phyllotaxy?.mode ?? "spiral",
         foliageKind: genome.moss
           ? "mossTuft"
-          : genome.habit === "conifer"
-            ? "coniferSpray"
-            : genome.habit === "palm"
+          : genome.habit === "grass" && genome.grass
+            ? "grassBlade"
+            : genome.habit === "fern" && genome.fern && !genome.groundcover
               ? "palmFrond"
-              : "leaf",
+              : genome.habit === "conifer"
+                ? "coniferSpray"
+                : genome.habit === "palm"
+                  ? "palmFrond"
+                  : "leaf",
       },
     },
     {
@@ -120,10 +124,10 @@ export const createProcPlantAuthoringGraph = (
       label: "Flowers and accessories",
       stage: "reproductive",
       enabled: reproductiveCount > 0,
-      dependsOn: [ids.architecture, ids.branching],
+      dependsOn: [ids.architecture, ids.branching, ids.foliage],
       count: reproductiveCount,
       placement: { mode: "tips", density: genome.groundcover?.flowerRate ?? 1 },
-      parentScope: { mode: "stages", stages: ["architecture", "branching"] },
+      parentScope: { mode: "stages", stages: ["architecture", "branching", "foliage"] },
       parameters: {
         flower: Boolean(genome.flower),
         accessories: (genome.accessoryOrgans ?? []).map((organ) => organ.kind),
@@ -507,7 +511,7 @@ const AUTHORING_DEPENDENCY_STAGES: Record<ProcPlantGeneratorNode["stage"], Reado
   architecture: new Set(["source"]),
   branching: new Set(["source", "architecture"]),
   foliage: new Set(["source", "architecture", "branching"]),
-  reproductive: new Set(["source", "architecture", "branching"]),
+  reproductive: new Set(["source", "architecture", "branching", "foliage"]),
   deformation: new Set(["source", "architecture", "branching", "foliage"]),
   material: new Set(["source", "foliage", "reproductive"]),
   lod: new Set(["deformation", "material"]),
