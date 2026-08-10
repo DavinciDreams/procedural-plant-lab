@@ -112,7 +112,7 @@ try {
       for (let i = 0; i < 100 && (!document.querySelector('#inspectGraph') || document.querySelector('#inspectGraph').disabled); i++) await wait(100);
       const initialLazyAuthoringResources = performance.getEntriesByType('resource')
         .map((entry) => entry.name.split('/').at(-1) ?? entry.name)
-        .filter((name) => /procplant-(?:graph-editor-ui|lab-authoring-imports|three-geometry|three-material-adapter|rules|contour-editor-ui|crown-volume-tool)-/.test(name));
+        .filter((name) => /procplant-(?:graph-editor-ui|material-graph-editor-ui|lab-authoring-imports|three-geometry|three-material-adapter|rules|contour-editor-ui|crown-volume-tool)-/.test(name));
       document.querySelector('#inspectGraph').click();
       for (let i = 0; i < 100 && !document.querySelector('.graph-node-editor'); i++) await wait(100);
       const row = [...document.querySelectorAll('.graph-node-list > li')]
@@ -145,11 +145,34 @@ try {
       primary.dispatchEvent(new Event('change', { bubbles: true }));
       await waitForIdle();
       for (let i = 0; i < 120 && document.querySelector('#app')?.dataset.heroLodPending !== 'false'; i++) await wait(100);
+      document.querySelector('#editMaterialGraph').click();
+      for (let i = 0; i < 120 && !document.querySelector('#materialGraphEditor .material-node-list'); i++) await wait(100);
+      const materialGraphBaselineHash = document.querySelector('#app')?.dataset.materialGraphHash ?? '';
+      const barkRoughLow = [...document.querySelectorAll('#materialGraphEditor .material-node-list > li')]
+        .find((entry) => entry.dataset.nodeId === 'barkRoughLow');
+      barkRoughLow.querySelector('.material-node').click();
+      const barkRoughInput = barkRoughLow.querySelector('.material-node-editor input[type=number]');
+      barkRoughInput.value = '0.2';
+      barkRoughInput.dispatchEvent(new Event('change', { bubbles: true }));
+      for (let i = 0; i < 120 && document.querySelector('#app')?.dataset.materialGraphChanged !== 'true'; i++) await wait(100);
+      for (let i = 0; i < 120 && !document.querySelector('#materialGraphEditor .graph-summary'); i++) await wait(100);
+      const materialGraphEditedHash = document.querySelector('#app')?.dataset.materialGraphHash ?? '';
+      const materialGraphSummary = document.querySelector('#materialGraphEditor .graph-summary')?.textContent ?? '';
+      const materialEditStatus = document.querySelector('#materialGraphEditor .graph-editor-status')?.textContent ?? '';
       document.querySelector('#bakeMaterial').click();
       for (let i = 0; i < 120 && !document.querySelector('#app')?.dataset.materialBakeHash; i++) await wait(100);
       for (let i = 0; i < 240 && document.querySelector('#app')?.dataset.materialLivePbr !== 'true'; i++) await wait(100);
       await waitForIdle();
+      const editedMaterialBakeHash = document.querySelector('#app')?.dataset.materialBakeHash ?? '';
+      const editedMaterialGraphFlag = document.querySelector('#app')?.dataset.materialBakeGraphChanged ?? null;
+      document.querySelector('#materialGraphEditor .graph-editor-actions button').click();
+      for (let i = 0; i < 120 && document.querySelector('#app')?.dataset.materialGraphHash !== materialGraphBaselineHash; i++) await wait(100);
+      document.querySelector('#bakeMaterial').click();
+      for (let i = 0; i < 240 && document.querySelector('#app')?.dataset.materialBakeHash === editedMaterialBakeHash; i++) await wait(100);
+      for (let i = 0; i < 240 && document.querySelector('#app')?.dataset.materialLivePbr !== 'true'; i++) await wait(100);
+      await waitForIdle();
       const materialBakeHash = document.querySelector('#app')?.dataset.materialBakeHash ?? '';
+      const undoneMaterialGraphFlag = document.querySelector('#app')?.dataset.materialBakeGraphChanged ?? null;
       const materialBakeReady = document.querySelector('#app')?.dataset.materialBakeReady ?? null;
       const materialBakeImages = Number(document.querySelector('#app')?.dataset.materialBakeImages ?? 0);
       const materialLivePbr = document.querySelector('#app')?.dataset.materialLivePbr ?? null;
@@ -333,10 +356,10 @@ try {
       for (let i = 0; i < 100 && document.querySelector('#app')?.dataset.crownFieldVolumeCount !== '0'; i++) await wait(100);
       const crownTrianglesRestored = Number(document.querySelector('#triangles').textContent.replaceAll(',', ''));
       return {
-        rows: document.querySelectorAll('.graph-node-list > li').length,
+        rows: document.querySelectorAll('#graphPreview .graph-node-list > li').length,
         before,
         after: Number(current.querySelector('.graph-node-editor input[type=number]').value),
-        summary: document.querySelector('.graph-summary')?.textContent ?? '',
+        summary: document.querySelector('#graphPreview .graph-summary')?.textContent ?? '',
         hash: document.querySelector('#graphPreview')?.dataset.hash ?? '',
         triangles: document.querySelector('#triangles')?.textContent ?? '',
         editContourButton: Boolean(document.querySelector('#editCutoutContour')),
@@ -349,6 +372,14 @@ try {
         visibilityPlacements,
         visibilityFrustumRejected,
         materialBakeHash,
+        materialGraphBaselineHash,
+        materialGraphEditedHash,
+        materialGraphSummary,
+        materialEditStatus,
+        editedMaterialBakeHash,
+        editedMaterialGraphFlag,
+        undoneMaterialGraphFlag,
+        materialGraphEditorLoaded: document.querySelector('#app')?.dataset.materialGraphEditorLoaded ?? null,
         materialBakeReady,
         materialBakeImages,
         materialLivePbr,
@@ -431,6 +462,16 @@ try {
   assert.ok(result.visibilityFrustumRejected >= 0 && result.visibilityFrustumRejected <= result.visibilityPlacements,
     "frustum rejection count must remain bounded by live placements");
   assert.match(result.materialBakeHash, /^fnv1a32:[0-9a-f]{8}$/);
+  assert.match(result.materialGraphBaselineHash, /^fnv1a32:[0-9a-f]{8}$/);
+  assert.match(result.materialGraphEditedHash, /^fnv1a32:[0-9a-f]{8}$/);
+  assert.notEqual(result.materialGraphEditedHash, result.materialGraphBaselineHash, "visual material edits must change the compiled graph hash");
+  assert.doesNotMatch(result.materialGraphSummary, /Â/);
+  assert.match(result.materialGraphSummary, /nodes \| 2 surfaces \|/);
+  assert.match(result.materialEditStatus, /barkRoughLow\.value updated/);
+  assert.notEqual(result.editedMaterialBakeHash, result.materialBakeHash, "undo and rebake must restore different generated material bytes");
+  assert.equal(result.editedMaterialGraphFlag, "true");
+  assert.equal(result.undoneMaterialGraphFlag, "false");
+  assert.equal(result.materialGraphEditorLoaded, "true");
   assert.equal(result.materialBakeReady, "true");
   assert.equal(result.materialBakeImages, 6, "two PBR surfaces must bake base-color, ORM, and normal resources");
   assert.equal(result.materialLivePbr, "true", "baked bark/organ materials must be adopted by the live generated plant");

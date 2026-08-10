@@ -44,6 +44,63 @@ const canonicalRecord = <T>(record: Readonly<Record<string, T>>) => Object.fromE
   Object.entries(record).sort(([left], [right]) => left.localeCompare(right)),
 ) as Record<string, T>;
 
+const dependenciesForEditorNode = (node: ProcPlantMaterialNode): string[] => node.kind === "multiply"
+  ? [node.a, node.b]
+  : node.kind === "mix"
+    ? [node.a, node.b, node.factor]
+    : node.kind === "one-minus" || node.kind === "clamp" || node.kind === "remap"
+      ? [node.input]
+      : [];
+
+const validateEditorGraph = (graph: ProcPlantMaterialGraph) => {
+  const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
+  const states = new Map<string, 0 | 1 | 2>();
+  const visit = (nodeId: string, path: string[]) => {
+    if (states.get(nodeId) === 1) throw new Error(`material graph cycle: ${[...path, nodeId].join(" -> ")}`);
+    if (states.get(nodeId) === 2) return;
+    const node = nodes.get(nodeId);
+    if (!node) return;
+    states.set(nodeId, 1);
+    for (const dependency of dependenciesForEditorNode(node)) visit(dependency, [...path, nodeId]);
+    states.set(nodeId, 2);
+  };
+  for (const nodeId of [...nodes.keys()].sort()) visit(nodeId, []);
+  const types = new Map<string, "scalar" | "color" | "normal">();
+  const resolveType = (nodeId: string): "scalar" | "color" | "normal" => {
+    const known = types.get(nodeId);
+    if (known) return known;
+    const node = nodes.get(nodeId);
+    if (!node) throw new Error(`material node references missing node ${nodeId}`);
+    let type: "scalar" | "color" | "normal";
+    if (node.kind === "scalar" || node.kind === "noise") type = "scalar";
+    else if (node.kind === "color") type = "color";
+    else if (node.kind === "texture-sample") type = node.channel === "rgb" ? "color" : node.channel === "normal" ? "normal" : "scalar";
+    else if (node.kind === "multiply") {
+      const left = resolveType(node.a);
+      const right = resolveType(node.b);
+      if (left === "normal" || right === "normal" || left !== right && left !== "scalar" && right !== "scalar") {
+        throw new Error(`${node.id} has incompatible multiply inputs ${left} and ${right}`);
+      }
+      type = left === "color" || right === "color" ? "color" : "scalar";
+    } else if (node.kind === "mix") {
+      const left = resolveType(node.a);
+      const right = resolveType(node.b);
+      const factor = resolveType(node.factor);
+      if (left !== right || left === "normal") throw new Error(`${node.id} mix inputs must have the same scalar or color type`);
+      if (factor !== "scalar") throw new Error(`${node.id} mix factor must be scalar`);
+      type = left;
+    } else {
+      const input = resolveType(node.input);
+      if (node.kind === "remap" && input !== "scalar") throw new Error(`${node.id} remap input must be scalar`);
+      if (input === "normal") throw new Error(`${node.id} cannot process normal values`);
+      type = input;
+    }
+    types.set(nodeId, type);
+    return type;
+  };
+  for (const nodeId of [...nodes.keys()].sort()) resolveType(nodeId);
+};
+
 /** Stable authoring JSON: declaration order cannot perturb exported bytes. */
 export const canonicalizeProcPlantMaterialGraph = (source: ProcPlantMaterialGraph): ProcPlantMaterialGraph => ({
   contract: source.contract,
@@ -75,7 +132,9 @@ const createState = (
 ): ProcPlantMaterialGraphEditorState => {
   const baselineCopy = clone(baseline);
   const graphCopy = clone(graph);
-  const baselineCompiled = compileProcPlantMaterialGraph(baselineCopy);
+  validateEditorGraph(baselineCopy);
+  validateEditorGraph(graphCopy);
+  compileProcPlantMaterialGraph(baselineCopy);
   const compiled = compileProcPlantMaterialGraph(graphCopy);
   return {
     contract: PROCPLANT_MATERIAL_GRAPH_EDITOR_CONTRACT,
@@ -86,7 +145,7 @@ const createState = (
     undoStack: undoStack.map(clone),
     redoStack: redoStack.map(clone),
     revision,
-    changed: baselineCompiled.contentHash !== compiled.contentHash,
+    changed: JSON.stringify(canonicalizeProcPlantMaterialGraph(baselineCopy)) !== JSON.stringify(canonicalizeProcPlantMaterialGraph(graphCopy)),
   };
 };
 
@@ -102,8 +161,11 @@ export const commitProcPlantMaterialGraphEditor = (
 ): ProcPlantMaterialGraphEditorResult => {
   try {
     const maxHistory = integer(options.maxHistory ?? PROCPLANT_MATERIAL_GRAPH_EDITOR_MAX_HISTORY, 1, 256, "maxHistory");
-    const nextCompiled = compileProcPlantMaterialGraph(nextGraph);
-    if (nextCompiled.contentHash === state.compiled.contentHash) return { ok: true, state };
+    validateEditorGraph(nextGraph);
+    compileProcPlantMaterialGraph(nextGraph);
+    if (JSON.stringify(canonicalizeProcPlantMaterialGraph(nextGraph)) === JSON.stringify(canonicalizeProcPlantMaterialGraph(state.graph))) {
+      return { ok: true, state };
+    }
     const undoStack = [...state.undoStack, clone(state.graph)].slice(-maxHistory);
     return { ok: true, state: createState(state.baseline, nextGraph, undoStack, [], state.revision + 1) };
   } catch (error) {
@@ -138,6 +200,71 @@ export const replaceProcPlantMaterialEditorNode = (
       nodes: state.graph.nodes.map((node) => node.id === nodeId ? clone(replacement) : clone(node)),
     })
   : { ok: false as const, state, error: `unknown material node: ${nodeId}` };
+
+export const addProcPlantMaterialEditorNode = (
+  state: ProcPlantMaterialGraphEditorState,
+  node: ProcPlantMaterialNode,
+) => state.graph.nodes.some((entry) => entry.id === node.id)
+  ? { ok: false as const, state, error: `duplicate material node: ${node.id}` }
+  : commitProcPlantMaterialGraphEditor(state, {
+      ...state.graph,
+      nodes: [...state.graph.nodes.map(clone), clone(node)],
+    });
+
+const nodeReferences = (node: ProcPlantMaterialNode, nodeId: string) => node.kind === "multiply"
+  ? node.a === nodeId || node.b === nodeId
+  : node.kind === "mix"
+    ? node.a === nodeId || node.b === nodeId || node.factor === nodeId
+    : node.kind === "one-minus" || node.kind === "clamp" || node.kind === "remap"
+      ? node.input === nodeId
+      : false;
+
+export const removeProcPlantMaterialEditorNode = (
+  state: ProcPlantMaterialGraphEditorState,
+  nodeId: string,
+): ProcPlantMaterialGraphEditorResult => {
+  if (!state.graph.nodes.some((node) => node.id === nodeId)) {
+    return { ok: false, state, error: `unknown material node: ${nodeId}` };
+  }
+  const dependent = state.graph.nodes.find((node) => nodeReferences(node, nodeId));
+  if (dependent) return { ok: false, state, error: `${nodeId} is still connected to ${dependent.id}` };
+  const surface = state.graph.surfaces.find((entry) => Object.values(entry.channels).includes(nodeId));
+  if (surface) return { ok: false, state, error: `${nodeId} is still bound to material surface ${surface.slot}` };
+  return commitProcPlantMaterialGraphEditor(state, {
+    ...state.graph,
+    nodes: state.graph.nodes.filter((node) => node.id !== nodeId).map(clone),
+  });
+};
+
+export type ProcPlantMaterialEditorNodeInput = "a" | "b" | "factor" | "input";
+
+const canSetNodeInput = (
+  node: ProcPlantMaterialNode,
+  input: ProcPlantMaterialEditorNodeInput,
+) => node.kind === "multiply"
+  ? input === "a" || input === "b"
+  : node.kind === "mix"
+    ? input === "a" || input === "b" || input === "factor"
+    : node.kind === "one-minus" || node.kind === "clamp" || node.kind === "remap"
+      ? input === "input"
+      : false;
+
+export const setProcPlantMaterialEditorNodeInput = (
+  state: ProcPlantMaterialGraphEditorState,
+  nodeId: string,
+  input: ProcPlantMaterialEditorNodeInput,
+  dependencyId: string,
+): ProcPlantMaterialGraphEditorResult => {
+  const node = state.graph.nodes.find((entry) => entry.id === nodeId);
+  if (!node) return { ok: false, state, error: `unknown material node: ${nodeId}` };
+  if (!state.graph.nodes.some((entry) => entry.id === dependencyId)) {
+    return { ok: false, state, error: `unknown material node: ${dependencyId}` };
+  }
+  if (!canSetNodeInput(node, input)) {
+    return { ok: false, state, error: `${nodeId}.${input} is not a connectable material input` };
+  }
+  return replaceProcPlantMaterialEditorNode(state, nodeId, { ...clone(node), [input]: dependencyId });
+};
 
 export const replaceProcPlantMaterialEditorTexture = (
   state: ProcPlantMaterialGraphEditorState,

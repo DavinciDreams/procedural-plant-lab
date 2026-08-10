@@ -93,6 +93,7 @@ import type {
 } from "./procplant-hero-spine-editor";
 import type { ProcPlantMeshSpine } from "./procplant-mesh-helper";
 import type { ProcPlantLabHeroPreview } from "./procplant-lab-authoring-imports";
+import type { ProcPlantMaterialGraphEditorState } from "./procplant-material-graph-editor";
 
 type SpeciesId = string;
 
@@ -377,6 +378,7 @@ app.innerHTML = `
         <button id="importHeroGlb" type="button">Import Hero GLB</button>
         <button id="clearHeroGlb" type="button" disabled>Clear Hero Import</button>
         <button id="bakeMaterial" type="button">Bake PBR Material</button>
+        <button id="editMaterialGraph" type="button" aria-expanded="false" aria-controls="materialGraphEditor">Material Graph</button>
         <input id="heroGlbFile" type="file" accept=".glb,model/gltf-binary" hidden />
       </div>
       <div class="button-row">
@@ -387,6 +389,7 @@ app.innerHTML = `
       </div>
       <output id="heroImportStatus" class="save-status" aria-live="polite"></output>
       <output id="materialBakeStatus" class="save-status" aria-live="polite"></output>
+      <section id="materialGraphEditor" class="graph-preview material-graph-editor" aria-live="polite" hidden></section>
       <details class="advanced-controls cutout-controls">
         <summary>Leaf cutout metadata</summary>
         <p>Trace and rebuild the active image without re-importing it.</p>
@@ -601,6 +604,8 @@ let heroSpineEditorState: ProcPlantHeroSpineEditorState | null = null;
 let heroSpineRebuildRequest = 0;
 let materialBakeAudit: Record<string, unknown> | null = null;
 let materialBakeBundle: ProcPlantBakedMaterialBundle | null = null;
+let materialGraphEditorState: ProcPlantMaterialGraphEditorState | null = null;
+let materialGraphEditorSourceKey: string | null = null;
 const authoredCutouts: Array<Record<string, unknown>> = [];
 interface ActiveCutoutSource {
   id: string;
@@ -797,7 +802,9 @@ const addHeroSpinePointButton = document.querySelector<HTMLButtonElement>("#addH
 const deleteHeroSpinePointButton = document.querySelector<HTMLButtonElement>("#deleteHeroSpinePoint")!;
 const resetHeroSpineButton = document.querySelector<HTMLButtonElement>("#resetHeroSpine")!;
 const bakeMaterialButton = document.querySelector<HTMLButtonElement>("#bakeMaterial")!;
+const editMaterialGraphButton = document.querySelector<HTMLButtonElement>("#editMaterialGraph")!;
 const materialBakeStatus = document.querySelector<HTMLOutputElement>("#materialBakeStatus")!;
+const materialGraphEditor = document.querySelector<HTMLElement>("#materialGraphEditor")!;
 const editCutoutContourButton = document.querySelector<HTMLButtonElement>("#editCutoutContour")!;
 const cutoutFileInput = document.querySelector<HTMLInputElement>("#cutoutFile")!;
 const applyCutoutMetadataButton = document.querySelector<HTMLButtonElement>("#applyCutoutMetadata")!;
@@ -1048,6 +1055,7 @@ const macroRulesActive = () => state.windExposure > 0.001 || state.wetness > 0.0
   state.pruning > 0.001 || state.stylization > 0.001 || state.biomeAdaptation > 0.001;
 type ProcPlantRulesModule = typeof import("./procplant-rules");
 type ProcPlantGraphEditorUiModule = typeof import("./procplant-graph-editor-ui");
+type ProcPlantMaterialGraphEditorUiModule = typeof import("./procplant-material-graph-editor-ui");
 type ProcPlantAuthoringToolsModule = typeof import("./procplant-authoring-tools");
 type ProcPlantCrownVolumeToolModule = typeof import("./procplant-crown-volume-tool");
 type ProcPlantOrganPlacementModule = typeof import("./procplant-organ-placement-overrides");
@@ -1057,6 +1065,8 @@ let procPlantRulesPromise: Promise<ProcPlantRulesModule> | null = null;
 let procPlantRulesFailed = false;
 let procPlantGraphEditorUiModule: ProcPlantGraphEditorUiModule | null = null;
 let procPlantGraphEditorUiPromise: Promise<ProcPlantGraphEditorUiModule> | null = null;
+let procPlantMaterialGraphEditorUiModule: ProcPlantMaterialGraphEditorUiModule | null = null;
+let procPlantMaterialGraphEditorUiPromise: Promise<ProcPlantMaterialGraphEditorUiModule> | null = null;
 let procPlantAuthoringToolsModule: ProcPlantAuthoringToolsModule | null = null;
 let procPlantAuthoringToolsPromise: Promise<ProcPlantAuthoringToolsModule> | null = null;
 let procPlantCrownVolumeToolModule: ProcPlantCrownVolumeToolModule | null = null;
@@ -1075,6 +1085,18 @@ const loadProcPlantGraphEditorUi = () => {
     procPlantGraphEditorUiPromise = null;
   });
   return procPlantGraphEditorUiPromise;
+};
+const loadProcPlantMaterialGraphEditorUi = () => {
+  if (procPlantMaterialGraphEditorUiModule) return Promise.resolve(procPlantMaterialGraphEditorUiModule);
+  if (procPlantMaterialGraphEditorUiPromise) return procPlantMaterialGraphEditorUiPromise;
+  procPlantMaterialGraphEditorUiPromise = import("./procplant-material-graph-editor-ui").then((module) => {
+    procPlantMaterialGraphEditorUiModule = module;
+    app.dataset.materialGraphEditorLoaded = "true";
+    return module;
+  }).finally(() => {
+    procPlantMaterialGraphEditorUiPromise = null;
+  });
+  return procPlantMaterialGraphEditorUiPromise;
 };
 const loadProcPlantAuthoringTools = () => {
   if (procPlantAuthoringToolsModule) return Promise.resolve(procPlantAuthoringToolsModule);
@@ -1556,6 +1578,39 @@ const renderGraphPreview = async () => {
       void renderGraphPreview();
     },
   });
+};
+
+let materialGraphEditorRequest = 0;
+const renderMaterialGraphEditor = async () => {
+  if (materialGraphEditor.hidden) return;
+  const request = ++materialGraphEditorRequest;
+  materialGraphEditor.replaceChildren();
+  materialGraphEditor.textContent = "Building material graph editor...";
+  const [editorModule, labModule] = await Promise.all([
+    loadProcPlantMaterialGraphEditorUi(),
+    import("./procplant-lab-authoring-imports"),
+  ]);
+  if (request !== materialGraphEditorRequest || materialGraphEditor.hidden) return;
+  const genome = selectedGenome();
+  const seed = selectedGeneratorSeed();
+  const sourceKey = bakedMaterialSourceKey(genome, seed);
+  if (!materialGraphEditorState || materialGraphEditorSourceKey !== sourceKey) {
+    const source = labModule.createProcPlantLabMaterialAuthoringSource(genome, seed);
+    materialGraphEditorState = editorModule.createProcPlantMaterialGraphEditorState(source.graph);
+    materialGraphEditorSourceKey = sourceKey;
+  }
+  editorModule.renderProcPlantMaterialGraphEditor({
+    container: materialGraphEditor,
+    state: materialGraphEditorState,
+    onStateChanged: (nextState) => {
+      materialGraphEditorState = nextState;
+      app.dataset.materialGraphHash = nextState.compiled.contentHash;
+      app.dataset.materialGraphChanged = String(nextState.changed);
+      void renderMaterialGraphEditor();
+    },
+  });
+  app.dataset.materialGraphHash = materialGraphEditorState.compiled.contentHash;
+  app.dataset.materialGraphChanged = String(materialGraphEditorState.changed);
 };
 
 const templateToGeometry = (template: ProcPlantTemplate) => {
@@ -2626,6 +2681,12 @@ const performRegeneration = async (request: number) => {
   const genome = selectedGenome();
   const generatorSeed = selectedGeneratorSeed();
   const materialSourceKey = bakedMaterialSourceKey(genome, generatorSeed);
+  if (materialGraphEditorSourceKey !== null && materialGraphEditorSourceKey !== materialSourceKey) {
+    materialGraphEditorState = null;
+    materialGraphEditorSourceKey = null;
+    delete app.dataset.materialGraphHash;
+    delete app.dataset.materialGraphChanged;
+  }
   if (liveBakedMaterials && liveBakedMaterialSourceKey !== materialSourceKey) {
     retiredBakedMaterials.push(liveBakedMaterials);
     liveBakedMaterials = null;
@@ -2805,6 +2866,7 @@ const performRegeneration = async (request: number) => {
     void installCompiledHeroLods(request, nextHeroLodState, biome.group, biome.treeLodSource, lodResultPromise);
   }
   if (!graphPreview.hidden) void renderGraphPreview();
+  if (!materialGraphEditor.hidden) void renderMaterialGraphEditor();
 };
 
 let regenerationTimer: number | null = null;
@@ -2827,6 +2889,7 @@ const setRegenerationBusy = (busy: boolean) => {
   importHeroGlbButton.disabled = busy;
   clearHeroGlbButton.disabled = busy || heroImportPreview === null;
   bakeMaterialButton.disabled = busy;
+  editMaterialGraphButton.disabled = busy;
   editCutoutContourButton.disabled = busy || activeCutout === null || activeCutoutSource === null;
   applyCutoutMetadataButton.disabled = busy || activeCutoutSource === null;
   inspectGraphButton.disabled = busy;
@@ -2933,6 +2996,13 @@ inspectGraphButton.addEventListener("click", () => {
   inspectGraphButton.setAttribute("aria-expanded", String(!graphPreview.hidden));
   inspectGraphButton.textContent = graphPreview.hidden ? "Graph Preview" : "Hide Graph";
   if (!graphPreview.hidden) void renderGraphPreview();
+});
+
+editMaterialGraphButton.addEventListener("click", () => {
+  materialGraphEditor.hidden = !materialGraphEditor.hidden;
+  editMaterialGraphButton.setAttribute("aria-expanded", String(!materialGraphEditor.hidden));
+  editMaterialGraphButton.textContent = materialGraphEditor.hidden ? "Material Graph" : "Hide Material Graph";
+  if (!materialGraphEditor.hidden) void renderMaterialGraphEditor();
 });
 
 seasonSelect.addEventListener("change", () => {
@@ -3581,7 +3651,10 @@ bakeMaterialButton.addEventListener("click", async () => {
     } = materialAdapter;
     const genome = selectedGenome();
     const generatorSeed = selectedGeneratorSeed();
-    const baked = downloadProcPlantLabMaterials(genome, generatorSeed);
+    const editorGraph = materialGraphEditorSourceKey === bakedMaterialSourceKey(genome, generatorSeed)
+      ? materialGraphEditorState?.graph
+      : undefined;
+    const baked = downloadProcPlantLabMaterials(genome, generatorSeed, editorGraph);
     const nextLiveMaterials = createProcPlantThreeBakedMaterials(baked.bundle, { ormUvChannel: 1 });
     nextLiveMaterials.bark.vertexColors = true;
     nextLiveMaterials.organ.vertexColors = true;
@@ -3597,6 +3670,7 @@ bakeMaterialButton.addEventListener("click", async () => {
     app.dataset.materialBakeHash = baked.contentHash;
     app.dataset.materialBakeReady = String(baked.ready);
     app.dataset.materialBakeImages = String(baked.imageCount);
+    app.dataset.materialBakeGraphChanged = String(Boolean(editorGraph && materialGraphEditorState?.changed));
     app.dataset.materialLivePbr = "pending";
     app.dataset.materialLiveAudit = nextLiveMaterials.audit.auditHash;
     app.dataset.materialLiveTextureBytes = String(nextLiveMaterials.audit.ownedTextureBytes);
