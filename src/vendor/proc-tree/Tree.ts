@@ -126,7 +126,7 @@ export class Tree {
       return stem.toData(radii);
     });
 
-    const leafData: LeafData[] = this.leaves.map((leaf) => leaf.toData());
+    const leafData: LeafData[] = this.leaves.map((leaf, index) => leaf.toData(index));
 
     return {
       stems: stemData,
@@ -1014,6 +1014,7 @@ export class Tree {
 
       // Create new clone stem
       const newStem = stem.copy();
+      if (newStem.parent) newStem.parent.addChild(newStem);
       this.stems.push(newStem);
       this.stemRadii.set(newStem, []);
 
@@ -1156,9 +1157,9 @@ export class Tree {
 
     // Create branches or leaves
     if (isLeaves) {
-      for (const { posTurtle, dirTurtle } of branchesArray) {
+      for (const { posTurtle, dirTurtle, offset } of branchesArray) {
         this.leaves.push(
-          new Leaf(posTurtle.pos, dirTurtle.dir, dirTurtle.right),
+          new Leaf(posTurtle.pos, dirTurtle.dir, dirTurtle.right, stem, offset),
         );
       }
     } else {
