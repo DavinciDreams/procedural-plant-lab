@@ -60,6 +60,7 @@ export * from "./procplant-spline-crown";
 export * from "./procplant-spatial-force";
 export * from "./procplant-tube";
 export * from "./procplant-usd-export";
+export * from "./procplant-usdz-export";
 export * from "./procplant-variant-export";
 export * from "./procplant-visibility-clusters";
 export * from "./procplant-webgpu-visibility";
