@@ -29,6 +29,7 @@ export * from "./procplant-material-graph";
 export * from "./procplant-material-graph-editor";
 export * from "./procplant-material-gltf-plan";
 export * from "./procplant-material-bake";
+export * from "./procplant-material-ktx2";
 export * from "./procplant-surface-partition";
 export * from "./procplant-three-geometry";
 export * from "./procplant-three-material-adapter";
