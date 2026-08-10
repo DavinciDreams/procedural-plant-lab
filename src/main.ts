@@ -123,6 +123,7 @@ import type {
   ProcPlantThreePlacementDecalBindingHandle,
   ProcPlantThreePlacementDecalDrawPackage,
 } from "./procplant-placement-decal-three";
+import type { ProcPlantVineGuidePackage } from "./procplant-vine-guide-authoring";
 import type { ProcPlantBakedMaterialBundle } from "./procplant-material-bake";
 import type { ProcPlantThreeBakedMaterialSet } from "./procplant-three-material-adapter";
 import type { ProcPlantThreeMaterialShaderSetInstallation } from "./procplant-three-material-shader";
@@ -459,6 +460,9 @@ app.innerHTML = `
         <button id="importPlacementDecal" type="button">Bind Decal Image</button>
         <button id="clearPlacementDecal" type="button" disabled>Clear Decal Binding</button>
         <input id="placementDecalFile" type="file" accept="image/png,image/webp,image/jpeg" hidden />
+        <button id="vineGuideMode" type="button" aria-pressed="false" disabled>Place Vine Guide</button>
+        <button id="undoVineGuide" type="button" disabled>Undo Guide Point</button>
+        <button id="resetVineGuide" type="button" disabled>Reset Vine Guide</button>
       </div>
       <div class="button-row">
         <button id="inspectReadiness" type="button">Asset QA</button>
@@ -700,6 +704,7 @@ let heroPruneTool: ProcPlantPruneTool | null = null;
 let heroPruneToolRequest = 0;
 let heroPlacementTool: ProcPlantPruneTool | null = null;
 let heroPlacementToolRequest = 0;
+let vineGuideVisualization: THREE.Group | null = null;
 let crownVolumeTool: ProcPlantCrownVolumeTool | null = null;
 let cutoutPreview: THREE.Mesh<THREE.BufferGeometry, THREE.MeshLambertMaterial> | null = null;
 let heroImportPreview: THREE.Group | null = null;
@@ -732,8 +737,10 @@ const organPlacementPackages = new Map<string, ProcPlantOrganPlacementPackage>()
 let livePlacementDecalBinding: ProcPlantThreePlacementDecalBindingHandle | null = null;
 let livePlacementDecalFileName = "";
 const retiredPlacementDecalBindings: ProcPlantThreePlacementDecalBindingHandle[] = [];
+let vineGuidePackage: ProcPlantVineGuidePackage | null = null;
 let pruneModeVisible = false;
 let placementModeVisible = false;
+let vineGuideModeVisible = false;
 let crownVolumeModeVisible = false;
 let debugIrVisible = false;
 let debugFramesVisible = false;
@@ -936,6 +943,10 @@ const importPlacementDecalButton = document.querySelector<HTMLButtonElement>("#i
 const clearPlacementDecalButton = document.querySelector<HTMLButtonElement>("#clearPlacementDecal")!;
 const placementDecalFileInput = document.querySelector<HTMLInputElement>("#placementDecalFile")!;
 const placementDecalStatus = document.querySelector<HTMLOutputElement>("#placementDecalStatus")!;
+const vineGuideModeButton = document.querySelector<HTMLButtonElement>("#vineGuideMode")!;
+const undoVineGuideButton = document.querySelector<HTMLButtonElement>("#undoVineGuide")!;
+const resetVineGuideButton = document.querySelector<HTMLButtonElement>("#resetVineGuide")!;
+let pendingVineGuideSerialized: string | null = null;
 const crownVolumeModeButton = document.querySelector<HTMLButtonElement>("#crownVolumeMode")!;
 const crownVolumeAddButton = document.querySelector<HTMLButtonElement>("#crownVolumeAdd")!;
 const crownVolumeSubtractButton = document.querySelector<HTMLButtonElement>("#crownVolumeSubtract")!;
@@ -1066,6 +1077,11 @@ const restoreStateFromUrl = () => {
       app.dataset.spatialForceRestoreError = error instanceof Error ? error.message : String(error);
     }
   }
+  const vineGuide = params.get("vg");
+  if (vineGuide) {
+    if (vineGuide.length <= 16_384) pendingVineGuideSerialized = vineGuide;
+    else app.dataset.vineGuideRestoreError = "vine guide package exceeds the 16 KiB serialized limit";
+  }
 };
 
 installSavedProcPlantPresets();
@@ -1176,6 +1192,9 @@ const stateParams = (includeCamera = false) => {
   if (Array.isArray(state.spatialForces?.fields) && state.spatialForces.fields.length > 0) {
     params.set("ff", JSON.stringify(state.spatialForces));
   }
+  if (vineGuidePackage && procPlantVineGuideAuthoringModule) {
+    params.set("vg", procPlantVineGuideAuthoringModule.serializeProcPlantVineGuidePackage(vineGuidePackage));
+  }
   if (includeCamera) {
     params.set("cx", camera.position.x.toFixed(3));
     params.set("cy", camera.position.y.toFixed(3));
@@ -1239,6 +1258,7 @@ type ProcPlantCrownVolumeToolModule = typeof import("./procplant-crown-volume-to
 type ProcPlantCrownMaskFitUiModule = typeof import("./procplant-crown-mask-fit-ui");
 type ProcPlantOrganPlacementModule = typeof import("./procplant-organ-placement-overrides");
 type ProcPlantPlacementDecalThreeModule = typeof import("./procplant-placement-decal-three");
+type ProcPlantVineGuideAuthoringModule = typeof import("./procplant-vine-guide-authoring");
 type ProcPlantGeneratorGraphOperation = import("./procplant-generator-graph").ProcPlantGeneratorGraphOperation;
 let procPlantRulesModule: ProcPlantRulesModule | null = null;
 let procPlantRulesPromise: Promise<ProcPlantRulesModule> | null = null;
@@ -1260,6 +1280,8 @@ let procPlantOrganPlacementModule: ProcPlantOrganPlacementModule | null = null;
 let procPlantOrganPlacementPromise: Promise<ProcPlantOrganPlacementModule> | null = null;
 let procPlantPlacementDecalThreeModule: ProcPlantPlacementDecalThreeModule | null = null;
 let procPlantPlacementDecalThreePromise: Promise<ProcPlantPlacementDecalThreeModule> | null = null;
+let procPlantVineGuideAuthoringModule: ProcPlantVineGuideAuthoringModule | null = null;
+let procPlantVineGuideAuthoringPromise: Promise<ProcPlantVineGuideAuthoringModule> | null = null;
 const graphOverrideOperations = new Map<string, ProcPlantGeneratorGraphOperation[]>();
 const loadProcPlantGraphEditorUi = () => {
   if (procPlantGraphEditorUiModule) return Promise.resolve(procPlantGraphEditorUiModule);
@@ -1357,6 +1379,18 @@ const loadProcPlantPlacementDecalThree = () => {
     procPlantPlacementDecalThreePromise = null;
   });
   return procPlantPlacementDecalThreePromise;
+};
+const loadProcPlantVineGuideAuthoring = () => {
+  if (procPlantVineGuideAuthoringModule) return Promise.resolve(procPlantVineGuideAuthoringModule);
+  if (procPlantVineGuideAuthoringPromise) return procPlantVineGuideAuthoringPromise;
+  procPlantVineGuideAuthoringPromise = import("./procplant-vine-guide-authoring").then((module) => {
+    procPlantVineGuideAuthoringModule = module;
+    app.dataset.vineGuideAuthoringLoaded = "true";
+    return module;
+  }).finally(() => {
+    procPlantVineGuideAuthoringPromise = null;
+  });
+  return procPlantVineGuideAuthoringPromise;
 };
 const loadProcPlantRules = () => {
   if (procPlantRulesModule) return Promise.resolve(procPlantRulesModule);
@@ -1566,7 +1600,7 @@ const selectedSourceGenome = (): ProcPlantGenome => {
     : hybridizePlantGenomes(a, b, state.hybrid, state.seed ^ 0x9e3779b9);
 };
 
-const selectedBaseGenome = (applyGraph = true): ProcPlantGenome => {
+const selectedBaseGenome = (applyGraph = true, applyVineGuide = true): ProcPlantGenome => {
   const base = selectedSourceGenome();
   const overridden = applyOverrides(base);
   let authored = overridden;
@@ -1590,6 +1624,17 @@ const selectedBaseGenome = (applyGraph = true): ProcPlantGenome => {
         biomeAdaptation: state.biomeAdaptation,
       }, procPlantRulesModule.PROCPLANT_DEFAULT_MACRO_RULES.filter((rule) => activeRuleNames.has(rule.name))).genome;
     }
+  }
+  if (applyVineGuide && vineGuidePackage && procPlantVineGuideAuthoringModule) {
+    const applied = procPlantVineGuideAuthoringModule.applyProcPlantVineGuidePackage(authored, state.seed, vineGuidePackage);
+    app.dataset.vineGuideStatus = applied.status;
+    app.dataset.vineGuideTargetMatched = String(applied.targetMatched);
+    app.dataset.vineGuidePointCount = String(vineGuidePackage.points.length);
+    authored = applied.genome;
+  } else if (applyVineGuide) {
+    app.dataset.vineGuideStatus = vineGuidePackage ? "pending-module" : "canonical";
+    app.dataset.vineGuidePointCount = String(vineGuidePackage?.points.length ?? 0);
+    delete app.dataset.vineGuideTargetMatched;
   }
   return applyGraph ? applyGraphGenomeOverrides(authored) : authored;
 };
@@ -2902,6 +2947,68 @@ const refreshHeroPlacementTool = async () => {
   syncPlacementButtons();
 };
 
+const disposeVineGuideVisualization = () => {
+  const visualization = vineGuideVisualization;
+  if (!visualization) return;
+  visualization.traverse((object) => {
+    if (object instanceof THREE.Mesh || object instanceof THREE.Line) {
+      object.geometry.dispose();
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      for (const material of materials) material.dispose();
+    }
+  });
+  scene.remove(visualization);
+  vineGuideVisualization = null;
+};
+
+const refreshVineGuideVisualization = () => {
+  disposeVineGuideVisualization();
+  if (!vineGuideModeVisible || !vineGuidePackage?.points.length) return;
+  const group = new THREE.Group();
+  const points = vineGuidePackage.points.map((point) => new THREE.Vector3(...point.position));
+  if (points.length > 1) {
+    group.add(new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(points),
+      new THREE.LineBasicMaterial({ color: 0x35d6a0, depthTest: false }),
+    ));
+  }
+  for (const [index, point] of points.entries()) {
+    const marker = new THREE.Mesh(
+      new THREE.SphereGeometry(0.028, 8, 6),
+      new THREE.MeshBasicMaterial({ color: index === points.length - 1 ? 0xffd166 : 0x35d6a0, depthTest: false }),
+    );
+    marker.position.copy(point);
+    marker.renderOrder = 20;
+    group.add(marker);
+  }
+  const target = heroLodState?.mesh;
+  if (target) {
+    group.position.copy(target.position);
+    group.quaternion.copy(target.quaternion);
+    group.scale.copy(target.scale);
+  }
+  group.renderOrder = 20;
+  vineGuideVisualization = group;
+  scene.add(group);
+};
+
+const syncVineGuideButtons = () => {
+  const available = Boolean(selectedSourceGenome().vine);
+  if (!available && vineGuideModeVisible) {
+    vineGuideModeVisible = false;
+    disposeVineGuideVisualization();
+    controls.enabled = !pruneModeVisible && !placementModeVisible;
+  }
+  vineGuideModeButton.disabled = regenerationBusy || !available;
+  vineGuideModeButton.setAttribute("aria-pressed", String(vineGuideModeVisible && available));
+  vineGuideModeButton.textContent = vineGuideModeVisible ? "Finish Vine Guide" : "Place Vine Guide";
+  undoVineGuideButton.disabled = regenerationBusy || !vineGuidePackage?.points.length;
+  resetVineGuideButton.disabled = regenerationBusy || !vineGuidePackage;
+  app.dataset.vineGuideAvailable = String(available);
+  app.dataset.vineGuideActive = String(vineGuideModeVisible && available);
+  app.dataset.vineGuidePointCount = String(vineGuidePackage?.points.length ?? 0);
+};
+
 const disposeGroup = (group: THREE.Group | null) => {
   if (!group) return;
   group.traverse((object) => {
@@ -3606,6 +3713,7 @@ const performRegeneration = async (request: number) => {
   void refreshHeroDebugOverlay();
   void refreshHeroPruneTool();
   void refreshHeroPlacementTool();
+  refreshVineGuideVisualization();
 
   delete app.dataset.biomeLodCounts;
   delete app.dataset.biomeLodCohort;
@@ -3649,6 +3757,7 @@ const performRegeneration = async (request: number) => {
   syncCrownVolumeButton();
   syncChainTubeControls(genome, generatorSeed, env);
   syncPlacementButtons();
+  syncVineGuideButtons();
   if (crownVolumeModeVisible) void refreshCrownVolumeTool();
   if (lodResultPromise) {
     void installCompiledHeroLods(request, nextHeroLodState, biome.group, biome.treeLodSource, lodResultPromise);
@@ -3689,6 +3798,7 @@ const setRegenerationBusy = (busy: boolean) => {
   for (const button of seasonButtons) button.disabled = busy;
   pruneModeButton.disabled = busy;
   syncPlacementButtons();
+  syncVineGuideButtons();
   syncCrownVolumeButton();
   if (currentChainTubeSnapshot) syncChainTubeInputs();
   if (busy) {
@@ -4235,6 +4345,11 @@ for (const input of Object.values(crownLobeInputs)) {
 
 pruneModeButton.addEventListener("click", () => {
   pruneModeVisible = !pruneModeVisible;
+  if (pruneModeVisible && vineGuideModeVisible) {
+    vineGuideModeVisible = false;
+    disposeVineGuideVisualization();
+    syncVineGuideButtons();
+  }
   if (pruneModeVisible && crownVolumeModeVisible) {
     crownVolumeModeVisible = false;
     disposeCrownVolumeTool();
@@ -4245,7 +4360,7 @@ pruneModeButton.addEventListener("click", () => {
     disposeHeroPlacementTool();
     syncPlacementButtons();
   }
-  controls.enabled = !pruneModeVisible && !placementModeVisible;
+  controls.enabled = !pruneModeVisible && !placementModeVisible && !vineGuideModeVisible;
   void refreshHeroPruneTool();
   setSaveStatus(
     pruneModeVisible
@@ -4269,7 +4384,12 @@ placementModeButton.addEventListener("click", () => {
     disposeCrownVolumeTool();
     syncCrownVolumeButton();
   }
-  controls.enabled = !placementModeVisible && !pruneModeVisible;
+  if (placementModeVisible && vineGuideModeVisible) {
+    vineGuideModeVisible = false;
+    disposeVineGuideVisualization();
+    syncVineGuideButtons();
+  }
+  controls.enabled = !placementModeVisible && !pruneModeVisible && !vineGuideModeVisible;
   syncPlacementButtons();
   void refreshHeroPlacementTool();
   setSaveStatus(
@@ -4279,11 +4399,120 @@ placementModeButton.addEventListener("click", () => {
   );
 });
 
+vineGuideModeButton.addEventListener("click", async () => {
+  if (regenerationBusy || !selectedSourceGenome().vine) return;
+  await loadProcPlantVineGuideAuthoring();
+  vineGuideModeVisible = !vineGuideModeVisible;
+  if (vineGuideModeVisible && pruneModeVisible) {
+    pruneModeVisible = false;
+    disposeHeroPruneTool();
+    syncPruneButtons();
+  }
+  if (vineGuideModeVisible && placementModeVisible) {
+    placementModeVisible = false;
+    disposeHeroPlacementTool();
+    syncPlacementButtons();
+  }
+  if (vineGuideModeVisible && crownVolumeModeVisible) {
+    crownVolumeModeVisible = false;
+    disposeCrownVolumeTool();
+    syncCrownVolumeButton();
+  }
+  controls.enabled = !vineGuideModeVisible && !pruneModeVisible && !placementModeVisible;
+  syncVineGuideButtons();
+  refreshVineGuideVisualization();
+  setSaveStatus(vineGuideModeVisible
+    ? "Vine guide mode: click points on the camera-facing plane; orbit between clicks to change depth. This authors a static centerline only."
+    : "Vine guide mode closed.");
+});
+
+undoVineGuideButton.addEventListener("click", async () => {
+  if (!vineGuidePackage || regenerationBusy) return;
+  const module = await loadProcPlantVineGuideAuthoring();
+  vineGuidePackage = module.undoLastProcPlantVineGuidePoint(vineGuidePackage);
+  if (vineGuidePackage.points.length === 0) vineGuidePackage = null;
+  syncVineGuideButtons();
+  refreshVineGuideVisualization();
+  setSaveStatus(vineGuidePackage?.points.length === 1
+    ? "One guide point remains as a draft; canonical vine geometry is restored until a second point is placed."
+    : "Removed the last static vine guide point.");
+  regenerate();
+});
+
+resetVineGuideButton.addEventListener("click", () => {
+  if (!vineGuidePackage || regenerationBusy) return;
+  vineGuidePackage = null;
+  syncVineGuideButtons();
+  refreshVineGuideVisualization();
+  setSaveStatus("Resetting the vine to its exact canonical guide/support behavior…");
+  regenerate();
+});
+
 type PruneGesturePoint = { x: number; y: number; clientX: number; clientY: number };
 let pruneGesturePointer: number | null = null;
 let pruneGesturePoints: PruneGesturePoint[] = [];
 let pruneGestureLasso = false;
 let suppressPruneClick = false;
+
+canvas.addEventListener("click", async (event) => {
+  if (!vineGuideModeVisible || regenerationBusy || !heroLodState) return;
+  const module = await loadProcPlantVineGuideAuthoring();
+  if (!vineGuideModeVisible || regenerationBusy || !heroLodState) return;
+  const sourceGenome = selectedBaseGenome(false, false);
+  if (!sourceGenome.vine) {
+    setSaveStatus("Static vine guide placement is available only for guided-vine genomes.");
+    return;
+  }
+  if (vineGuidePackage) {
+    const targetAudit = module.applyProcPlantVineGuidePackage(sourceGenome, state.seed, vineGuidePackage);
+    if (!targetAudit.targetMatched) {
+      setSaveStatus("This guide targets a different vine source or seed. Reset it before placing new points.");
+      return;
+    }
+  }
+  const rect = canvas.getBoundingClientRect();
+  const pointer = new THREE.Vector2(
+    ((event.clientX - rect.left) / rect.width) * 2 - 1,
+    -(((event.clientY - rect.top) / rect.height) * 2 - 1),
+  );
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(pointer, camera);
+  const planeNormal = camera.getWorldDirection(new THREE.Vector3());
+  const planePoint = vineGuidePackage?.points.at(-1)
+    ? heroLodState.mesh.localToWorld(new THREE.Vector3(...vineGuidePackage.points.at(-1)!.position))
+    : controls.target.clone();
+  const worldPoint = raycaster.ray.intersectPlane(
+    new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal, planePoint),
+    new THREE.Vector3(),
+  );
+  if (!worldPoint) {
+    setSaveStatus("The viewport ray did not intersect the static guide authoring plane.");
+    return;
+  }
+  const localPoint = heroLodState.mesh.worldToLocal(worldPoint.clone());
+  const position = localPoint.toArray().map((value) => Number(value.toFixed(6))) as [number, number, number];
+  vineGuidePackage ??= module.createProcPlantVineGuidePackage(
+    module.createProcPlantVineGuideTarget(sourceGenome, state.seed),
+  );
+  try {
+    vineGuidePackage = module.appendProcPlantVineGuidePoint(vineGuidePackage, position);
+  } catch (error) {
+    setSaveStatus(error instanceof Error ? error.message : String(error));
+    return;
+  }
+  app.dataset.vineGuideProjection = "camera-facing-plane";
+  app.dataset.vineGuideCollision = "static-none";
+  app.dataset.vineGuideStatus = vineGuidePackage.points.length < 2 ? "draft" : "pending-regeneration";
+  app.dataset.vineGuideTargetMatched = "true";
+  syncVineGuideButtons();
+  refreshVineGuideVisualization();
+  if (vineGuidePackage.points.length < 2) {
+    setSaveStatus("First static guide point placed. Add a second point to rebuild the vine; no geometry changed yet.");
+    return;
+  }
+  setSaveStatus(`Placed ${vineGuidePackage.points.at(-1)!.id}; rebuilding the static authored centerline…`);
+  regenerate();
+});
 
 const prunePointFromEvent = (event: PointerEvent, rect: DOMRect): PruneGesturePoint => ({
   x: ((event.clientX - rect.left) / rect.width) * 2 - 1,
@@ -5426,6 +5655,7 @@ document.querySelector<HTMLButtonElement>("#exportJson")!.addEventListener("clic
             liveTriangles: heroLodState?.placementDecals?.audit.triangles ?? 0,
           }
         : null,
+      vineGuide: vineGuidePackage,
       weberPennTrim: heroLodState?.weberPennTrim
         ? {
             target: heroLodState.weberPennTrim.target,
@@ -5620,7 +5850,20 @@ const resize = () => {
 
 window.addEventListener("resize", resize, { passive: true });
 resize();
-regenerate();
+if (pendingVineGuideSerialized) {
+  void loadProcPlantVineGuideAuthoring().then((module) => {
+    vineGuidePackage = module.deserializeProcPlantVineGuidePackage(pendingVineGuideSerialized!);
+    app.dataset.vineGuideRestored = "true";
+  }).catch((error) => {
+    vineGuidePackage = null;
+    app.dataset.vineGuideRestoreError = error instanceof Error ? error.message : String(error);
+  }).finally(() => {
+    pendingVineGuideSerialized = null;
+    regenerate();
+  });
+} else {
+  regenerate();
+}
 
 const clock = new THREE.Clock();
 let animationFrame: number | null = null;
@@ -5662,6 +5905,7 @@ window.addEventListener("pagehide", () => {
   impostorBakeAbort?.abort();
   heroDebugOverlayRequest++;
   disposeCrownVolumeTool();
+  disposeVineGuideVisualization();
   heroLodCompiler.dispose();
   disposeBiomePlacementLodState(biomePlacementLodState);
   disposeHeroImportPreview();
