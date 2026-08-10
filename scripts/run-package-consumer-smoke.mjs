@@ -100,6 +100,8 @@ import {
   fitProcPlantCrownVoxelMask,
   buildProcPlantTemplateWithCrownLightPruning,
   PROCPLANT_PLACEMENT_DECAL_GLB_CONTRACT,
+  PROCPLANT_IMPORTED_HERO_DECAL_CONTRACT,
+  createProcPlantImportedHeroDecalPackage,
   appendProcPlantVineGuidePoint,
   applyProcPlantVineGuidePackage,
   createProcPlantVineGuidePackage,
@@ -109,6 +111,7 @@ import {
   createProcPlantVineLiveSupportPackage,
   rebuildProcPlantVineGuideFromLiveSupports,
   type ProcPlantGraph,
+  type ProcPlantImportedHeroDecalTarget,
   type ProcPlantThreePlacementDecalBindingMetadata,
 } from "procplants";
 
@@ -130,6 +133,12 @@ const optInBuild = buildProcPlantTemplateWithCrownLightPruning(genome, 612072, d
   crownLightPruning: { enabled: false },
 });
 const decalExportSupport: ProcPlantThreePlacementDecalBindingMetadata["exportSupport"] = "metadata-only";
+const importedDecalTarget: ProcPlantImportedHeroDecalTarget = {
+  sourceContentHash: "source", authoringContentHash: "authoring", instanceId: "instance", nodePath: "root/trunk",
+  meshIndex: 0, primitiveIndex: 0, materialIndex: 0, transformsBaked: true, vertexCount: 3, triangleCount: 1,
+  geometrySignature: "geometry-v1-fnv1a32:12345678",
+};
+const importedDecals = createProcPlantImportedHeroDecalPackage(importedDecalTarget);
 const vineGenome = procPlantPresets.floweringWallCreeper!;
 let vineGuide = createProcPlantVineGuidePackage(createProcPlantVineGuideTarget(vineGenome, 612072));
 const staticSnap = appendProcPlantVineGuidePointOnStaticSupport(vineGuide, [0, 0.2, 0], {
@@ -173,6 +182,7 @@ if (voxelFit.crown.volumes.length !== 2) throw new Error("crown voxel-mask fit e
 if (optInBuild.crownLightPruning.status !== "disabled") throw new Error("full-entry crown-pruning contract drift");
 if (decalExportSupport !== "metadata-only") throw new Error("placement decal renderer type export drift");
 if (PROCPLANT_PLACEMENT_DECAL_GLB_CONTRACT !== "procplants.placement-decal-glb") throw new Error("placement decal GLB export drift");
+if (PROCPLANT_IMPORTED_HERO_DECAL_CONTRACT !== "procplants.imported-hero-decals" || importedDecals.operations.length !== 0) throw new Error("imported hero decal export drift");
 if (authoredVine.status !== "applied" || authoredVine.genome.vine?.guide?.length !== 2) throw new Error("vine guide authoring export drift");
 if (!lod5AtlasPlan.cacheKey.startsWith("procplants-lod5-atlas-v1-")) throw new Error("five-tier atlas build export drift");
 if (!lod5CatalogPlan.cacheKey.startsWith("procplants-lod5-atlas-catalog-v1-")) throw new Error("five-tier atlas catalog export drift");

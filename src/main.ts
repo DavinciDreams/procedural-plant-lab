@@ -138,6 +138,7 @@ import type {
 } from "./procplant-hero-spine-editor";
 import type { ProcPlantMeshSpine } from "./procplant-mesh-helper";
 import type { ProcPlantLabHeroPreview } from "./procplant-lab-authoring-imports";
+import type { ProcPlantImportedHeroDecalPackage } from "./procplant-imported-hero-decal";
 import type { ProcPlantMaterialGraphEditorState } from "./procplant-material-graph-editor";
 import type { ProcPlantSpatialForceEditorState } from "./procplant-spatial-force-editor-ui";
 import type { ProcPlantSpatialForceAudit } from "./procplant-spatial-force";
@@ -726,10 +727,14 @@ let vineGuideVisualization: THREE.Group | null = null;
 let crownVolumeTool: ProcPlantCrownVolumeTool | null = null;
 let cutoutPreview: THREE.Mesh<THREE.BufferGeometry, THREE.MeshLambertMaterial> | null = null;
 let heroImportPreview: THREE.Group | null = null;
+let heroImportModel: ProcPlantLabHeroPreview | null = null;
 let heroImportAudit: Record<string, unknown> | null = null;
 let heroImportSource: ArrayBuffer | null = null;
 let heroImportFileName = "";
 let heroImportSpine: ProcPlantMeshSpine | null = null;
+let heroImportDecalPackage: ProcPlantImportedHeroDecalPackage | null = null;
+let heroImportDecalDraws: ProcPlantThreePlacementDecalDrawPackage | null = null;
+let heroImportDecalRefreshRequest = 0;
 let heroSpineEditor: ProcPlantHeroSpineEditor | null = null;
 let heroSpineEditorState: ProcPlantHeroSpineEditorState | null = null;
 let heroSpineRebuildRequest = 0;
@@ -3026,15 +3031,20 @@ const placementColors: Partial<Record<ProcPlantPlaceableOrganKind, { color: numb
 
 const syncPlacementButtons = () => {
   const weberPenn = Boolean(selectedGenome().weberPenn);
-  const graphAvailable = Boolean(heroLodState?.graph || (heroLodState && weberPenn));
-  if (!graphAvailable && placementModeVisible) {
+  const generatedPlacementAvailable = heroImportModel === null
+    && Boolean(heroLodState?.graph || (heroLodState && weberPenn));
+  const importedDecalAvailable = Boolean(heroImportModel?.importedDecalTarget && livePlacementDecalBinding && !livePlacementDecalBinding.disposed);
+  const placementAvailable = generatedPlacementAvailable || importedDecalAvailable;
+  if (!placementAvailable && placementModeVisible) {
     placementModeVisible = false;
     disposeHeroPlacementTool();
     controls.enabled = !pruneModeVisible;
   }
   const genome = selectedGenome();
   for (const option of placementKindSelect.options) {
-    option.disabled = weberPenn && !["leaf", "flower", "fruit", "berry", "cone"].includes(option.value);
+    option.disabled = heroImportModel !== null
+      ? option.value !== "decal"
+      : weberPenn && !["leaf", "flower", "fruit", "berry", "cone"].includes(option.value);
   }
   const flowerOption = placementKindSelect.querySelector<HTMLOptionElement>('option[value="flower"]');
   if (flowerOption) flowerOption.disabled = flowerOption.disabled || !genome.flower;
@@ -3042,17 +3052,19 @@ const syncPlacementButtons = () => {
   const decalOption = placementKindSelect.querySelector<HTMLOptionElement>('option[value="decal"]');
   const decalReady = Boolean(livePlacementDecalBinding && !livePlacementDecalBinding.disposed);
   if (decalOption) decalOption.disabled = decalOption.disabled || !decalReady;
-  if (!decalReady && placementKindSelect.value === "decal") placementKindSelect.value = "leaf";
-  placementModeButton.disabled = regenerationBusy || !graphAvailable;
+  if (heroImportModel && decalReady) placementKindSelect.value = "decal";
+  else if (!decalReady && placementKindSelect.value === "decal") placementKindSelect.value = "leaf";
+  placementModeButton.disabled = regenerationBusy || !placementAvailable;
   placementModeButton.setAttribute("aria-pressed", String(placementModeVisible));
   placementModeButton.textContent = placementModeVisible ? "Exit Place" : "Place Part";
-  placementKindSelect.disabled = regenerationBusy || !graphAvailable;
-  undoPlacementButton.disabled = regenerationBusy || (currentPlacementPackage()?.operations.length ?? 0) === 0;
+  placementKindSelect.disabled = regenerationBusy || !placementAvailable;
+  const undoCount = heroImportModel ? heroImportDecalPackage?.operations.length ?? 0 : currentPlacementPackage()?.operations.length ?? 0;
+  undoPlacementButton.disabled = regenerationBusy || undoCount === 0;
   importPlacementDecalButton.disabled = regenerationBusy;
   clearPlacementDecalButton.disabled = regenerationBusy || !decalReady;
-  app.dataset.organPlacementAvailable = String(graphAvailable);
-  app.dataset.organPlacementActive = String(placementModeVisible && graphAvailable);
-  app.dataset.organPlacementCount = String(currentPlacementPackage()?.operations.length ?? 0);
+  app.dataset.organPlacementAvailable = String(placementAvailable);
+  app.dataset.organPlacementActive = String(placementModeVisible && placementAvailable);
+  app.dataset.organPlacementCount = String(heroImportModel ? heroImportDecalPackage?.operations.length ?? 0 : currentPlacementPackage()?.operations.length ?? 0);
   app.dataset.placementDecalBindingReady = String(decalReady);
 };
 
@@ -3060,7 +3072,7 @@ const refreshHeroPlacementTool = async () => {
   disposeHeroPlacementTool();
   const request = ++heroPlacementToolRequest;
   const target = heroLodState;
-  if (!placementModeVisible || !target || (!target.graph && !selectedGenome().weberPenn)) {
+  if (!placementModeVisible || heroImportModel || !target || (!target.graph && !selectedGenome().weberPenn)) {
     syncPlacementButtons();
     return;
   }
@@ -3217,6 +3229,54 @@ const disposeHeroImportGroup = (preview: THREE.Group | null) => {
   scene.remove(preview);
 };
 
+const disposeHeroImportDecalDraws = () => {
+  heroImportDecalRefreshRequest++;
+  if (!heroImportDecalDraws) return;
+  heroImportDecalDraws.root.removeFromParent();
+  heroImportDecalDraws.dispose();
+  heroImportDecalDraws = null;
+  delete app.dataset.heroImportDecalDraws;
+  delete app.dataset.heroImportDecalTriangles;
+};
+
+const refreshHeroImportDecalDraws = async () => {
+  disposeHeroImportDecalDraws();
+  const request = ++heroImportDecalRefreshRequest;
+  const model = heroImportModel;
+  const authored = heroImportDecalPackage;
+  const binding = livePlacementDecalBinding;
+  if (!model?.importedDecalTarget || !authored?.operations.length) {
+    app.dataset.heroImportDecalStatus = model?.importedDecalTargetInspection.reason ?? "no-import";
+    return;
+  }
+  const module = await import("./procplant-imported-hero-decal");
+  if (request !== heroImportDecalRefreshRequest || model !== heroImportModel || authored !== heroImportDecalPackage) return;
+  const applied = module.applyProcPlantImportedHeroDecals(
+    model.importedDecalTarget,
+    model.trunk.geometry,
+    authored,
+    binding && !binding.disposed ? [binding.binding] : [],
+  );
+  if (!applied.targetMatched) {
+    app.dataset.heroImportDecalStatus = "stale-target";
+    placementDecalStatus.textContent = "Imported-hero decal target is stale. No decal was drawn; undo it or restore the exact source and authored spine.";
+    return;
+  }
+  if (applied.decals.length !== authored.operations.length || !binding || binding.disposed) {
+    app.dataset.heroImportDecalStatus = applied.unsupported[0]?.reason ?? "missing-binding";
+    return;
+  }
+  const rendererModule = await loadProcPlantPlacementDecalThree();
+  if (request !== heroImportDecalRefreshRequest || model !== heroImportModel || binding !== livePlacementDecalBinding || binding.disposed) return;
+  const draws = rendererModule.createProcPlantThreePlacementDecalDraws(applied.decals, binding);
+  draws.root.userData.procplantLiveOnly = true;
+  model.group.add(draws.root);
+  heroImportDecalDraws = draws;
+  app.dataset.heroImportDecalStatus = "ready";
+  app.dataset.heroImportDecalDraws = String(draws.audit.draws);
+  app.dataset.heroImportDecalTriangles = String(draws.audit.triangles);
+};
+
 const syncHeroSpineButtons = () => {
   const hasImport = heroImportPreview !== null && heroImportSpine !== null && heroImportSource !== null;
   const editing = heroSpineEditor !== null;
@@ -3236,7 +3296,9 @@ const disposeHeroSpineEditor = () => {
 
 const installHeroImportPreview = (authored: ProcPlantLabHeroPreview, fileName: string) => {
   const previous = heroImportPreview;
+  disposeHeroImportDecalDraws();
   heroImportPreview = authored.group;
+  heroImportModel = authored;
   heroImportSpine = authored.spine;
   heroImportAudit = {
     ...authored.audit,
@@ -3282,20 +3344,25 @@ const installHeroImportPreview = (authored: ProcPlantLabHeroPreview, fileName: s
   app.dataset.heroImportSourceMaterialImages = String(authored.sourceMaterialAudit.decodedImages);
   app.dataset.heroImportSourceMaterialKtx2Images = String(authored.sourceMaterialAudit.ktx2DecodedImages);
   app.dataset.heroImportSourceMaterialKtx2Decoder = authored.sourceMaterialAudit.ktx2Decoder ?? "";
+  app.dataset.heroImportDecalTarget = authored.importedDecalTarget ? "static" : authored.importedDecalTargetInspection.reason;
   if (heroSpineEditor) {
     heroSpineEditor.setTarget(authored.trunk);
     heroSpineEditor.copyDisplayTransform(authored.group);
   }
   disposeHeroImportGroup(previous);
+  void refreshHeroImportDecalDraws();
   clearHeroGlbButton.disabled = regenerationBusy;
   syncHeroSpineButtons();
+  syncPlacementButtons();
 };
 
 const disposeHeroImportPreview = () => {
   heroSpineRebuildRequest++;
   disposeHeroSpineEditor();
+  disposeHeroImportDecalDraws();
   disposeHeroImportGroup(heroImportPreview);
   heroImportPreview = null;
+  heroImportModel = null;
   heroImportAudit = null;
   heroImportSource = null;
   heroImportFileName = "";
@@ -3321,11 +3388,14 @@ const disposeHeroImportPreview = () => {
   delete app.dataset.heroImportSourceMaterialKtx2Images;
   delete app.dataset.heroImportSourceMaterialKtx2Decoder;
   delete app.dataset.heroImportSourceMaterialKtx2Uploads;
+  delete app.dataset.heroImportDecalTarget;
+  delete app.dataset.heroImportDecalStatus;
   delete app.dataset.heroImportLastExportBytes;
   delete app.dataset.heroImportLastExportMaterials;
   delete app.dataset.heroImportLastExportTextures;
   delete app.dataset.heroImportLastExportImages;
   syncHeroSpineButtons();
+  syncPlacementButtons();
 };
 
 const DENSE_TREE_LOD_DISTANCE_SCALE = 0.4;
@@ -4696,7 +4766,14 @@ pruneModeButton.addEventListener("click", () => {
 });
 
 placementModeButton.addEventListener("click", () => {
-  if (regenerationBusy || !heroLodState || (!heroLodState.graph && !selectedGenome().weberPenn)) return;
+  const importedPlacementAvailable = Boolean(
+    heroImportModel?.importedDecalTarget
+      && livePlacementDecalBinding
+      && !livePlacementDecalBinding.disposed,
+  );
+  const generatedPlacementAvailable = heroImportModel === null
+    && Boolean(heroLodState?.graph || (heroLodState && selectedGenome().weberPenn));
+  if (regenerationBusy || (!importedPlacementAvailable && !generatedPlacementAvailable)) return;
   placementModeVisible = !placementModeVisible;
   if (placementModeVisible && pruneModeVisible) {
     pruneModeVisible = false;
@@ -4716,9 +4793,13 @@ placementModeButton.addEventListener("click", () => {
   controls.enabled = !placementModeVisible && !pruneModeVisible && !vineGuideModeVisible;
   syncPlacementButtons();
   void refreshHeroPlacementTool();
-  setSaveStatus(placementModeVisible
-    ? "Place mode: choose a part, then click a highlighted branch."
-    : "Place mode closed.");
+  setSaveStatus(
+    placementModeVisible
+      ? heroImportModel
+        ? "Imported-hero decal mode: click a triangle on the static baked trunk. The UV0 quad is bound to that exact primitive and authored-geometry signature."
+        : "Place mode: choose a supported plant part, then click a highlighted source segment. Branches, clusters, and organs regenerate from the segment frame."
+      : "Place mode closed.",
+  );
 });
 
 vineGuideModeButton.addEventListener("click", async () => {
@@ -5110,6 +5191,53 @@ canvas.addEventListener("pointermove", (event) => {
 });
 
 canvas.addEventListener("click", async (event) => {
+  const model = heroImportModel;
+  const target = model?.importedDecalTarget;
+  const binding = livePlacementDecalBinding;
+  if (!placementModeVisible || !model || !target || !binding || binding.disposed || regenerationBusy) return;
+  const rect = canvas.getBoundingClientRect();
+  const pointer = new THREE.Vector2(
+    ((event.clientX - rect.left) / rect.width) * 2 - 1,
+    -((event.clientY - rect.top) / rect.height) * 2 + 1,
+  );
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(pointer, camera);
+  const hit = raycaster.intersectObject(model.trunk, false)[0];
+  if (!hit || hit.faceIndex === undefined || hit.faceIndex === null) {
+    setSaveStatus("No static imported-hero trunk triangle was selected.");
+    return;
+  }
+  const module = await import("./procplant-imported-hero-decal");
+  if (!placementModeVisible || model !== heroImportModel || binding !== livePlacementDecalBinding || binding.disposed) return;
+  let authored = heroImportDecalPackage;
+  if (authored && authored.target.geometrySignature !== target.geometrySignature) {
+    setSaveStatus("Existing imported-hero decals target a different source or authored spine. Undo them before placing on this geometry.");
+    return;
+  }
+  authored ??= module.createProcPlantImportedHeroDecalPackage(target);
+  model.trunk.updateMatrixWorld(true);
+  const localPoint = model.trunk.worldToLocal(hit.point.clone());
+  const appended = module.appendProcPlantImportedHeroDecal(authored, model.trunk.geometry, {
+    triangleIndex: hit.faceIndex,
+    localPoint,
+    size: 0.18,
+    binding: binding.binding,
+  });
+  if (!appended.operation) {
+    setSaveStatus(appended.reason === "cap"
+      ? "The 32-decal imported-hero cap has been reached."
+      : appended.reason === "target-mismatch"
+        ? "The imported-hero geometry changed; no decal was placed."
+        : "That imported-hero triangle cannot carry a stable decal anchor.");
+    return;
+  }
+  heroImportDecalPackage = appended.package;
+  await refreshHeroImportDecalDraws();
+  syncPlacementButtons();
+  setSaveStatus(`Placed exact UV0 decal on imported primitive triangle ${hit.faceIndex}.`);
+});
+
+canvas.addEventListener("click", async (event) => {
   const target = heroLodState;
   const tool = heroPlacementTool;
   if (!placementModeVisible || !tool || !target?.graph || regenerationBusy) return;
@@ -5284,6 +5412,16 @@ resetPruneButton.addEventListener("click", () => {
 });
 
 undoPlacementButton.addEventListener("click", async () => {
+  if (heroImportModel) {
+    if (!heroImportDecalPackage?.operations.length || regenerationBusy) return;
+    const { undoLastProcPlantImportedHeroDecal } = await import("./procplant-imported-hero-decal");
+    heroImportDecalPackage = undoLastProcPlantImportedHeroDecal(heroImportDecalPackage);
+    if (heroImportDecalPackage.operations.length === 0) heroImportDecalPackage = null;
+    await refreshHeroImportDecalDraws();
+    syncPlacementButtons();
+    setSaveStatus("Removed the last imported-hero decal and disposed its live quad geometry.");
+    return;
+  }
   const key = currentPruneKey();
   const placementPackage = organPlacementPackages.get(key);
   if (!placementPackage?.operations.length || regenerationBusy) return;
@@ -5976,6 +6114,53 @@ exportGlbButton.addEventListener("click", async () => {
     setSaveStatus("Generate a plant before exporting GLB.");
     return;
   }
+  if (heroImportModel) {
+    const model = heroImportModel;
+    const authored = heroImportDecalPackage;
+    let decals: ProcPlantMaterializedPlacementDecal[] = [];
+    if (authored?.operations.length) {
+      if (!model.importedDecalTarget || !livePlacementDecalBinding || livePlacementDecalBinding.disposed || !livePlacementDecalPixelSource) {
+        app.dataset.lastGlbImportedHeroDecalsRejected = String(authored.operations.length);
+        setSaveStatus("Imported-hero GLB export stopped: restore the exact static target and matching PNG/WebP/JPEG binding, or undo unresolved decals.");
+        return;
+      }
+      const module = await import("./procplant-imported-hero-decal");
+      const applied = module.applyProcPlantImportedHeroDecals(model.importedDecalTarget, model.trunk.geometry, authored, [livePlacementDecalBinding.binding]);
+      if (!applied.targetMatched || applied.decals.length !== authored.operations.length || applied.unsupported.length > 0) {
+        app.dataset.lastGlbImportedHeroDecalsRejected = String(authored.operations.length);
+        setSaveStatus("Imported-hero GLB export stopped: a primitive signature, triangle, or image binding is stale. No partial decal export was produced.");
+        return;
+      }
+      decals = applied.decals;
+    }
+    delete app.dataset.lastGlbImportedHeroDecalsRejected;
+    exportGlbButton.disabled = true;
+    try {
+      const module = await import("./procplant-lab-authoring-imports");
+      const adopted = decals.length > 0
+        ? await module.exportProcPlantLabHeroPreviewWithPlacementDecals(model.group, heroImportAudit, decals, livePlacementDecalPixelSource!)
+        : { bytes: await module.exportProcPlantLabHeroPreview(model.group, heroImportAudit), draws: 0, triangles: 0, embeddedBytes: 0, contentHash: "none" };
+      const url = URL.createObjectURL(new Blob([adopted.bytes], { type: "model/gltf-binary" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `procplant-imported-hero-${app.dataset.heroImportHash ?? state.seed}.glb`;
+      link.click();
+      URL.revokeObjectURL(url);
+      app.dataset.heroImportLastExportBytes = String(adopted.bytes.byteLength);
+      app.dataset.lastGlbImportedHeroDecals = String(adopted.draws);
+      app.dataset.lastGlbImportedHeroDecalTriangles = String(adopted.triangles);
+      app.dataset.lastGlbImportedHeroDecalEmbeddedBytes = String(adopted.embeddedBytes);
+      setSaveStatus(decals.length > 0
+        ? `Imported hero GLB exported with ${decals.length} signature-bound UV0 decal draw${decals.length === 1 ? "" : "s"} and deterministic embedded PNG.`
+        : "Imported hero GLB exported with fitted spine, source material, and authored attachments.");
+    } catch (error) {
+      console.error("[procplants] Imported hero GLB export failed.", error);
+      setSaveStatus(`Imported hero GLB export failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      exportGlbButton.disabled = false;
+    }
+    return;
+  }
   const authoredDecals = currentPlacementPackage()?.operations.filter((operation) => operation.kind === "decal").length ?? 0;
   const exportableDecals = authoredDecals > 0
     && livePlacementDecalBinding
@@ -5987,30 +6172,11 @@ exportGlbButton.addEventListener("click", async () => {
     setSaveStatus("GLB export stopped: every decal needs the exact active binding plus retained source bytes and decoded pixels. Rebind the matching image or remove the unresolved decals.");
     return;
   }
-  if (authoredDecals > 0 && heroImportPreview) {
-    app.dataset.lastGlbPlacementDecalsRejected = String(authoredDecals);
-    setSaveStatus("GLB export stopped: placement decals are not adopted onto imported-hero exports. Remove them or export the generated hero; no material target is guessed.");
-    return;
-  }
   delete app.dataset.lastGlbPlacementDecalsRejected;
   exportGlbButton.disabled = true;
   setSaveStatus("Preparing GLB with vertex color, sway, tintability, and contract metadata…");
   const activeLod = heroLodState.controller.active;
   try {
-    if (heroImportPreview) {
-      const { downloadProcPlantLabHeroPreview } = await import("./procplant-lab-authoring-imports");
-      const exported = await downloadProcPlantLabHeroPreview(
-        heroImportPreview,
-        heroImportAudit,
-        app.dataset.heroImportHash ?? String(state.seed),
-      );
-      app.dataset.heroImportLastExportBytes = String(exported.byteLength);
-      app.dataset.heroImportLastExportMaterials = String(exported.materials);
-      app.dataset.heroImportLastExportTextures = String(exported.textures);
-      app.dataset.heroImportLastExportImages = String(exported.images);
-      setSaveStatus("Imported hero GLB exported with fitted spine, bark UV, wind, collars, and instanced branch, leaf, and accessory anchors.");
-      return;
-    }
     const exportOptions = {
       name: `${state.primary}-${state.seed}-lod${activeLod.level}`,
       genomeId: selectedGenome().id,
@@ -6190,6 +6356,15 @@ document.querySelector<HTMLButtonElement>("#exportJson")!.addEventListener("clic
       graphOperations: currentPruneOperations().map((segmentId) => ({ operation: "remove", segmentId })),
       graphOperationGroups: currentPruneHistory().map((segmentIds) => ({ operation: "remove", segmentIds: [...segmentIds] })),
       organPlacements: currentPlacementPackage(),
+      importedHeroDecals: heroImportDecalPackage,
+      importedHeroDecalStatus: heroImportModel
+        ? {
+            targetEligibility: heroImportModel.importedDecalTargetInspection.reason,
+            liveStatus: app.dataset.heroImportDecalStatus ?? "none",
+            liveDraws: heroImportDecalDraws?.audit.draws ?? 0,
+            liveTriangles: heroImportDecalDraws?.audit.triangles ?? 0,
+          }
+        : null,
       placementDecalBinding: livePlacementDecalBinding && !livePlacementDecalBinding.disposed
         ? {
             ...livePlacementDecalBinding.metadata,
@@ -6379,6 +6554,7 @@ placementDecalFileInput.addEventListener("change", async () => {
     app.dataset.placementDecalBindingHeight = String(canvasSource.height);
     placementDecalStatus.textContent = `${file.name}: renderer-owned ${canvasSource.width}x${canvasSource.height} UV0 binding ready with retained source provenance and deterministic PNG GLB export.`;
     syncPlacementButtons();
+    void refreshHeroImportDecalDraws();
     regenerate();
   } catch (error) {
     console.error("[procplants] Placement decal binding failed.", error);
@@ -6404,6 +6580,7 @@ clearPlacementDecalButton.addEventListener("click", () => {
   delete app.dataset.placementDecalBindingHeight;
   placementDecalStatus.textContent = "Decal binding cleared. Existing decal authoring records remain in JSON and fail closed until their exact binding is restored.";
   syncPlacementButtons();
+  void refreshHeroImportDecalDraws();
   regenerate();
 });
 
