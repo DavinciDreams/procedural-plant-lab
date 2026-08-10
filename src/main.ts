@@ -117,8 +117,10 @@ import {
 import type {
   ProcPlantMaterializedPlacementDecal,
   ProcPlantOrganPlacementPackage,
-  ProcPlantPlaceableOrganKind,
 } from "./procplant-organ-placement-overrides";
+import type {
+  ProcPlantWeberPennOrganPlacementPackage,
+} from "./procplant-weber-penn-organ-placement";
 import type {
   ProcPlantThreePlacementDecalBindingHandle,
   ProcPlantThreePlacementDecalDrawPackage,
@@ -134,6 +136,8 @@ import type {
 } from "./procplant-hero-spine-editor";
 import type { ProcPlantMeshSpine } from "./procplant-mesh-helper";
 import type { ProcPlantLabHeroPreview } from "./procplant-lab-authoring-imports";
+import type { ProcPlantImportedHeroDecalPackage } from "./procplant-imported-hero-decal";
+import type { ProcPlantImportedHeroDecalUiController } from "./procplant-imported-hero-decal-ui";
 import type { ProcPlantMaterialGraphEditorState } from "./procplant-material-graph-editor";
 import type { ProcPlantSpatialForceEditorState } from "./procplant-spatial-force-editor-ui";
 import type { ProcPlantSpatialForceAudit } from "./procplant-spatial-force";
@@ -469,6 +473,11 @@ app.innerHTML = `
         <button id="resetVineGuide" type="button" disabled>Reset Vine Guide</button>
       </div>
       <div class="button-row">
+        <button id="attachVineLiveSupport" type="button" disabled>Attach Guide to Live Trellis</button>
+        <button id="deformVineLiveSupport" type="button" disabled>Move + Rebuild Trellis</button>
+        <button id="resetVineLiveSupport" type="button" disabled>Reset Live Support</button>
+      </div>
+      <div class="button-row">
         <button id="inspectReadiness" type="button">Asset QA</button>
         <button id="importCutout" type="button">Import Cutout</button>
         <button id="editCutoutContour" type="button" disabled>Edit Contour</button>
@@ -480,6 +489,10 @@ app.innerHTML = `
         <button id="bakeImpostor" type="button" disabled>Bake Far Impostor</button>
         <button id="exportImpostor" type="button" disabled>Export Impostor GLB</button>
       </div>
+      <div class="button-row">
+        <button id="openLod5Catalog" type="button" aria-expanded="false" aria-controls="lod5CatalogHost">Five-tier Catalog</button>
+      </div>
+      <div id="lod5CatalogHost" hidden></div>
       <div class="button-row">
         <button id="importHeroGlb" type="button">Import Hero GLB</button>
         <button id="clearHeroGlb" type="button" disabled>Clear Hero Import</button>
@@ -713,10 +726,13 @@ let vineGuideVisualization: THREE.Group | null = null;
 let crownVolumeTool: ProcPlantCrownVolumeTool | null = null;
 let cutoutPreview: THREE.Mesh<THREE.BufferGeometry, THREE.MeshLambertMaterial> | null = null;
 let heroImportPreview: THREE.Group | null = null;
+let heroImportModel: ProcPlantLabHeroPreview | null = null;
 let heroImportAudit: Record<string, unknown> | null = null;
 let heroImportSource: ArrayBuffer | null = null;
 let heroImportFileName = "";
 let heroImportSpine: ProcPlantMeshSpine | null = null;
+let heroImportDecalPackage: ProcPlantImportedHeroDecalPackage | null = null;
+let heroImportDecalUi: ProcPlantImportedHeroDecalUiController | null = null;
 let heroSpineEditor: ProcPlantHeroSpineEditor | null = null;
 let heroSpineEditorState: ProcPlantHeroSpineEditorState | null = null;
 let heroSpineRebuildRequest = 0;
@@ -738,12 +754,15 @@ let activeCutoutSource: ActiveCutoutSource | null = null;
 let activeCutout: ProcPlantCutout | null = null;
 const pruneOperations = new Map<string, string[][]>();
 const weberPennTrimTargets = new Map<string, ProcPlantWeberPennTrimTarget>();
-const organPlacementPackages = new Map<string, ProcPlantOrganPlacementPackage>();
+type AuthoredOrganPlacementPackage = ProcPlantOrganPlacementPackage | ProcPlantWeberPennOrganPlacementPackage;
+const organPlacementPackages = new Map<string, AuthoredOrganPlacementPackage>();
 let livePlacementDecalBinding: ProcPlantThreePlacementDecalBindingHandle | null = null;
 let livePlacementDecalPixelSource: ProcPlantPlacementDecalPixelSource | null = null;
 let livePlacementDecalFileName = "";
 const retiredPlacementDecalBindings: ProcPlantThreePlacementDecalBindingHandle[] = [];
 let vineGuidePackage: ProcPlantVineGuidePackage | null = null;
+let vineLiveSupportUi: import("./procplant-vine-live-support-ui").ProcPlantLabLiveVineUi | null = null;
+let vineLiveSupportUiPromise: Promise<import("./procplant-vine-live-support-ui").ProcPlantLabLiveVineUi> | null = null;
 let pruneModeVisible = false;
 let placementModeVisible = false;
 let vineGuideModeVisible = false;
@@ -912,6 +931,8 @@ const exportGlbButton = document.querySelector<HTMLButtonElement>("#exportGlb")!
 const bakeImpostorButton = document.querySelector<HTMLButtonElement>("#bakeImpostor")!;
 const exportImpostorButton = document.querySelector<HTMLButtonElement>("#exportImpostor")!;
 const impostorStatus = document.querySelector<HTMLOutputElement>("#impostorStatus")!;
+const openLod5CatalogButton = document.querySelector<HTMLButtonElement>("#openLod5Catalog")!;
+const lod5CatalogHost = document.querySelector<HTMLElement>("#lod5CatalogHost")!;
 const debugIrButton = document.querySelector<HTMLButtonElement>("#debugIr")!;
 const debugFramesButton = document.querySelector<HTMLButtonElement>("#debugFrames")!;
 const debugWindButton = document.querySelector<HTMLButtonElement>("#debugWind")!;
@@ -954,6 +975,9 @@ const vineGuideModeButton = document.querySelector<HTMLButtonElement>("#vineGuid
 const vineGuideSupportModeButton = document.querySelector<HTMLButtonElement>("#vineGuideSupportMode")!;
 const undoVineGuideButton = document.querySelector<HTMLButtonElement>("#undoVineGuide")!;
 const resetVineGuideButton = document.querySelector<HTMLButtonElement>("#resetVineGuide")!;
+const attachVineLiveSupportButton = document.querySelector<HTMLButtonElement>("#attachVineLiveSupport")!;
+const deformVineLiveSupportButton = document.querySelector<HTMLButtonElement>("#deformVineLiveSupport")!;
+const resetVineLiveSupportButton = document.querySelector<HTMLButtonElement>("#resetVineLiveSupport")!;
 let pendingVineGuideSerialized: string | null = null;
 const crownVolumeModeButton = document.querySelector<HTMLButtonElement>("#crownVolumeMode")!;
 const crownVolumeAddButton = document.querySelector<HTMLButtonElement>("#crownVolumeAdd")!;
@@ -1271,6 +1295,7 @@ type ProcPlantOrganPlacementModule = typeof import("./procplant-organ-placement-
 type ProcPlantPlacementDecalThreeModule = typeof import("./procplant-placement-decal-three");
 type ProcPlantVineGuideAuthoringModule = typeof import("./procplant-vine-guide-authoring");
 type ProcPlantVineSurfaceAuthoringModule = typeof import("./procplant-vine-surface-authoring");
+type ProcPlantFiveTierAtlasCatalogUiModule = typeof import("./procplant-five-tier-atlas-catalog-ui");
 type ProcPlantGeneratorGraphOperation = import("./procplant-generator-graph").ProcPlantGeneratorGraphOperation;
 let procPlantRulesModule: ProcPlantRulesModule | null = null;
 let procPlantRulesPromise: Promise<ProcPlantRulesModule> | null = null;
@@ -1299,7 +1324,19 @@ let procPlantVineGuideAuthoringModule: ProcPlantVineGuideAuthoringModule | null 
 let procPlantVineGuideAuthoringPromise: Promise<ProcPlantVineGuideAuthoringModule> | null = null;
 let procPlantVineSurfaceAuthoringModule: ProcPlantVineSurfaceAuthoringModule | null = null;
 let procPlantVineSurfaceAuthoringPromise: Promise<ProcPlantVineSurfaceAuthoringModule> | null = null;
+let procPlantFiveTierAtlasCatalogUiPromise: Promise<ProcPlantFiveTierAtlasCatalogUiModule> | null = null;
+let procPlantFiveTierAtlasCatalogUi: import("./procplant-five-tier-atlas-catalog-ui").ProcPlantFiveTierAtlasCatalogUi | null = null;
 const graphOverrideOperations = new Map<string, ProcPlantGeneratorGraphOperation[]>();
+const loadProcPlantFiveTierAtlasCatalogUi = () => {
+  if (procPlantFiveTierAtlasCatalogUiPromise) return procPlantFiveTierAtlasCatalogUiPromise;
+  procPlantFiveTierAtlasCatalogUiPromise = import("./procplant-five-tier-atlas-catalog-ui").then((module) => {
+    app.dataset.lod5CatalogLoaded = "true";
+    return module;
+  }).finally(() => {
+    procPlantFiveTierAtlasCatalogUiPromise = null;
+  });
+  return procPlantFiveTierAtlasCatalogUiPromise;
+};
 const loadProcPlantGraphEditorUi = () => {
   if (procPlantGraphEditorUiModule) return Promise.resolve(procPlantGraphEditorUiModule);
   if (procPlantGraphEditorUiPromise) return procPlantGraphEditorUiPromise;
@@ -1397,6 +1434,8 @@ const loadProcPlantOrganPlacement = () => {
   });
   return procPlantOrganPlacementPromise;
 };
+const loadProcPlantWeberPennOrganPlacement = () => import("./procplant-weber-penn-organ-placement");
+const loadProcPlantLabPlacementAuthoring = () => import("./procplant-lab-placement-authoring");
 const loadProcPlantPlacementDecalThree = () => {
   if (procPlantPlacementDecalThreeModule) return Promise.resolve(procPlantPlacementDecalThreeModule);
   if (procPlantPlacementDecalThreePromise) return procPlantPlacementDecalThreePromise;
@@ -2927,42 +2966,29 @@ const disposeHeroPlacementTool = () => {
   app.dataset.organPlacementToolReady = "false";
 };
 
-const placementKind = (): ProcPlantPlaceableOrganKind => {
-  const value = placementKindSelect.value;
-  switch (value) {
-    case "flower":
-    case "fruit":
-    case "berry":
-    case "cone":
-    case "thorn":
-    case "aerialRoot":
-    case "coniferSpray":
-    case "fernFrond":
-    case "palmFrond":
-    case "mossTuft":
-    case "branch":
-    case "knot":
-    case "decal":
-      return value;
-    default:
-      return "leaf";
-  }
-};
-
 const syncPlacementButtons = () => {
-  const graphAvailable = Boolean(heroLodState?.graph);
+  if (heroImportModel) {
+    heroImportDecalUi?.syncButtons();
+    if (!heroImportDecalUi) placementModeButton.disabled = true;
+    return;
+  }
+  const weberPenn = Boolean(selectedGenome().weberPenn);
+  const graphAvailable = Boolean(heroLodState?.graph || (heroLodState && weberPenn));
   if (!graphAvailable && placementModeVisible) {
     placementModeVisible = false;
     disposeHeroPlacementTool();
     controls.enabled = !pruneModeVisible;
   }
   const genome = selectedGenome();
+  for (const option of placementKindSelect.options) {
+    option.disabled = weberPenn && !["leaf", "flower", "fruit", "berry", "cone"].includes(option.value);
+  }
   const flowerOption = placementKindSelect.querySelector<HTMLOptionElement>('option[value="flower"]');
-  if (flowerOption) flowerOption.disabled = !genome.flower;
+  if (flowerOption) flowerOption.disabled = flowerOption.disabled || !genome.flower;
   if (!genome.flower && placementKindSelect.value === "flower") placementKindSelect.value = "leaf";
   const decalOption = placementKindSelect.querySelector<HTMLOptionElement>('option[value="decal"]');
   const decalReady = Boolean(livePlacementDecalBinding && !livePlacementDecalBinding.disposed);
-  if (decalOption) decalOption.disabled = !decalReady;
+  if (decalOption) decalOption.disabled = decalOption.disabled || !decalReady;
   if (!decalReady && placementKindSelect.value === "decal") placementKindSelect.value = "leaf";
   placementModeButton.disabled = regenerationBusy || !graphAvailable;
   placementModeButton.setAttribute("aria-pressed", String(placementModeVisible));
@@ -2981,13 +3007,43 @@ const refreshHeroPlacementTool = async () => {
   disposeHeroPlacementTool();
   const request = ++heroPlacementToolRequest;
   const target = heroLodState;
-  if (!placementModeVisible || !target?.graph) {
+  if (!placementModeVisible || heroImportModel || !target || (!target.graph && !selectedGenome().weberPenn)) {
     syncPlacementButtons();
     return;
   }
   const { createProcPlantPruneTool } = await loadProcPlantAuthoringTools();
-  if (request !== heroPlacementToolRequest || !placementModeVisible || heroLodState !== target || !target.graph) return;
-  const tool = createProcPlantPruneTool(target.graph, { visible: true, opacity: 0.2, radiusScale: 2.4 });
+  if (request !== heroPlacementToolRequest || !placementModeVisible || heroLodState !== target) return;
+  if (!target.weberPennTrim && selectedGenome().weberPenn) {
+    const built = buildProcPlantTemplate(selectedGenome(), selectedGeneratorSeed(), envFromState());
+    if (request !== heroPlacementToolRequest || !placementModeVisible || heroLodState !== target) return;
+    const sourceLod: ProcPlantCompiledLod = {
+      level: 0,
+      label: "full",
+      distance: 0,
+      template: built.template,
+      triangles: built.template.idx.length / 3,
+      vertices: built.template.pos.length / 3,
+    };
+    const sourceGeometry = templateToGeometry(built.template);
+    for (const geometry of target.geometries) geometry.dispose();
+    target.mesh.geometry = sourceGeometry;
+    target.lods = [sourceLod];
+    target.geometries = [sourceGeometry];
+    target.controller = new ProcPlantLodController([sourceLod], camera.position.distanceTo(target.mesh.position) / target.scale);
+    target.graph = built.graph;
+    target.weberPennTrim = built.weberPennTrim ?? null;
+    target.stats = built.stats;
+    target.authoringGeometryLocked = true;
+    app.dataset.heroLod = "full";
+    app.dataset.heroLodLevel = "0";
+    app.dataset.heroLodPending = "false";
+    app.dataset.heroTemplateTriangles = String(sourceLod.triangles);
+    app.dataset.heroTemplateVertices = String(sourceLod.vertices);
+    refreshPreviewGeometryStats();
+  }
+  const pickerGraph = target.weberPennTrim?.pickerGraph ?? target.graph;
+  if (request !== heroPlacementToolRequest || !placementModeVisible || heroLodState !== target || !pickerGraph) return;
+  const tool = createProcPlantPruneTool(pickerGraph, { visible: true, opacity: 0.2, radiusScale: 2.4 });
   tool.object.position.copy(target.mesh.position);
   tool.object.quaternion.copy(target.mesh.quaternion);
   tool.object.scale.copy(target.mesh.scale);
@@ -3042,8 +3098,40 @@ const refreshVineGuideVisualization = () => {
   scene.add(group);
 };
 
+const syncVineLiveSupportButtons = () => {
+  const guideReady = Boolean(vineGuidePackage && vineGuidePackage.points.length >= 2 && heroLodState?.mesh);
+  if (vineLiveSupportUi) return vineLiveSupportUi.sync();
+  attachVineLiveSupportButton.disabled = true;
+  deformVineLiveSupportButton.disabled = true;
+  resetVineLiveSupportButton.disabled = true;
+  app.dataset.vineLiveSupportStatus = "canonical";
+  app.dataset.vineLiveSupportBindings = "0";
+  if (!guideReady || regenerationBusy || vineLiveSupportUiPromise) return;
+  vineLiveSupportUiPromise = import("./procplant-vine-live-support-ui").then((module) => {
+    const ui = module.createProcPlantLabLiveVineUi({
+      app,
+      scene,
+      renderer,
+      attachButton: attachVineLiveSupportButton,
+      deformButton: deformVineLiveSupportButton,
+      resetButton: resetVineLiveSupportButton,
+      getBusy: () => regenerationBusy,
+      getGuide: () => vineGuidePackage,
+      setGuide: (authored) => { vineGuidePackage = authored; },
+      getGuideRoot: () => heroLodState?.mesh ?? null,
+      refreshGuide: refreshVineGuideVisualization,
+      syncGuide: syncVineGuideButtons,
+      setStatus: setSaveStatus,
+      regenerate,
+    });
+    vineLiveSupportUi = ui;
+    return ui;
+  }).finally(() => { vineLiveSupportUiPromise = null; });
+};
+
 const syncVineGuideButtons = () => {
   const available = Boolean(selectedSourceGenome().vine);
+  if (!available) vineLiveSupportUi?.clear();
   if (!available && vineGuideModeVisible) {
     vineGuideModeVisible = false;
     disposeVineGuideVisualization();
@@ -3060,6 +3148,7 @@ const syncVineGuideButtons = () => {
   app.dataset.vineGuideAvailable = String(available);
   app.dataset.vineGuideActive = String(vineGuideModeVisible && available);
   app.dataset.vineGuidePointCount = String(vineGuidePackage?.points.length ?? 0);
+  syncVineLiveSupportButtons();
 };
 
 const disposeGroup = (group: THREE.Group | null) => {
@@ -3084,6 +3173,46 @@ const disposeHeroImportGroup = (preview: THREE.Group | null) => {
   scene.remove(preview);
 };
 
+const disposeHeroImportDecalDraws = () => {
+  heroImportDecalUi?.dispose();
+  heroImportDecalUi = null;
+};
+
+const refreshHeroImportDecalDraws = async () => {
+  const model = heroImportModel;
+  if (!model?.importedDecalTarget) {
+    app.dataset.heroImportDecalStatus = model?.importedDecalTargetInspection.reason ?? "no-import";
+    return;
+  }
+  if (!heroImportDecalUi) {
+    const ui = await import("./procplant-imported-hero-decal-ui");
+    if (model !== heroImportModel) return;
+    heroImportDecalUi = ui.createProcPlantImportedHeroDecalUiController({
+      canvas, camera, dataset: app.dataset, statusElement: placementDecalStatus,
+      placementKindSelect, placementModeButton, undoButton: undoPlacementButton, exportGlbButton,
+      importDecalButton: importPlacementDecalButton, clearDecalButton: clearPlacementDecalButton,
+      getPreview: () => heroImportModel,
+      getAuthored: () => heroImportDecalPackage,
+      setAuthored: (value) => { heroImportDecalPackage = value; },
+      getBinding: () => livePlacementDecalBinding,
+      getPixels: () => livePlacementDecalPixelSource,
+      getAudit: () => heroImportAudit,
+      getContentHash: () => app.dataset.heroImportHash ?? String(state.seed),
+      isPlacementActive: () => placementModeVisible,
+      isBusy: () => regenerationBusy,
+      closePlacement: () => {
+        placementModeVisible = false;
+        disposeHeroPlacementTool();
+        controls.enabled = !pruneModeVisible;
+      },
+      changed: syncPlacementButtons,
+      setStatus: setSaveStatus,
+    });
+  }
+  heroImportDecalUi.refresh();
+  heroImportDecalUi.syncButtons();
+};
+
 const syncHeroSpineButtons = () => {
   const hasImport = heroImportPreview !== null && heroImportSpine !== null && heroImportSource !== null;
   const editing = heroSpineEditor !== null;
@@ -3103,7 +3232,9 @@ const disposeHeroSpineEditor = () => {
 
 const installHeroImportPreview = (authored: ProcPlantLabHeroPreview, fileName: string) => {
   const previous = heroImportPreview;
+  disposeHeroImportDecalDraws();
   heroImportPreview = authored.group;
+  heroImportModel = authored;
   heroImportSpine = authored.spine;
   heroImportAudit = {
     ...authored.audit,
@@ -3149,20 +3280,25 @@ const installHeroImportPreview = (authored: ProcPlantLabHeroPreview, fileName: s
   app.dataset.heroImportSourceMaterialImages = String(authored.sourceMaterialAudit.decodedImages);
   app.dataset.heroImportSourceMaterialKtx2Images = String(authored.sourceMaterialAudit.ktx2DecodedImages);
   app.dataset.heroImportSourceMaterialKtx2Decoder = authored.sourceMaterialAudit.ktx2Decoder ?? "";
+  app.dataset.heroImportDecalTarget = authored.importedDecalTarget ? "static" : authored.importedDecalTargetInspection.reason;
   if (heroSpineEditor) {
     heroSpineEditor.setTarget(authored.trunk);
     heroSpineEditor.copyDisplayTransform(authored.group);
   }
   disposeHeroImportGroup(previous);
+  void refreshHeroImportDecalDraws();
   clearHeroGlbButton.disabled = regenerationBusy;
   syncHeroSpineButtons();
+  syncPlacementButtons();
 };
 
 const disposeHeroImportPreview = () => {
   heroSpineRebuildRequest++;
   disposeHeroSpineEditor();
+  disposeHeroImportDecalDraws();
   disposeHeroImportGroup(heroImportPreview);
   heroImportPreview = null;
+  heroImportModel = null;
   heroImportAudit = null;
   heroImportSource = null;
   heroImportFileName = "";
@@ -3188,11 +3324,14 @@ const disposeHeroImportPreview = () => {
   delete app.dataset.heroImportSourceMaterialKtx2Images;
   delete app.dataset.heroImportSourceMaterialKtx2Decoder;
   delete app.dataset.heroImportSourceMaterialKtx2Uploads;
+  delete app.dataset.heroImportDecalTarget;
+  delete app.dataset.heroImportDecalStatus;
   delete app.dataset.heroImportLastExportBytes;
   delete app.dataset.heroImportLastExportMaterials;
   delete app.dataset.heroImportLastExportTextures;
   delete app.dataset.heroImportLastExportImages;
   syncHeroSpineButtons();
+  syncPlacementButtons();
 };
 
 const DENSE_TREE_LOD_DISTANCE_SCALE = 0.4;
@@ -3559,8 +3698,14 @@ const performRegeneration = async (request: number) => {
       )
     : undefined;
   const authoredPlacements = currentPlacementPackage();
+  const authoredWeberPlacements = authoredPlacements?.contract === "procplants.weber-penn-organ-placement-overrides"
+    ? authoredPlacements
+    : null;
+  const authoredGraphPlacements = authoredPlacements?.contract === "procplants.organ-placement-overrides"
+    ? authoredPlacements
+    : null;
   const authoringToolsPromise = authoredPrunes.length > 0 ? loadProcPlantAuthoringTools() : null;
-  const placementModulePromise = authoredPlacements?.operations.length ? loadProcPlantOrganPlacement() : null;
+  const placementModulePromise = authoredGraphPlacements?.operations.length ? loadProcPlantOrganPlacement() : null;
   const shouldCompileHeroLods = authoredPrunes.length === 0 && !authoredPlacements?.operations.length && !productionDag && !spatialForcesActive;
   const lodResultPromise = shouldCompileHeroLods
     ? heroLodCompiler.compile(genome, generatorSeed, env).then(
@@ -3579,9 +3724,12 @@ const performRegeneration = async (request: number) => {
 
   // Finish both replacements before removing the visible scene. This keeps a
   // failed or superseded build from leaving a partially-empty preview.
-  let heroBuild = productionDag?.build ?? (biome.heroTemplate && !weberPennTrimOverrides && !spatialForcesActive
+  let heroBuild = productionDag?.build ?? (biome.heroTemplate && !weberPennTrimOverrides && !authoredWeberPlacements?.operations.length && !spatialForcesActive
     ? null
-    : buildProcPlantTemplate(genome, generatorSeed, env, { trimOverrides: weberPennTrimOverrides }));
+    : buildProcPlantTemplate(genome, generatorSeed, env, {
+        trimOverrides: weberPennTrimOverrides,
+        placementOverrides: authoredWeberPlacements ?? undefined,
+      }));
   if (heroBuild && authoredPrunes.length > 0 && !genome.weberPenn && !genome.branchModules) {
     const { pruneProcPlantGraph } = await authoringToolsPromise!;
     if (request !== regenerationRequest) {
@@ -3595,14 +3743,14 @@ const performRegeneration = async (request: number) => {
     heroBuild = buildProcPlantTemplateFromGraph(genome, pruned.graph, env);
   }
   let materializedPlacementDecals: ProcPlantMaterializedPlacementDecal[] = [];
-  if (heroBuild && authoredPlacements?.operations.length && !genome.weberPenn && !genome.branchModules && !genome.spaceColonization) {
+  if (heroBuild && authoredGraphPlacements?.operations.length && !genome.weberPenn && !genome.branchModules && !genome.spaceColonization) {
     const placementModule = await placementModulePromise!;
     if (request !== regenerationRequest) {
       disposeGroup(biome.group);
       return;
     }
     const source = placementModule.createProcPlantOrganPlacementTarget(genome.id, state.seed, heroBuild.graph);
-    const applied = placementModule.applyProcPlantOrganPlacementOverrides(heroBuild.graph, source, authoredPlacements, {
+    const applied = placementModule.applyProcPlantOrganPlacementOverrides(heroBuild.graph, source, authoredGraphPlacements, {
       decalBindings: livePlacementDecalBinding && !livePlacementDecalBinding.disposed
         ? [livePlacementDecalBinding.binding]
         : [],
@@ -3761,6 +3909,18 @@ const performRegeneration = async (request: number) => {
     delete app.dataset.weberPennTrimRemovedLeaves;
     delete app.dataset.weberPennTrimBeforeTriangles;
     delete app.dataset.weberPennTrimAfterTriangles;
+  }
+  const weberPlacementAudit = nextHeroLodState.weberPennTrim?.placementAudit;
+  if (weberPlacementAudit) {
+    app.dataset.organPlacementTargetMatched = String(weberPlacementAudit.status !== "target-mismatch");
+    app.dataset.organPlacementApplied = String(weberPlacementAudit.appliedOperationIds.length);
+    app.dataset.organPlacementUnsupported = String(weberPlacementAudit.operations.filter((operation) => operation.status === "unsupported").length);
+    app.dataset.weberPennOrganPlacementStatus = weberPlacementAudit.status;
+  } else if (genome.weberPenn) {
+    delete app.dataset.organPlacementTargetMatched;
+    delete app.dataset.organPlacementApplied;
+    delete app.dataset.organPlacementUnsupported;
+    delete app.dataset.weberPennOrganPlacementStatus;
   }
 
   const previousBiome = biomeGroup;
@@ -4024,6 +4184,32 @@ randomSeedButton.addEventListener("click", () => {
   clearChainTubeOverrides("changed-seed");
   state.seed = Math.floor(Math.random() * 1_000_000);
   regenerate();
+});
+
+openLod5CatalogButton.addEventListener("click", async () => {
+  if (procPlantFiveTierAtlasCatalogUi) {
+    procPlantFiveTierAtlasCatalogUi.dispose();
+    procPlantFiveTierAtlasCatalogUi = null;
+    lod5CatalogHost.hidden = true;
+    openLod5CatalogButton.setAttribute("aria-expanded", "false");
+    openLod5CatalogButton.textContent = "Five-tier Catalog";
+    return;
+  }
+  openLod5CatalogButton.disabled = true;
+  openLod5CatalogButton.textContent = "Loading Catalog...";
+  try {
+    const module = await loadProcPlantFiveTierAtlasCatalogUi();
+    lod5CatalogHost.hidden = false;
+    procPlantFiveTierAtlasCatalogUi = module.createProcPlantFiveTierAtlasCatalogUi({ host: lod5CatalogHost });
+    openLod5CatalogButton.setAttribute("aria-expanded", "true");
+    openLod5CatalogButton.textContent = "Close Catalog";
+  } catch (error) {
+    lod5CatalogHost.hidden = true;
+    setSaveStatus(`Five-tier catalog unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    openLod5CatalogButton.textContent = "Five-tier Catalog";
+  } finally {
+    openLod5CatalogButton.disabled = false;
+  }
 });
 
 regenerateButton.addEventListener("click", () => regenerate());
@@ -4516,7 +4702,8 @@ pruneModeButton.addEventListener("click", () => {
 });
 
 placementModeButton.addEventListener("click", () => {
-  if (regenerationBusy || !heroLodState?.graph) return;
+  if (regenerationBusy || (!heroImportModel?.importedDecalTarget
+    && (!heroLodState || (!heroLodState.graph && !selectedGenome().weberPenn)))) return;
   placementModeVisible = !placementModeVisible;
   if (placementModeVisible && pruneModeVisible) {
     pruneModeVisible = false;
@@ -4536,11 +4723,9 @@ placementModeButton.addEventListener("click", () => {
   controls.enabled = !placementModeVisible && !pruneModeVisible && !vineGuideModeVisible;
   syncPlacementButtons();
   void refreshHeroPlacementTool();
-  setSaveStatus(
-    placementModeVisible
-      ? "Place mode: choose a supported plant part, then click a highlighted source segment. Branches, clusters, and organs regenerate from the segment frame."
-      : "Place mode closed.",
-  );
+  void import("./procplant-lab-placement-authoring").then((module) => {
+    setSaveStatus(module.describeProcPlantLabPlacementMode(placementModeVisible, Boolean(heroImportModel)));
+  });
 });
 
 vineGuideModeButton.addEventListener("click", async () => {
@@ -4584,6 +4769,7 @@ vineGuideSupportModeButton.addEventListener("click", async () => {
 
 undoVineGuideButton.addEventListener("click", async () => {
   if (!vineGuidePackage || regenerationBusy) return;
+  vineLiveSupportUi?.clear();
   const module = await loadProcPlantVineGuideAuthoring();
   vineGuidePackage = module.undoLastProcPlantVineGuidePoint(vineGuidePackage);
   if (vineGuidePackage.points.length === 0) vineGuidePackage = null;
@@ -4597,6 +4783,7 @@ undoVineGuideButton.addEventListener("click", async () => {
 
 resetVineGuideButton.addEventListener("click", () => {
   if (!vineGuidePackage || regenerationBusy) return;
+  vineLiveSupportUi?.clear();
   vineGuidePackage = null;
   syncVineGuideButtons();
   refreshVineGuideVisualization();
@@ -4654,6 +4841,7 @@ canvas.addEventListener("click", async (event) => {
   vineGuidePackage ??= module.createProcPlantVineGuidePackage(
     module.createProcPlantVineGuideTarget(sourceGenome, state.seed),
   );
+  vineLiveSupportUi?.clear();
   try {
     if (vineGuideStaticSupportEnabled) {
       const surface = await loadProcPlantVineSurfaceAuthoring();
@@ -4830,105 +5018,36 @@ canvas.addEventListener("click", async (event) => {
     setSaveStatus("No branch segment selected for placement.");
     return;
   }
-  const segment = target.graph.segmentRecords.find((candidate) => candidate.id === hit.segmentId);
-  const start = segment ? target.graph.stems[segment.startNodeIndex] : null;
-  const end = segment ? target.graph.stems[segment.endNodeIndex] : null;
-  if (!segment || !start || !end) {
-    setSaveStatus("That segment no longer has a stable graph frame.");
-    return;
-  }
-  if (segment.id.startsWith("placed-branch:") || segment.id.startsWith("placed-knot:")) {
-    setSaveStatus("Place additional parts on a source branch; authored outputs are regenerated rather than stable placement targets.");
-    return;
-  }
   tool.object.updateMatrixWorld(true);
   const localPoint = tool.object.worldToLocal(hit.point.clone());
-  const axis = end.position.clone().sub(start.position);
-  const axisLengthSq = axis.lengthSq();
-  if (axisLengthSq < 1e-10) {
-    setSaveStatus("That segment is too short for a stable placement.");
-    return;
-  }
-  const axialT = THREE.MathUtils.clamp(localPoint.clone().sub(start.position).dot(axis) / axisLengthSq, 0.02, 0.98);
-  const placementModule = await loadProcPlantOrganPlacement();
-  if (!placementModeVisible || heroLodState !== target || target.graph !== heroLodState.graph) return;
-  const azimuth = placementModule.deriveProcPlantOrganPlacementAzimuth(target.graph, segment.id, axialT, localPoint);
-  if (azimuth === null) {
-    setSaveStatus("A stable radial frame could not be derived for that segment.");
-    return;
-  }
   const genome = selectedGenome();
-  const source = placementModule.createProcPlantOrganPlacementTarget(genome.id, state.seed, target.graph);
   const key = currentPruneKey();
-  let placementPackage = organPlacementPackages.get(key);
-  if (placementPackage && (
-    placementPackage.target.genomeId !== source.genomeId
-    || placementPackage.target.seed !== source.seed
-    || placementPackage.target.graphSignatureVersion !== source.graphSignatureVersion
-    || placementPackage.target.graphSignature !== source.graphSignature
-  )) {
-    setSaveStatus("Existing placements target a different graph topology. Undo them before placing on this regenerated plant.");
-    return;
-  }
-  placementPackage ??= placementModule.createProcPlantOrganPlacementPackage(source);
-  const kind = placementKind();
-  if (kind === "flower" && !genome.flower) {
-    setSaveStatus("This plant has no flower geometry; choose another supported part.");
-    return;
-  }
-  if (kind === "decal") {
-    if (!livePlacementDecalBinding || livePlacementDecalBinding.disposed) {
-      setSaveStatus("Bind a decal image before placing an exact renderer-owned UV0 patch.");
-      return;
-    }
-  }
-  const placementScale: Record<ProcPlantPlaceableOrganKind, number> = {
-    leaf: 1,
-    flower: 1,
-    fruit: 0.16,
-    berry: 0.14,
-    cone: 0.22,
-    thorn: 0.18,
-    aerialRoot: 0.38,
-    coniferSpray: 0.72,
-    fernFrond: 0.86,
-    palmFrond: 1,
-    mossTuft: 0.28,
-    branch: 0.48,
-    knot: 0.18,
-    decal: 0.18,
-  };
-  const placementColors: Partial<Record<ProcPlantPlaceableOrganKind, { color: number; secondaryColor?: number }>> = {
-    fruit: { color: 0xc7472f, secondaryColor: 0x6e281c },
-    berry: { color: 0x92324d, secondaryColor: 0x4b1728 },
-    cone: { color: 0x76502d, secondaryColor: 0x3f2a19 },
-    thorn: { color: 0x6f5a3c, secondaryColor: 0x3d2f20 },
-    aerialRoot: { color: 0x6a5438, secondaryColor: 0x3b3024 },
-  };
-  const appended = placementModule.appendProcPlantOrganPlacement(placementPackage, {
-    kind,
-    segmentId: segment.id,
-    axialT,
-    azimuth,
-    scale: placementScale[kind],
-    ...placementColors[kind],
-    ...(kind === "decal" && livePlacementDecalBinding
-      ? { decal: livePlacementDecalBinding.binding }
-      : {}),
+  const placement = (await loadProcPlantLabPlacementAuthoring()).resolveProcPlantLabPlacement({
+    placementPackage: organPlacementPackages.get(key) ?? null,
+    graph: target.graph,
+    weberPenn: target.weberPennTrim,
+    pickerSegmentId: hit.segmentId,
+    localPoint,
+    kind: placementKindSelect.value,
+    genomeId: genome.id,
+    seed: state.seed,
+    flowerAvailable: Boolean(genome.flower),
+    decalBinding: livePlacementDecalBinding && !livePlacementDecalBinding.disposed
+      ? livePlacementDecalBinding.binding
+      : null,
   });
-  if (!appended.operation) {
-    setSaveStatus(
-      appended.reason === "spacing"
-        ? "That placement is too close to another authored organ on this segment."
-        : appended.reason === "cap"
-          ? "The 96-part authored placement cap has been reached."
-          : "That placement could not be represented safely.",
-    );
+  if (!placementModeVisible || heroLodState !== target || target.graph !== heroLodState.graph) return;
+  if (placement.status === "rejected" || !placement.placementPackage) {
+    setSaveStatus(placement.message);
     return;
   }
-  organPlacementPackages.set(key, appended.package);
+  organPlacementPackages.set(key, placement.placementPackage);
+  if (placement.attachmentId && placement.ownerStemId) {
+    app.dataset.weberPennOrganPlacementAttachment = placement.attachmentId;
+    app.dataset.weberPennOrganPlacementOwner = placement.ownerStemId;
+  }
   syncPlacementButtons();
-  setSaveStatus(`Placing ${kind} on ${segment.id} at ${(appended.operation.axialT * 100).toFixed(0)}%…`);
+  setSaveStatus(placement.message);
   regenerate();
 });
 
@@ -4977,11 +5096,17 @@ resetPruneButton.addEventListener("click", () => {
 });
 
 undoPlacementButton.addEventListener("click", async () => {
+  if (heroImportModel) {
+    if (!heroImportDecalUi) await refreshHeroImportDecalDraws();
+    heroImportDecalUi?.undo();
+    return;
+  }
   const key = currentPruneKey();
   const placementPackage = organPlacementPackages.get(key);
   if (!placementPackage?.operations.length || regenerationBusy) return;
-  const { undoLastProcPlantOrganPlacement } = await loadProcPlantOrganPlacement();
-  const next = undoLastProcPlantOrganPlacement(placementPackage);
+  const next = placementPackage.contract === "procplants.weber-penn-organ-placement-overrides"
+    ? (await loadProcPlantWeberPennOrganPlacement()).undoLastProcPlantWeberPennOrganPlacement(placementPackage)
+    : (await loadProcPlantOrganPlacement()).undoLastProcPlantOrganPlacement(placementPackage);
   if (next.operations.length === 0) organPlacementPackages.delete(key);
   else organPlacementPackages.set(key, next);
   syncPlacementButtons();
@@ -5664,275 +5789,77 @@ exportImpostorButton.addEventListener("click", async () => {
 });
 
 exportGlbButton.addEventListener("click", async () => {
+  const glbModule = await import("./procplant-lab-glb-export");
   if (!heroLodState) {
-    setSaveStatus("Generate a plant before exporting GLB.");
+    setSaveStatus(glbModule.PROCPLANT_LAB_GLB_NO_HERO_MESSAGE);
+    return;
+  }
+  if (heroImportModel) {
+    if (heroImportModel.importedDecalTarget) {
+      if (!heroImportDecalUi) await refreshHeroImportDecalDraws();
+      await heroImportDecalUi?.exportGlb();
+      return;
+    }
+    setSaveStatus(await glbModule.exportProcPlantLabImportedGlb({
+      preview: heroImportModel.group,
+      audit: heroImportAudit,
+      contentHash: app.dataset.heroImportHash ?? String(state.seed),
+      dataset: app.dataset,
+    }));
     return;
   }
   const authoredDecals = currentPlacementPackage()?.operations.filter((operation) => operation.kind === "decal").length ?? 0;
-  const exportableDecals = authoredDecals > 0
-    && livePlacementDecalBinding
-    && !livePlacementDecalBinding.disposed
-    && livePlacementDecalPixelSource
-    && heroLodState.placementDecalRecords.length === authoredDecals;
-  if (authoredDecals > 0 && !exportableDecals) {
-    app.dataset.lastGlbPlacementDecalsRejected = String(authoredDecals);
-    setSaveStatus("GLB export stopped: every decal needs the exact active binding plus retained source bytes and decoded pixels. Rebind the matching image or remove the unresolved decals.");
-    return;
-  }
-  if (authoredDecals > 0 && heroImportPreview) {
-    app.dataset.lastGlbPlacementDecalsRejected = String(authoredDecals);
-    setSaveStatus("GLB export stopped: placement decals are not adopted onto imported-hero exports. Remove them or export the generated hero; no material target is guessed.");
-    return;
-  }
-  delete app.dataset.lastGlbPlacementDecalsRejected;
   exportGlbButton.disabled = true;
-  setSaveStatus("Preparing GLB with vertex color, sway, tintability, and contract metadata…");
+  setSaveStatus(glbModule.PROCPLANT_LAB_GLB_PREPARING_MESSAGE);
   const activeLod = heroLodState.controller.active;
-  try {
-    if (heroImportPreview) {
-      const { downloadProcPlantLabHeroPreview } = await import("./procplant-lab-authoring-imports");
-      const exported = await downloadProcPlantLabHeroPreview(
-        heroImportPreview,
-        heroImportAudit,
-        app.dataset.heroImportHash ?? String(state.seed),
-      );
-      app.dataset.heroImportLastExportBytes = String(exported.byteLength);
-      app.dataset.heroImportLastExportMaterials = String(exported.materials);
-      app.dataset.heroImportLastExportTextures = String(exported.textures);
-      app.dataset.heroImportLastExportImages = String(exported.images);
-      setSaveStatus("Imported hero GLB exported with fitted spine, bark UV, wind, collars, and instanced branch, leaf, and accessory anchors.");
-      return;
-    }
-    const exportOptions = {
-      name: `${state.primary}-${state.seed}-lod${activeLod.level}`,
-      genomeId: selectedGenome().id,
-      seed: selectedGeneratorSeed(),
-      ...(materialBakeBundle ? { material: { tangents: true } } : {}),
-      collision: {
-        type: ["tree", "conifer", "palm"].includes(selectedGenome().habit)
-          ? "trunk-capsule"
-          : "bounds-box",
-      },
-      metadata: {
-        lodLevel: activeLod.level,
-        lodLabel: activeLod.label,
-        lodDistance: activeLod.distance,
-        previewScale: heroLodState.scale,
-        authoredTriangles: activeLod.triangles,
-        authoredVertices: activeLod.vertices,
-        ...(heroLodState.weberPennTrim?.trimAudit
-          ? {
-              weberPennTrimContract: "procplants.weber-penn-trim-overrides",
-              weberPennTrimStatus: heroLodState.weberPennTrim.trimAudit.status,
-              weberPennTrimSourceSignature: heroLodState.weberPennTrim.trimAudit.sourceTopologySignature,
-              weberPennTrimResultSignature: heroLodState.weberPennTrim.trimAudit.resultTopologySignature,
-              weberPennTrimOperations: heroLodState.weberPennTrim.trimAudit.operations.length,
-              weberPennTrimRemovedStems: heroLodState.weberPennTrim.trimAudit.removedStemIds.length,
-              weberPennTrimRemovedLeaves: heroLodState.weberPennTrim.trimAudit.removedLeafIds.length,
-            }
-          : {}),
-      },
-    } as const;
-    const authoring = await loadProcPlantAuthoringTools();
-    let glb: ArrayBuffer;
-    if (materialBakeBundle || exportableDecals) {
-      const prepared = authoring.prepareProcPlantGlbExport(activeLod.template, exportOptions);
-      const decalPrepared = exportableDecals
-        ? authoring.prepareProcPlantPlacementDecalGlbDraws(heroLodState.placementDecalRecords, livePlacementDecalPixelSource!)
-        : null;
-      if (decalPrepared) prepared.scene.add(decalPrepared.root);
-      try {
-        if (materialBakeBundle) {
-          const { exportProcPlantGlbWithBakedMaterials } = await import("./procplant-glb-material-binding");
-          const slotByMeshName: Record<string, string> = {};
-          const groupSlotsByMeshName: Record<string, readonly string[]> = {};
-          for (const mesh of prepared.meshes) {
-            const slots = mesh.userData.procplantSurfaces?.slots as string[] | undefined;
-            if (Array.isArray(mesh.material)) groupSlotsByMeshName[mesh.name] = ["bark", "leaf"];
-            else slotByMeshName[mesh.name] = slots?.[0] === "organ" ? "leaf" : "bark";
-          }
-          app.dataset.lastGlbSurfaceGroups = String(prepared.meshes.reduce(
-            (sum, mesh) => sum + (Array.isArray(mesh.material) ? mesh.geometry.groups.length : 1),
-            0,
-          ));
-          const bound = await exportProcPlantGlbWithBakedMaterials(
-            { scene: prepared.scene, meshes: prepared.meshes },
-            materialBakeBundle,
-            { slotByMeshName, groupSlotsByMeshName },
-          );
-          glb = bound.bytes;
-          app.dataset.lastGlbMaterialHash = bound.contentHash;
-          app.dataset.lastGlbMaterialAssignments = String(bound.assignments.length);
-        } else {
-          glb = await authoring.exportProcPlantScenesGlb(prepared.scene);
-        }
-        if (decalPrepared && livePlacementDecalPixelSource) {
-          const adopted = await authoring.bindProcPlantPlacementDecalsIntoGlb(
-            glb,
-            decalPrepared,
-            livePlacementDecalPixelSource,
-          );
-          glb = adopted.bytes;
-          app.dataset.lastGlbPlacementDecals = String(adopted.draws);
-          app.dataset.lastGlbPlacementDecalTriangles = String(adopted.triangles);
-          app.dataset.lastGlbPlacementDecalHash = adopted.contentHash;
-          app.dataset.lastGlbPlacementDecalEmbeddedBytes = String(adopted.embeddedBytes);
-        }
-      } finally {
-        decalPrepared?.dispose();
-        authoring.disposePreparedProcPlantGlbExport(prepared);
-      }
-    } else {
-      glb = await authoring.exportProcPlantGlb(activeLod.template, exportOptions);
-    }
-    const url = URL.createObjectURL(new Blob([glb], { type: "model/gltf-binary" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `procplant-${state.primary}-${state.seed}-lod${activeLod.level}.glb`;
-    link.click();
-    URL.revokeObjectURL(url);
-    setSaveStatus(exportableDecals
-      ? `GLB exported from ${activeLod.label} geometry with ${authoredDecals} exact UV0 decal draw${authoredDecals === 1 ? "" : "s"} and a deterministic embedded PNG.`
-      : materialBakeBundle
-        ? `GLB exported from ${activeLod.label} geometry with separate embedded bark/leaf PBR primitives and tangents.`
-        : `GLB exported from ${activeLod.label} geometry with separate bark/organ surfaces.`);
-  } catch (error) {
-    console.error("[procplants] GLB export failed.", error);
-    setSaveStatus(`GLB export failed: ${error instanceof Error ? error.message : String(error)}`);
-  } finally {
-    exportGlbButton.disabled = false;
-  }
+  setSaveStatus(await glbModule.runProcPlantLabGeneratedGlbAction({
+    activeLod,
+    name: `${state.primary}-${state.seed}-lod${activeLod.level}`,
+    genomeId: selectedGenome().id,
+    habit: selectedGenome().habit,
+    seed: selectedGeneratorSeed(),
+    previewScale: heroLodState.scale,
+    materialBakeBundle,
+    placementDecals: heroLodState.placementDecalRecords,
+    placementDecalPixelSource: livePlacementDecalPixelSource,
+    activeBinding: Boolean(livePlacementDecalBinding && !livePlacementDecalBinding.disposed),
+    weberPenn: heroLodState.weberPennTrim,
+    authoredDecals,
+    downloadName: `procplant-${state.primary}-${state.seed}-lod${activeLod.level}.glb`,
+    dataset: app.dataset,
+  }));
+  exportGlbButton.disabled = false;
 });
 
 document.querySelector<HTMLButtonElement>("#exportJson")!.addEventListener("click", async () => {
+  const jsonModule = await import("./procplant-lab-json-export");
   const genome = selectedGenome();
   const env = envFromState();
-  const graphEditorModule = await loadProcPlantGraphEditorUi();
   const graphSourceGenome = selectedBaseGenome(false);
   const generatorOverrides = graphOverrideOperations.get(graphSourceGenome.id) ?? [];
-  const graphEditorState = graphEditorModule.compileProcPlantGraphEditorState(
-    graphSourceGenome,
-    state.seed,
-    generatorOverrides,
-    env,
-  );
+  const graphEditorState = await jsonModule.compileProcPlantLabJsonGraph(graphSourceGenome, state.seed, generatorOverrides, env);
   const generatorGraph = graphEditorState.graph;
   const generatorApplyAudit = graphEditorState.applyAudit;
-  const organVariants = heroLodState?.graph
-    ? (await import("./procplant-organ-variants")).buildProcPlantOrganVariants(heroLodState.graph.attachments, {
-        season: state.season,
-        health: state.health,
-        maturity: state.maturity,
-        wetness: state.wetness,
-        snowLoad: state.snow,
-        seed: state.seed,
-      })
-    : null;
-  const payload = {
-    version: 1,
-    savedAt: new Date().toISOString(),
-    state: { ...state },
-    camera: {
-      position: camera.position.toArray(),
-      target: controls.target.toArray(),
-    },
-    stats: { ...currentStats },
-    genome,
-    runtime: buildProcPlantRuntimePackage(genome, state.seed, env),
-    authoring: {
-      variant: { season: state.season, health: state.health, maturity: state.maturity },
-      organVariants,
-      cutouts: authoredCutouts,
-      activeLeafCutout: cutoutLeafId,
-      heroImport: heroImportAudit,
-      materialBake: materialBakeAudit,
-      spatialForces: state.spatialForces
-        ? {
-            state: state.spatialForces,
-            status: app.dataset.spatialForceStatus ?? "canonical",
-            diagnostic: spatialForceDiagnostic,
-            audit: spatialForceAudit,
-          }
-        : null,
-      freeformCrown: state.crownField ? cloneProcPlantFreeformCrown(state.crownField) : genome.spaceColonization?.freeform ?? null,
-      impostor: heroLodState?.impostor
-        ? {
-            contract: heroLodState.impostor.atlas.contract,
-            version: heroLodState.impostor.atlas.version,
-            contentHash: heroLodState.impostor.atlas.contentHash,
-            width: heroLodState.impostor.atlas.width,
-            height: heroLodState.impostor.atlas.height,
-            padding: heroLodState.impostor.atlas.padding,
-            entries: heroLodState.impostor.atlas.entries.map((entry) => ({
-              id: entry.id,
-              uv: entry.uv,
-              paddedUv: entry.paddedUv,
-              outward: entry.view.outward,
-            })),
-          }
-        : null,
-      graphOperations: currentPruneOperations().map((segmentId) => ({ operation: "remove", segmentId })),
-      graphOperationGroups: currentPruneHistory().map((segmentIds) => ({ operation: "remove", segmentIds: [...segmentIds] })),
-      organPlacements: currentPlacementPackage(),
-      placementDecalBinding: livePlacementDecalBinding && !livePlacementDecalBinding.disposed
-        ? {
-            ...livePlacementDecalBinding.metadata,
-            sourceFile: livePlacementDecalFileName,
-            width: Number(app.dataset.placementDecalBindingWidth ?? 0),
-            height: Number(app.dataset.placementDecalBindingHeight ?? 0),
-            pixelExportReady: Boolean(livePlacementDecalPixelSource),
-            sourceMimeType: livePlacementDecalPixelSource?.sourceMimeType,
-            sourceSha256: livePlacementDecalPixelSource?.sourceSha256,
-            rgbaSha256: livePlacementDecalPixelSource?.rgbaSha256,
-            pngSha256: livePlacementDecalPixelSource?.pngSha256,
-            liveDraws: heroLodState?.placementDecals?.audit.draws ?? 0,
-            liveTriangles: heroLodState?.placementDecals?.audit.triangles ?? 0,
-          }
-        : null,
-      vineGuide: vineGuidePackage,
-      weberPennTrim: heroLodState?.weberPennTrim
-        ? {
-            target: heroLodState.weberPennTrim.target,
-            operations: currentPruneOperations().length > 0
-              ? createProcPlantWeberPennTrimOverrideSet(
-                  heroLodState.weberPennTrim.target,
-                  [createProcPlantWeberPennTrimOperation("remove", {
-                    kind: "segment-ids",
-                    segmentIds: currentPruneOperations(),
-                  })],
-                )
-              : null,
-            audit: heroLodState.weberPennTrim.trimAudit,
-          }
-        : null,
-      generatorGraph,
-      generatorOverrides,
-      generatorApplyAudit: {
-        changed: generatorApplyAudit.changed,
-        applied: generatorApplyAudit.applied,
-        unsupported: generatorApplyAudit.unsupported,
-      },
-      generatorPreview: graphEditorState.preview,
-      productionDag: graphEditorState.production
-        ? {
-            version: graphEditorState.production.version,
-            path: graphEditorState.production.path,
-            work: graphEditorState.production.work,
-            previewHash: graphEditorState.production.previewHash,
-            records: graphEditorState.production.records,
-          }
-        : null,
-    },
-    url: currentShareUrl(true),
-  };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-  const link = document.createElement("a");
-  const slug = `${state.primary}-${state.secondary}-${state.seed}`.replace(/[^a-z0-9-]+/gi, "-");
-  link.href = URL.createObjectURL(blob);
-  link.download = `procplant-${slug}.json`;
-  link.click();
-  URL.revokeObjectURL(link.href);
-  setSaveStatus("JSON exported.");
+  const variant = { season: state.season, health: state.health, maturity: state.maturity, wetness: state.wetness, snowLoad: state.snow, seed: state.seed };
+  const pruningJson = jsonModule.summarizeProcPlantLabJsonPruning(currentPruneOperations(), currentPruneHistory());
+  const decalBindingJson = jsonModule.summarizeProcPlantLabJsonLiveDecalBinding(
+    livePlacementDecalBinding, livePlacementDecalFileName, app.dataset, livePlacementDecalPixelSource,
+    heroLodState?.placementDecals?.audit.draws ?? 0, heroLodState?.placementDecals?.audit.triangles ?? 0,
+  );
+  const weberPennTrimJson = jsonModule.summarizeProcPlantLabJsonWeberPennTrim(heroLodState?.weberPennTrim, currentPruneOperations());
+  const authoring = await jsonModule.createProcPlantLabJsonAuthoring(
+    variant, heroLodState?.graph?.attachments ?? null, authoredCutouts, cutoutLeafId, heroImportAudit, materialBakeAudit,
+    jsonModule.summarizeProcPlantLabJsonSpatialForces(state.spatialForces, app.dataset.spatialForceStatus ?? "canonical", spatialForceDiagnostic, spatialForceAudit),
+    state.crownField ? cloneProcPlantFreeformCrown(state.crownField) : genome.spaceColonization?.freeform ?? null,
+    heroLodState?.impostor, pruningJson, currentPlacementPackage(), heroImportDecalPackage, heroImportDecalUi?.jsonStatus() ?? null,
+    decalBindingJson, vineGuidePackage, vineLiveSupportUi?.attachment ?? null, weberPennTrimJson,
+    { graph: generatorGraph, overrides: generatorOverrides, applyAudit: generatorApplyAudit, preview: graphEditorState.preview, production: graphEditorState.production },
+  );
+  const payload = jsonModule.createProcPlantLabJsonPayload(
+    { ...state }, camera.position.toArray(), controls.target.toArray(), { ...currentStats }, genome,
+    buildProcPlantRuntimePackage(genome, state.seed, env), authoring, currentShareUrl(true),
+  );
+  setSaveStatus(jsonModule.downloadProcPlantLabJson(payload, state));
 });
 
 document.querySelector<HTMLButtonElement>("#savePreset")!.addEventListener("click", (event) => {
@@ -6062,6 +5989,7 @@ placementDecalFileInput.addEventListener("change", async () => {
     app.dataset.placementDecalBindingHeight = String(canvasSource.height);
     placementDecalStatus.textContent = `${file.name}: renderer-owned ${canvasSource.width}x${canvasSource.height} UV0 binding ready with retained source provenance and deterministic PNG GLB export.`;
     syncPlacementButtons();
+    void refreshHeroImportDecalDraws();
     regenerate();
   } catch (error) {
     console.error("[procplants] Placement decal binding failed.", error);
@@ -6087,6 +6015,7 @@ clearPlacementDecalButton.addEventListener("click", () => {
   delete app.dataset.placementDecalBindingHeight;
   placementDecalStatus.textContent = "Decal binding cleared. Existing decal authoring records remain in JSON and fail closed until their exact binding is restored.";
   syncPlacementButtons();
+  void refreshHeroImportDecalDraws();
   regenerate();
 });
 
@@ -6154,6 +6083,10 @@ document.addEventListener("visibilitychange", () => {
 });
 window.addEventListener("pagehide", () => {
   impostorBakeAbort?.abort();
+  procPlantFiveTierAtlasCatalogUi?.dispose();
+  procPlantFiveTierAtlasCatalogUi = null;
+  vineLiveSupportUi?.dispose();
+  vineLiveSupportUi = null;
   heroDebugOverlayRequest++;
   disposeCrownVolumeTool();
   disposeVineGuideVisualization();

@@ -21,7 +21,9 @@ export type ProcPlantWeberPennStableAttachmentKind = "leaf-site" | "branch-tip";
 export type ProcPlantWeberPennTrimSelection =
   | { kind: "attachment-ids"; attachmentIds: readonly string[] }
   | { kind: "attachment-kind"; attachmentKinds: readonly ProcPlantWeberPennStableAttachmentKind[] }
+  /** Whole owners whose native tip/leaf attachment height is within the source-normalized [0, 1] range. */
   | { kind: "axial-range"; min: number; max: number }
+  /** Whole owners selected by their native tip/leaf attachment height after source normalization. */
   | { kind: "height-plane"; height: number; side: "above" | "below" }
   | { kind: "segment-ids"; segmentIds: readonly string[] }
   | { kind: "branch-depth"; minDepth?: number; maxDepth?: number };
@@ -429,6 +431,14 @@ const parseStemId = (value: string) => {
   return Number.isSafeInteger(index) ? index : null;
 };
 
+const branchTipId = (index: number) => `weber-penn:branch-tip:${index}`;
+const parseBranchTipId = (value: string) => {
+  const match = /^weber-penn:branch-tip:(\d+)$/.exec(value);
+  if (!match) return null;
+  const index = Number(match[1]);
+  return Number.isSafeInteger(index) ? index : null;
+};
+
 const validateRangePartition = (
   ranges: readonly { vertexStart: number; vertexCount: number; indexStart: number; indexCount: number }[],
   vertexCount: number,
@@ -479,11 +489,17 @@ const validateBakedTrimSource = (source: ProcPlantWeberPennBakedTrimSource) => {
         throw new Error(`baked trim source has non-reciprocal child ${stemId(childIndex)}`);
       }
     }
+    const ownsGeometry = stem.baked && (stem.vertexCount > 0 || stem.indexCount > 0);
+    if ((ownsGeometry && !Number.isFinite(stem.tipHeightYUp)) ||
+      (stem.tipHeightYUp !== null && !Number.isFinite(stem.tipHeightYUp))) {
+      throw new Error(`baked trim source has invalid tip-height metadata for ${stemId(stem.stemIndex)}`);
+    }
   }
   const leafIndices = new Set<number>();
   const attachmentIds = new Set<string>();
   for (const leaf of leaves) {
-    if (leafIndices.has(leaf.leafIndex) || attachmentIds.has(leaf.attachmentId) || !byIndex.has(leaf.parentStemIndex)) {
+    if (leafIndices.has(leaf.leafIndex) || attachmentIds.has(leaf.attachmentId) || !byIndex.has(leaf.parentStemIndex) ||
+      !Number.isFinite(leaf.attachmentHeightYUp)) {
       throw new Error("baked trim source has duplicate leaves or a leaf without native parent ownership");
     }
     leafIndices.add(leaf.leafIndex);
@@ -531,8 +547,10 @@ const unchangedBakedAudit = (
 });
 
 /**
- * Atomically remove baked Weber-Penn stem/native-leaf ranges. Any stale binding,
- * unsupported selector, or unmatched identity returns the exact source by reference.
+ * Atomically remove baked Weber-Penn stem/native-leaf ranges. Branch-tip and
+ * normalized-height selectors operate on whole native owners; they never split
+ * or infer a partial triangle range. Any stale binding, unsupported selector,
+ * or unmatched identity returns the exact source by reference.
  */
 export const applyProcPlantWeberPennBakedTrimOverrides = (
   sourceValue: ProcPlantWeberPennBakedTrimSource,
@@ -554,6 +572,21 @@ export const applyProcPlantWeberPennBakedTrimOverrides = (
   const stemByIndex = new Map(source.baked.topology.stems.map((stem) => [stem.stemIndex, stem]));
   const leafById = new Map(source.baked.topology.leaves.map((leaf) => [leaf.attachmentId, leaf]));
   const leafByIndex = new Map(source.baked.topology.leaves.map((leaf) => [leaf.leafIndex, leaf]));
+  const bakedStemIndices = new Set(source.baked.topology.stems.filter((stem) => stem.baked).map((stem) => stem.stemIndex));
+  const sourceTipStemIndices = new Set(source.baked.topology.stems
+    .filter((stem) => stem.baked && !stem.childStemIndices.some((child) => bakedStemIndices.has(child)))
+    .map((stem) => stem.stemIndex));
+  const sourceTipById = new Map([...sourceTipStemIndices].map((index) => [branchTipId(index), index]));
+  const normalizedHeight = (y: number) => (y - source.baked.min.y) / Math.max(1e-9, source.baked.max.y - source.baked.min.y);
+  const stemHeight = (index: number) => {
+    const height = stemByIndex.get(index)?.tipHeightYUp;
+    return Number.isFinite(height) ? normalizedHeight(height!) : null;
+  };
+  const leafHeight = (index: number) => normalizedHeight(leafByIndex.get(index)!.attachmentHeightYUp);
+  const heightMatches = (value: number, selection: Extract<ProcPlantWeberPennTrimSelection, { kind: "axial-range" | "height-plane" }>) =>
+    selection.kind === "axial-range"
+      ? value >= selection.min && value <= selection.max
+      : selection.side === "above" ? value > selection.height : value < selection.height;
   let retainedStems = new Set(stemByIndex.keys());
   let retainedLeaves = new Set(source.baked.topology.leaves.map((leaf) => leaf.leafIndex));
   const audits: ProcPlantWeberPennBakedTrimOperationAudit[] = [];
@@ -603,21 +636,36 @@ export const applyProcPlantWeberPennBakedTrimOverrides = (
         return depth >= (selection.minDepth ?? 0) && depth <= (selection.maxDepth ?? Number.MAX_SAFE_INTEGER);
       }));
     } else if (operation.selection.kind === "attachment-ids") {
-      unknownIds = operation.selection.attachmentIds.filter((id) => !leafById.has(id));
+      unknownIds = operation.selection.attachmentIds.filter((id) => !leafById.has(id) && !sourceTipById.has(id));
       matchedLeaves = new Set(operation.selection.attachmentIds.flatMap((id) => {
         const leaf = leafById.get(id);
         return leaf && retainedLeaves.has(leaf.leafIndex) ? [leaf.leafIndex] : [];
       }));
+      matchedStems = new Set(operation.selection.attachmentIds.flatMap((id) => {
+        const index = sourceTipById.get(id) ?? parseBranchTipId(id);
+        return index !== null && sourceTipStemIndices.has(index) && retainedStems.has(index) ? [index] : [];
+      }));
     } else if (operation.selection.kind === "attachment-kind") {
       if (operation.selection.attachmentKinds.includes("branch-tip")) {
-        unsupported = "Branch-tip anchors do not own a single native baked geometry range.";
-      } else if (operation.selection.attachmentKinds.includes("leaf-site")) {
+        matchedStems = new Set([...sourceTipStemIndices].filter((index) => retainedStems.has(index)));
+      }
+      if (operation.selection.attachmentKinds.includes("leaf-site")) {
         matchedLeaves = new Set(retainedLeaves);
       }
     } else if (operation.selection.kind === "axial-range") {
-      unsupported = "Axial-range selection is normalized graph-space height, not native owner-stem axial position.";
+      matchedStems = new Set([...retainedStems].filter((index) => {
+        const height = stemHeight(index);
+        return height !== null && heightMatches(height, operation.selection as Extract<ProcPlantWeberPennTrimSelection, { kind: "axial-range" }>);
+      }));
+      matchedLeaves = new Set([...retainedLeaves].filter((index) =>
+        heightMatches(leafHeight(index), operation.selection as Extract<ProcPlantWeberPennTrimSelection, { kind: "axial-range" }>)));
     } else {
-      unsupported = "Height-plane selection is normalized graph-space data and cannot be losslessly applied to raw baked buffers.";
+      matchedStems = new Set([...retainedStems].filter((index) => {
+        const height = stemHeight(index);
+        return height !== null && heightMatches(height, operation.selection as Extract<ProcPlantWeberPennTrimSelection, { kind: "height-plane" }>);
+      }));
+      matchedLeaves = new Set([...retainedLeaves].filter((index) =>
+        heightMatches(leafHeight(index), operation.selection as Extract<ProcPlantWeberPennTrimSelection, { kind: "height-plane" }>)));
     }
 
     const noMatch = matchedStems.size === 0 && matchedLeaves.size === 0;

@@ -137,7 +137,7 @@
           "label": "full",
           "distance": 0,
           "triangles": 352,
-          "vertices": 1056,
+          "vertices": 704,
           "bounds": {
             "min": [
               -0.657785,
@@ -155,19 +155,19 @@
             "max": 0.9
           },
           "attributeLengths": {
-            "pos": 3168,
-            "nrm": 3168,
-            "uv0": 2112,
-            "col": 3168,
-            "tintable": 1056,
-            "sway": 1056,
+            "pos": 2112,
+            "nrm": 2112,
+            "uv0": 1408,
+            "col": 2112,
+            "tintable": 704,
+            "sway": 704,
             "idx": 1056
           },
           "surfacePartition": {
             "contract": "procplants.surface-partition",
             "version": 1,
-            "contentHash": "fd38b806",
-            "sourceIndexHash": "c7adbc9b",
+            "contentHash": "62cbcade",
+            "sourceIndexHash": "ab5ed55b",
             "triangleCount": 352,
             "indexCount": 1056,
             "groups": {
@@ -185,14 +185,14 @@
               "complete": true
             }
           },
-          "geometryHash": "36e76619c2f4809f457ac040f7f2f61f4b1712263b1aadd0621e950602a2728d"
+          "geometryHash": "adc7aa4d0e481e32888abd676e2fa00e1ab68cb73accac28bb9ea6400167946a"
         },
         {
           "level": 1,
           "label": "clustered",
           "distance": 13.5,
           "triangles": 264,
-          "vertices": 792,
+          "vertices": 528,
           "bounds": {
             "min": [
               -0.510067,
@@ -210,19 +210,19 @@
             "max": 0.9
           },
           "attributeLengths": {
-            "pos": 2376,
-            "nrm": 2376,
-            "uv0": 1584,
-            "col": 2376,
-            "tintable": 792,
-            "sway": 792,
+            "pos": 1584,
+            "nrm": 1584,
+            "uv0": 1056,
+            "col": 1584,
+            "tintable": 528,
+            "sway": 528,
             "idx": 792
           },
           "surfacePartition": {
             "contract": "procplants.surface-partition",
             "version": 1,
-            "contentHash": "6fdf5df1",
-            "sourceIndexHash": "f5cccb0a",
+            "contentHash": "b73891bc",
+            "sourceIndexHash": "a0ff8afa",
             "triangleCount": 264,
             "indexCount": 792,
             "groups": {
@@ -240,7 +240,7 @@
               "complete": true
             }
           },
-          "geometryHash": "5091204410c5b0ba10f6da1853dd9dc6da41879f22d615c223fb0959f690f590"
+          "geometryHash": "6a4db5a870b8ad4628862b57986df62a07f0b88698610d3737064943c653f7d4"
         },
         {
           "level": 2,
@@ -295,7 +295,7 @@
               "complete": true
             }
           },
-          "geometryHash": "519b1e90fb6a5af8d90ff0a523123191dd33a74bc511c9bcd6765a369112434e"
+          "geometryHash": "bec4939949dbb81b9b4809ead1b3e349f6312df7e3992cdf0793c38295c6fa78"
         },
         {
           "level": 3,
@@ -350,10 +350,10 @@
               "complete": true
             }
           },
-          "geometryHash": "27f115b43007a578927308dcdcbfed7bce44a527ca529654073e1045623e5ad5"
+          "geometryHash": "d622506c78aa20be5fd10ebf616c6fae9a44d8ce90df665749a4e5c9db9bb1c9"
         }
       ],
-      "hash": "30324eaa2207893c561d6539d3eb68add328b14a5e41bfafd751a2a888705961"
+      "hash": "2fc07cb0341707e2941e466471b51f53ab398d5fb4428d640f2d25481ac5abca"
     },
     {
       "presetId": "blueSpruce",
@@ -461,7 +461,7 @@
           "label": "full",
           "distance": 0,
           "triangles": 3934,
-          "vertices": 7324,
+          "vertices": 4420,
           "bounds": {
             "min": [
               -0.696833,
@@ -476,22 +476,22 @@
           },
           "sway": {
             "min": 0,
-            "max": 1
+            "max": 0.922
           },
           "attributeLengths": {
-            "pos": 21972,
-            "nrm": 21972,
-            "uv0": 14648,
-            "col": 21972,
-            "tintable": 7324,
-            "sway": 7324,
+            "pos": 13260,
+            "nrm": 13260,
+            "uv0": 8840,
+            "col": 13260,
+            "tintable": 4420,
+            "sway": 4420,
             "idx": 11802
           },
           "surfacePartition": {
             "contract": "procplants.surface-partition",
             "version": 1,
-            "contentHash": "e264f0fa",
-            "sourceIndexHash": "03b510d7",
+            "contentHash": "87de91af",
+            "sourceIndexHash": "ae03a0a3",
             "triangleCount": 3934,
             "indexCount": 11802,
             "groups": {
@@ -509,14 +509,14 @@
               "complete": true
             }
           },
-          "geometryHash": "81ad2dd1444743537087044202e09e32ccae776251c471646d6089e22316a1d2"
+          "geometryHash": "07b07d67d3014f5760a64ed53874d726f917a85055b95c9713ba8f1a7d61bf24"
         },
         {
           "level": 1,
           "label": "clustered",
           "distance": 27,
           "triangles": 2494,
-          "vertices": 3942,
+          "vertices": 2436,
           "bounds": {
             "min": [
               -0.705072,
@@ -531,22 +531,22 @@
           },
           "sway": {
             "min": 0,
-            "max": 1
+            "max": 0.930739
           },
           "attributeLengths": {
-            "pos": 11826,
-            "nrm": 11826,
-            "uv0": 7884,
-            "col": 11826,
-            "tintable": 3942,
-            "sway": 3942,
+            "pos": 7308,
+            "nrm": 7308,
+            "uv0": 4872,
+            "col": 7308,
+            "tintable": 2436,
+            "sway": 2436,
             "idx": 7482
           },
           "surfacePartition": {
             "contract": "procplants.surface-partition",
             "version": 1,
-            "contentHash": "a7142df8",
-            "sourceIndexHash": "ba67108a",
+            "contentHash": "e48ddef0",
+            "sourceIndexHash": "078a5eae",
             "triangleCount": 2494,
             "indexCount": 7482,
             "groups": {
@@ -564,7 +564,7 @@
               "complete": true
             }
           },
-          "geometryHash": "bef4107b1f5cb7635b70737f61744258cf8939318c8e246726cf332c7a548a32"
+          "geometryHash": "82b0c1a04da78db075403c471026b32690b795cd1e9bf4046cb06e892a359f1c"
         },
         {
           "level": 2,
@@ -619,7 +619,7 @@
               "complete": true
             }
           },
-          "geometryHash": "0ef98dce11e2d8fe31f0cf13496419b47cdc0435c722709d7e14608dce384301"
+          "geometryHash": "cfb43fa634454cf3e0f7d4c3ca1f778a678957c6fadd3ff3e846ddeb0607859d"
         },
         {
           "level": 3,
@@ -674,10 +674,10 @@
               "complete": true
             }
           },
-          "geometryHash": "048a875df31a00c56444a6bb843171f01f77894eb1d4aea49a396f53ac607d1f"
+          "geometryHash": "7644989b40b38c55252ff83d973a4c8cfba021359931cb75de43306cf597c72f"
         }
       ],
-      "hash": "53f1e74942d2dbaf7e27b7125fc7dc10f71a3d02b241754f17ba783e5e7c124c"
+      "hash": "c972ea657f4262949d02b17f3ba7f13854a7844b61124cc306c98848d84f0280"
     },
     {
       "presetId": "cloverGroundcover",
@@ -1337,5 +1337,5 @@
       "hash": "c28831c2be45295e3e18b812a7d7ed2026f2b7d71e3e5c48a7f60c4bbf38e821"
     }
   ],
-  "hash": "62870c7df7d6cd323d19662cad387881a5f3047f30ba4a295d148d277c9baa52"
+  "hash": "a0e06f99d48e08713d8867260f30de9ee339d3d1f13cc2d97c18d30b90cb6585"
 }

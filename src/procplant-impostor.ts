@@ -460,7 +460,8 @@ const hashBytes = (bytes: Uint8Array, seed = 0x811c9dc5) => {
   return hash >>> 0;
 };
 
-const atlasHash = (
+/** Recompute the canonical atlas hash for persisted/cache validation. */
+export const hashProcPlantImpostorAtlasContent = (
   plan: ProcPlantImpostorCapturePlan,
   width: number,
   height: number,
@@ -551,7 +552,7 @@ export const buildProcPlantImpostorAtlas = async (
       atlasRgba.set(dilated.rgba.subarray(sourceOffset, sourceOffset + dilated.width * 4), targetOffset);
     }
   }
-  const contentHash = atlasHash(plan, layout.width, layout.height, layout.padding, layout.entries, atlasRgba);
+  const contentHash = hashProcPlantImpostorAtlasContent(plan, layout.width, layout.height, layout.padding, layout.entries, atlasRgba);
   return {
     contract: PROCPLANT_IMPOSTOR_CONTRACT,
     version: PROCPLANT_IMPOSTOR_VERSION,

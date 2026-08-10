@@ -4,7 +4,24 @@ import { access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-const root = resolve(import.meta.dirname, "..");
+const root = process.env.PROCPLANTS_VISUAL_ROOT
+  ? resolve(process.env.PROCPLANTS_VISUAL_ROOT)
+  : resolve(import.meta.dirname, "..");
+const presetIds = process.argv.slice(2);
+if (presetIds.length === 0) {
+  presetIds.push("blueSpruce", "alpineFir", "redwoodSpire", "tundraSmallPine", "shorePineCones");
+}
+const visualBaselines = {
+  phiFern: {
+    width: 1280,
+    height: 900,
+    foliagePixels: 557_308,
+    maxFoliagePixelDelta: 8,
+    triangles: 6_042,
+    draws: 9,
+    heroTriangles: 352,
+  },
+};
 const appPort = Number(process.env.PROCPLANTS_CONIFER_VISUAL_PORT ?? 4203);
 const debugPort = Number(process.env.PROCPLANTS_CONIFER_VISUAL_DEBUG_PORT ?? 9253);
 const chromeCandidates = process.platform === "win32"
@@ -18,7 +35,7 @@ const chrome = await Promise.any(chromeCandidates.map(async (candidate) => {
   await access(candidate);
   return candidate;
 })).catch(() => null);
-if (!chrome) throw new Error("Chrome or Edge is required for the conifer visual browser smoke test");
+if (!chrome) throw new Error("Chrome or Edge is required for the plant visual browser smoke test");
 
 const waitForJson = async (url, timeoutMs = 60_000) => {
   const started = Date.now();
@@ -58,7 +75,7 @@ try {
   browser = spawn(chrome, [
     "--headless=new", "--disable-gpu", "--disable-crashpad", "--no-first-run", "--disable-extensions",
     "--window-size=1280,900", `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profile}`,
-    `http://127.0.0.1:${appPort}/?p=blueSpruce&s=cloverGroundcover&seed=612072&d=0`,
+    `http://127.0.0.1:${appPort}/?p=${encodeURIComponent(presetIds[0])}&s=cloverGroundcover&seed=612072&d=0`,
   ], { stdio: "ignore", windowsHide: true });
   const targets = await waitForJson(`http://127.0.0.1:${debugPort}/json`);
   const target = targets.find((entry) => entry.type === "page" && entry.url.includes(String(appPort)));
@@ -85,6 +102,12 @@ try {
   });
   await command("Page.enable");
   await command("Runtime.enable");
+  await command("Emulation.setDeviceMetricsOverride", {
+    width: 1280,
+    height: 900,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
   await command("Page.addScriptToEvaluateOnNewDocument", {
     source: "Object.defineProperty(performance, 'now', { configurable: true, value: () => 1000 });",
   });
@@ -129,6 +152,8 @@ try {
           let sum = 0;
           let sumSquares = 0;
           let opaque = 0;
+          let foliagePixels = 0;
+          let foliageMaskHash = 0x811c9dc5;
           const bins = new Set();
           for (let offset = 0; offset < pixels.length; offset += 4) {
             const r = pixels[offset], g = pixels[offset + 1], b = pixels[offset + 2], a = pixels[offset + 3];
@@ -139,6 +164,10 @@ try {
             const luminance = r * 0.2126 + g * 0.7152 + b * 0.0722;
             sum += luminance; sumSquares += luminance * luminance;
             if (a > 0) opaque++;
+            const foliage = g > r * 1.035 && g > b * 1.035 && g - Math.min(r, b) > 8;
+            if (foliage) foliagePixels++;
+            foliageMaskHash ^= foliage ? 1 : 0;
+            foliageMaskHash = Math.imul(foliageMaskHash, 0x01000193);
             bins.add((r >> 4) << 8 | (g >> 4) << 4 | (b >> 4));
           }
           const count = pixels.length / 4;
@@ -148,11 +177,14 @@ try {
             width: canvas.width,
             height: canvas.height,
             opaque,
+            foliagePixels,
+            foliageMaskHash: (foliageMaskHash >>> 0).toString(16).padStart(8, '0'),
             colorBins: bins.size,
             luminanceVariance: sumSquares / count - mean * mean,
+            webglError: gl.getError(),
           };
         };
-        const ids = ['blueSpruce', 'alpineFir', 'redwoodSpire', 'tundraSmallPine', 'shorePineCones'];
+        const ids = ${JSON.stringify(presetIds)};
         const results = [];
         for (const id of ids) {
           primary.value = id;
@@ -160,7 +192,14 @@ try {
           await waitForIdle();
           const first = await capture();
           const second = await capture();
-          results.push({ id, first, second, triangles: Number(document.querySelector('#triangles').textContent.replaceAll(',', '')) });
+          results.push({
+            id,
+            first,
+            second,
+            triangles: Number(document.querySelector('#triangles').textContent.replaceAll(',', '')),
+            draws: Number(app?.dataset.previewDraws ?? '0'),
+            heroTriangles: Number(app?.dataset.heroTemplateTriangles ?? '0'),
+          });
         }
         return results;
       })()
@@ -170,16 +209,30 @@ try {
   });
   assert.equal(evaluated.result?.exceptionDetails, undefined, evaluated.result?.exceptionDetails?.text);
   const results = evaluated.result?.result?.value;
-  assert.equal(results.length, 5);
+  assert.equal(results.length, presetIds.length);
   for (const result of results) {
     assert.equal(result.first.hash, result.second.hash, `${result.id} fixed-camera WebGL pixels must be stable`);
     assert.ok(result.first.opaque > 0, `${result.id} must render pixels`);
+    assert.ok(result.first.foliagePixels > 0, `${result.id} must retain visible green foliage coverage`);
     assert.ok(result.first.colorBins >= 24, `${result.id} must retain a nontrivial shaded silhouette`);
     assert.ok(result.first.luminanceVariance > 40, `${result.id} must retain visual contrast`);
+    assert.equal(result.first.webglError, 0, `${result.id} must render without a WebGL error`);
     assert.ok(result.triangles > 0, `${result.id} must render authored geometry`);
+    assert.ok(result.draws > 0, `${result.id} must report real scene draws`);
+    assert.ok(result.heroTriangles > 0, `${result.id} must report hero LOD geometry`);
+    const baseline = visualBaselines[result.id];
+    if (baseline) {
+      assert.equal(result.first.width, baseline.width, `${result.id} fixed WebGL viewport width drifted`);
+      assert.equal(result.first.height, baseline.height, `${result.id} fixed WebGL viewport height drifted`);
+      assert.ok(Math.abs(result.first.foliagePixels - baseline.foliagePixels) <= baseline.maxFoliagePixelDelta,
+        `${result.id} foliage coverage drifted beyond the frozen shading-edge tolerance`);
+      assert.equal(result.triangles, baseline.triangles, `${result.id} controlled scene triangle count drifted`);
+      assert.equal(result.draws, baseline.draws, `${result.id} controlled scene draw count drifted`);
+      assert.equal(result.heroTriangles, baseline.heroTriangles, `${result.id} hero triangle count drifted`);
+    }
   }
   assert.equal(new Set(results.map((result) => result.first.hash)).size, results.length,
-    "each audited conifer must retain a distinct fixed-camera silhouette");
+    "each audited plant must retain a distinct fixed-camera silhouette");
   console.log(JSON.stringify(results, null, 2));
   socket.close();
 } finally {

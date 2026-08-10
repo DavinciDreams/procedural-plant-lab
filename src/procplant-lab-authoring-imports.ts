@@ -37,6 +37,17 @@ import {
 } from "./procplant-material-bake";
 import { exportProcPlantScenesGlb } from "./procplant-export";
 import type { ProcPlantMeshAttachmentSpec, ProcPlantMeshSpine } from "./procplant-mesh-helper";
+import {
+  inspectProcPlantImportedHeroDecalTarget,
+  type ProcPlantImportedHeroDecalTarget,
+  type ProcPlantImportedHeroDecalTargetInspection,
+} from "./procplant-imported-hero-decal";
+import type { ProcPlantMaterializedPlacementDecal } from "./procplant-organ-placement-overrides";
+import {
+  bindProcPlantPlacementDecalsIntoGlb,
+  prepareProcPlantPlacementDecalGlbDraws,
+  type ProcPlantPlacementDecalPixelSource,
+} from "./procplant-placement-decal-glb";
 
 export interface ProcPlantLabHeroPreview {
   group: THREE.Group;
@@ -50,6 +61,8 @@ export interface ProcPlantLabHeroPreview {
   attachmentMaterialization: ProcPlantAttachmentMaterialization;
   sourceMaterialAudit: ProcPlantHeroSourceMaterialAudit;
   spine: ProcPlantMeshSpine;
+  importedDecalTarget: ProcPlantImportedHeroDecalTarget | null;
+  importedDecalTargetInspection: ProcPlantImportedHeroDecalTargetInspection;
 }
 
 const createProcPlantHeroBranchPrototype = () => {
@@ -174,6 +187,7 @@ export const createProcPlantLabHeroPreview = async (
   trunk.receiveShadow = true;
   trunk.userData.procplantOwnsMaterial = true;
   group.add(trunk);
+  const importedDecalTargetInspection = inspectProcPlantImportedHeroDecalTarget(authored, trunkGeometry);
 
   const attachmentPrototypes: ProcPlantAttachmentPrototype[] = [{
     id: "hero-branch",
@@ -267,6 +281,8 @@ export const createProcPlantLabHeroPreview = async (
     attachmentMaterialization,
     sourceMaterialAudit: sourceMaterial.audit,
     spine: authored.spine,
+    importedDecalTarget: importedDecalTargetInspection.target,
+    importedDecalTargetInspection,
   };
   } catch (error) {
     sourceMaterial.dispose();
@@ -398,6 +414,11 @@ export const createProcPlantLabHeroExportScene = (
     audit,
   };
   const authoredRoot = preview.clone(true);
+  const liveOnly: THREE.Object3D[] = [];
+  authoredRoot.traverse((object) => {
+    if (object.userData.procplantLiveOnly === true) liveOnly.push(object);
+  });
+  for (const object of liveOnly) object.removeFromParent();
   authoredRoot.position.set(0, 0, 0);
   authoredRoot.quaternion.identity();
   authoredRoot.scale.set(1, 1, 1);
@@ -472,3 +493,21 @@ export const exportProcPlantLabHeroPreview = async (
   preview: THREE.Group,
   audit: Record<string, unknown> | null,
 ) => exportProcPlantScenesGlb(createProcPlantLabHeroExportScene(preview, audit));
+
+/** Standards-valid imported-hero export: ordinary UV0 quads plus embedded core PNG. */
+export const exportProcPlantLabHeroPreviewWithPlacementDecals = async (
+  preview: THREE.Group,
+  audit: Record<string, unknown> | null,
+  decals: readonly ProcPlantMaterializedPlacementDecal[],
+  pixels: ProcPlantPlacementDecalPixelSource,
+) => {
+  const scene = createProcPlantLabHeroExportScene(preview, audit);
+  const prepared = prepareProcPlantPlacementDecalGlbDraws(decals, pixels);
+  scene.add(prepared.root);
+  try {
+    const base = await exportProcPlantScenesGlb(scene);
+    return await bindProcPlantPlacementDecalsIntoGlb(base, prepared, pixels);
+  } finally {
+    prepared.dispose();
+  }
+};

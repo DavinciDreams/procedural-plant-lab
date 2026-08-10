@@ -41,6 +41,11 @@ import {
   type ProcPlantWeberPennTrimOverrideSet,
   type ProcPlantWeberPennTrimTarget,
 } from "./procplant-weber-penn-trim";
+import { applyProcPlantWeberPennOrganPlacementOverrides } from "./procplant-weber-penn-organ-placement-apply";
+import type {
+  ProcPlantWeberPennOrganPlacementAudit,
+  ProcPlantWeberPennOrganPlacementPackage,
+} from "./procplant-weber-penn-organ-placement";
 
 export interface ProcPlantTemplate {
   pos: Float32Array;
@@ -358,6 +363,8 @@ export interface ProcPlantStats {
 export interface ProcPlantWeberPennBuildOptions {
   /** Signature-bound baked trim operations. Unsupported or stale sets fail closed. */
   trimOverrides?: ProcPlantWeberPennTrimOverrideSet;
+  /** Exact native attachment-frame organ placements. Unsupported or stale sets fail closed. */
+  placementOverrides?: ProcPlantWeberPennOrganPlacementPackage;
 }
 
 export interface ProcPlantWeberPennBuildMetadata {
@@ -367,8 +374,12 @@ export interface ProcPlantWeberPennBuildMetadata {
   pickerGraph: ProcPlantGraph;
   /** Stable picker segment ID to native stem ID mapping. */
   pickerStemIds: Readonly<Record<string, string>>;
+  /** Stable native attachment ID to exact baked owner stem ID mapping. */
+  attachmentStemIds: Readonly<Record<string, string>>;
   /** Present whenever a caller supplied an override set, including fail-closed audits. */
   trimAudit: ProcPlantWeberPennBakedTrimAudit | null;
+  /** Present whenever a caller supplied exact-frame organ placements. */
+  placementAudit: ProcPlantWeberPennOrganPlacementAudit | null;
 }
 
 export interface ProcPlantBuildResult {
@@ -4773,6 +4784,49 @@ class TemplateBuilder {
     this.idx.push(base, base + 1, base + 2);
   }
 
+  /**
+   * Append an authored indexed prototype without expanding every triangle into
+   * three independent vertices. This is intentionally strict: callers must
+   * provide normals and UV0 so sharing a vertex cannot silently change either
+   * lighting or texture semantics.
+   */
+  addTransformedIndexedGeometry(
+    geometry: THREE.BufferGeometry,
+    matrix: THREE.Matrix4,
+    color: THREE.Color,
+    tint = true,
+    sway = 1,
+  ) {
+    const index = geometry.getIndex();
+    const position = geometry.getAttribute("position");
+    const normal = geometry.getAttribute("normal");
+    const uv0 = geometry.getAttribute("uv");
+    if (!index || !position || position.itemSize !== 3 || position.count === 0) {
+      throw new Error("Indexed ProcPlant geometry requires a non-empty position attribute and index");
+    }
+    if (!normal || normal.itemSize !== 3 || normal.count !== position.count) {
+      throw new Error("Indexed ProcPlant geometry requires one xyz normal per position vertex");
+    }
+    if (!uv0 || uv0.itemSize !== 2 || uv0.count !== position.count) {
+      throw new Error("Indexed ProcPlant geometry requires one UV0 pair per position vertex");
+    }
+    const base = this.pos.length / 3;
+    const transformedPosition = new THREE.Vector3();
+    const transformedNormal = new THREE.Vector3();
+    const normalMatrix = new THREE.Matrix3().getNormalMatrix(matrix);
+    for (let vertex = 0; vertex < position.count; vertex++) {
+      transformedPosition.fromBufferAttribute(position, vertex).applyMatrix4(matrix);
+      transformedNormal.fromBufferAttribute(normal, vertex).applyNormalMatrix(normalMatrix);
+      this.pos.push(transformedPosition.x, transformedPosition.y, transformedPosition.z);
+      this.nrm.push(transformedNormal.x, transformedNormal.y, transformedNormal.z);
+      this.uv0.push(uv0.getX(vertex), uv0.getY(vertex));
+      this.col.push(color.r, color.g, color.b);
+      this.tintable.push(tint ? 1 : 0);
+      this.sway.push(sway);
+    }
+    for (let offset = 0; offset < index.count; offset++) this.idx.push(base + index.getX(offset));
+  }
+
   build(): ProcPlantTemplate {
     return {
       pos: new Float32Array(this.pos),
@@ -6576,6 +6630,7 @@ export const createProcPlantAerialRootGeometry = (): THREE.BufferGeometry =>
 export const createProcPlantConiferSprayGeometry = (detail: "full" | "light" = "full"): THREE.BufferGeometry => {
   const positions: number[] = [];
   const normals: number[] = [];
+  const uvs: number[] = [];
   const indices: number[] = [];
   const addQuad = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3) => {
     const base = positions.length / 3;
@@ -6584,6 +6639,9 @@ export const createProcPlantConiferSprayGeometry = (detail: "full" | "light" = "
       positions.push(p.x, p.y, p.z);
       normals.push(normal.x, normal.y, normal.z);
     }
+    // Each folded half-ribbon owns a coherent UV island. Adjacent halves keep
+    // separate ridge vertices because their flat normals intentionally differ.
+    uvs.push(0, 0, 0, 1, 1, 1, 1, 0);
     indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
   };
 
@@ -6629,7 +6687,9 @@ export const createProcPlantConiferSprayGeometry = (detail: "full" | "light" = "
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
   geometry.setIndex(indices);
+  declareProcPlantGeometryUv0(geometry);
   geometry.computeBoundingSphere();
   return geometry;
 };
@@ -6638,14 +6698,33 @@ export const createProcPlantConiferSprayGeometry = (detail: "full" | "light" = "
 export const createProcPlantFernFrondGeometry = (): THREE.BufferGeometry => {
   const positions: number[] = [];
   const normals: number[] = [];
+  const uvs: number[] = [];
   const indices: number[] = [];
-  const addQuad = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3) => {
+  const addQuad = (
+    a: THREE.Vector3,
+    b: THREE.Vector3,
+    c: THREE.Vector3,
+    d: THREE.Vector3,
+    uv0: readonly [number, number],
+    uv1: readonly [number, number],
+    uv2: readonly [number, number],
+    uv3: readonly [number, number],
+  ) => {
     const base = positions.length / 3;
-    const normal = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a)).normalize();
+    const normal = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a));
+    // The basal half-width is intentionally zero, so its first triangle is
+    // degenerate. Use the second triangle's plane for that quad instead of
+    // uploading a zero normal; rendered positions and triangle topology stay
+    // unchanged.
+    if (normal.lengthSq() < 1e-12) {
+      normal.subVectors(c, a).cross(new THREE.Vector3().subVectors(d, a));
+    }
+    normal.normalize();
     for (const point of [a, b, c, d]) {
       positions.push(point.x, point.y, point.z);
       normals.push(normal.x, normal.y, normal.z);
     }
+    for (const uv of [uv0, uv1, uv2, uv3]) uvs.push(uv[0], uv[1]);
     indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
   };
   const halfWidth = (y: number) => {
@@ -6669,18 +6748,28 @@ export const createProcPlantFernFrondGeometry = (): THREE.BufferGeometry => {
       new THREE.Vector3(-width0, y0, fold0 + sag0),
       new THREE.Vector3(-width1, y1, fold1 + sag1),
       new THREE.Vector3(0, y1, sag1),
+      [0.5, y0],
+      [0, y0],
+      [0, y1],
+      [0.5, y1],
     );
     addQuad(
       new THREE.Vector3(0, y0, sag0),
       new THREE.Vector3(0, y1, sag1),
       new THREE.Vector3(width1, y1, -fold1 + sag1),
       new THREE.Vector3(width0, y0, -fold0 + sag0),
+      [0.5, y0],
+      [0.5, y1],
+      [1, y1],
+      [1, y0],
     );
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
   geometry.setIndex(indices);
+  declareProcPlantGeometryUv0(geometry);
   geometry.computeBoundingSphere();
   return geometry;
 };
@@ -6757,6 +6846,14 @@ const addTransformedGeometry = (
   }
   if (source !== geometry) source.dispose();
 };
+
+const addTransformedIndexedGeometry = (
+  builder: TemplateBuilder,
+  geometry: THREE.BufferGeometry,
+  matrix: THREE.Matrix4,
+  color: THREE.Color,
+  sway = 1,
+) => builder.addTransformedIndexedGeometry(geometry, matrix, color, true, sway);
 
 const combineTemplates = (base: ProcPlantTemplate, extra: ProcPlantTemplate): ProcPlantTemplate => {
   if (extra.idx.length === 0) return base;
@@ -7072,7 +7169,11 @@ const addWeberPennFoliageMass = (
     // fill remains byte-stable; removed owner anchors simply suppress their
     // already-determined organ instead of redistributing it elsewhere.
     if (anchor && retainedAnchorIds && !retainedAnchorIds.has(anchor.id)) continue;
-    addTransformedGeometry(builder, sprayGeometry, matrix, color, 0.38 + t * 0.58);
+    if (sourceMode === "conifer-spray") {
+      addTransformedIndexedGeometry(builder, sprayGeometry, matrix, color, 0.38 + t * 0.58);
+    } else {
+      addTransformedGeometry(builder, sprayGeometry, matrix, color, 0.38 + t * 0.58);
+    }
     added++;
   }
   sprayGeometry.dispose();
@@ -7528,7 +7629,11 @@ const buildWeberPennProcPlantTemplateInternal = (
   const baseY = normalizationBake.min.y;
   const branchVerts = baked.branches.positions.length / 3;
   const leafVerts = baked.leaves.positions.length / 3;
-  const totalVerts = branchVerts + leafVerts;
+  // Leaf-site data still drives branch-relative authored crown fill below, but
+  // native leaf vertices are not renderable when nativeLeaves=false. Omitting
+  // those unindexed attribute rows avoids uploading dead Weber-Penn geometry.
+  const renderedLeafVerts = nativeLeaves ? leafVerts : 0;
+  const totalVerts = branchVerts + renderedLeafVerts;
   const totalIdx = baked.branches.indices.length + (nativeLeaves ? baked.leaves.indices.length : 0);
   const pos = new Float32Array(totalVerts * 3);
   const nrm = new Float32Array(totalVerts * 3);
@@ -7637,7 +7742,9 @@ const buildWeberPennProcPlantTemplateInternal = (
         if (direction.lengthSq() < 0.0001) direction.set(position.x, 0.1, position.z);
         direction.normalize();
         return {
-          id: `weber-penn:branch-tip:${index}`,
+          // Bind the public anchor to the native owner identity, not the
+          // position of that stem in a capped/sorted preview subset.
+          id: `weber-penn:branch-tip:${stem.index}`,
           ownerStemIndex: stem.index,
           position,
           direction,
@@ -7690,7 +7797,7 @@ const buildWeberPennProcPlantTemplateInternal = (
     sway[i] = w * w * realism.windFlex * 0.62;
   }
 
-  for (let i = 0; i < leafVerts; i++) {
+  for (let i = 0; i < renderedLeafVerts; i++) {
     const src = i * 3;
     const dst = (branchVerts + i) * 3;
     const di = branchVerts + i;
@@ -7751,8 +7858,8 @@ const buildWeberPennProcPlantTemplateInternal = (
     sourceFoliageAnchors,
     retainedFoliageAnchorIds,
   );
-  const template = combineTemplates(baseTemplate, massBuilder.build());
-  const graph = emptyGraph();
+  let template = combineTemplates(baseTemplate, massBuilder.build());
+  let graph = emptyGraph();
   graph.attachments = foliageAnchors.map((anchor, index) => {
     const tangent = anchor.direction.clone().normalize();
     // An anchor right that is parallel to the tangent projects to zero, so fall back
@@ -7783,6 +7890,30 @@ const buildWeberPennProcPlantTemplateInternal = (
       organIndex: null,
     };
   });
+  const attachmentStemIds = Object.fromEntries(foliageAnchors.map((anchor) => [
+    anchor.id,
+    `weber-penn:stem:${anchor.ownerStemIndex}`,
+  ]));
+  const placement = options.placementOverrides && target.topologySignature
+    ? applyProcPlantWeberPennOrganPlacementOverrides({
+        target: { ...target, topologySignature: target.topologySignature },
+        graph,
+        attachmentStemIds,
+        flowerAvailable: Boolean(genome.flower),
+      }, options.placementOverrides)
+    : null;
+  let placedLeaves = 0;
+  let placedFlowers = 0;
+  let placedAccessories = 0;
+  if (placement?.changed) {
+    const placedOrgans = placement.graph.organs.slice(graph.organs.length);
+    const overlay = buildProcPlantOrganOverlayTemplate(genome, placedOrgans, env);
+    template = combineTemplates(template, overlay.template);
+    graph = placement.graph;
+    placedLeaves = overlay.leaves;
+    placedFlowers = overlay.flowers;
+    placedAccessories = overlay.accessories;
+  }
   const pickerGraph = emptyGraph();
   const pickerStemIds: Record<string, string> = {};
   const retainedBakedStemIndices = new Set(
@@ -7839,15 +7970,18 @@ const buildWeberPennProcPlantTemplateInternal = (
     graph,
     stats: {
       stems: baked.branches.indices.length / 6,
-      leaves: (nativeLeaves ? Math.round(baked.leaves.indices.length / 6) : 0) + massLeaves,
-      flowers: 0,
+      leaves: (nativeLeaves ? Math.round(baked.leaves.indices.length / 6) : 0) + massLeaves + placedLeaves,
+      flowers: placedFlowers,
+      ...(placedAccessories > 0 ? { accessories: placedAccessories } : {}),
       triangles: template.idx.length / 3,
     },
     weberPennTrim: {
       target,
       pickerGraph,
       pickerStemIds,
+      attachmentStemIds,
       trimAudit: trimmed?.audit ?? null,
+      placementAudit: placement?.audit ?? null,
     },
   };
 };
@@ -8263,6 +8397,40 @@ const geometryForAccessoryKind = (kind: ProcPlantAccessoryKind): THREE.BufferGeo
   return createProcPlantAerialRootGeometry();
 };
 
+/** Materialize organ-only geometry without inventing a graph stem backend. */
+const buildProcPlantOrganOverlayTemplate = (
+  genome: ProcPlantGenome,
+  organs: readonly ProcPlantOrgan[],
+  env: ProcPlantEnvironment,
+): { template: ProcPlantTemplate; leaves: number; flowers: number; accessories: number } => {
+  const builder = new TemplateBuilder();
+  const shade = 1 - THREE.MathUtils.clamp(env.light, 0, 1);
+  let leaves = 0;
+  let flowers = 0;
+  let accessories = 0;
+  const accessoryGeometries = new Map<ProcPlantAccessoryKind, THREE.BufferGeometry>();
+  for (const organ of organs) {
+    if (organ.kind === "flower") {
+      addFlower(builder, genome, organ);
+      flowers++;
+    } else if (isAccessoryOrganKind(organ.kind)) {
+      const instance = accessoryInstance(organ);
+      let geometry = accessoryGeometries.get(organ.kind);
+      if (!geometry) {
+        geometry = geometryForAccessoryKind(organ.kind);
+        accessoryGeometries.set(organ.kind, geometry);
+      }
+      addTransformedGeometry(builder, geometry, instance.matrix, instance.color, instance.sway);
+      accessories++;
+    } else {
+      addLeaf(builder, genome, organ, shade);
+      leaves++;
+    }
+  }
+  for (const geometry of accessoryGeometries.values()) geometry.dispose();
+  return { template: builder.build(), leaves, flowers, accessories };
+};
+
 /**
  * Compile a public graph after graph-space operations such as pruning. This is
  * intentionally limited to the procplant graph backend: Weber-Penn and branch
@@ -8293,13 +8461,13 @@ export const buildProcPlantTemplateFromGraph = (
     } else if (organ.kind === "coniferSpray") {
       const inst = coniferSprayInstance(genome, organ);
       const geo = createProcPlantConiferSprayGeometry();
-      addTransformedGeometry(builder, geo, inst.matrix, inst.color, inst.sway);
+      addTransformedIndexedGeometry(builder, geo, inst.matrix, inst.color, inst.sway);
       geo.dispose();
       leafCount++;
     } else if (organ.kind === "fernFrond") {
       const inst = fernFrondInstance(genome, organ);
       const geo = createProcPlantFernFrondGeometry();
-      addTransformedGeometry(builder, geo, inst.matrix, inst.color, inst.sway);
+      addTransformedIndexedGeometry(builder, geo, inst.matrix, inst.color, inst.sway);
       geo.dispose();
       leafCount++;
     } else if (organ.kind === "palmFrond") {
@@ -8447,7 +8615,11 @@ export const buildProcPlantInstancePrototype = (
   const geometry = geometryForCompiledInstance(kind, genome);
   const builder = new TemplateBuilder();
   try {
-    addTransformedGeometry(builder, geometry, new THREE.Matrix4(), new THREE.Color(0xffffff), 1);
+    if (kind === "coniferSpray" || kind === "fernFrond") {
+      addTransformedIndexedGeometry(builder, geometry, new THREE.Matrix4(), new THREE.Color(0xffffff), 1);
+    } else {
+      addTransformedGeometry(builder, geometry, new THREE.Matrix4(), new THREE.Color(0xffffff), 1);
+    }
     return builder.build();
   } finally {
     geometry.dispose();
@@ -8467,7 +8639,11 @@ export const materializeProcPlantParts = (
       geometry = geometryForCompiledInstance(instance.kind, genome);
       geometries.set(instance.kind, geometry);
     }
-    addTransformedGeometry(builder, geometry, instance.matrix, instance.color, instance.sway);
+    if (instance.kind === "coniferSpray" || instance.kind === "fernFrond") {
+      addTransformedIndexedGeometry(builder, geometry, instance.matrix, instance.color, instance.sway);
+    } else {
+      addTransformedGeometry(builder, geometry, instance.matrix, instance.color, instance.sway);
+    }
   }
   for (const geometry of geometries.values()) geometry.dispose();
   return combineTemplates(parts.stems, builder.build());

@@ -92,16 +92,26 @@ import {
 } from "procplants/core";
 import {
   buildProcPlantGraph as buildProcPlantGraphFromFullEntry,
+  createProcPlantFiveTierAtlasBuildManifest,
+  createProcPlantFiveTierAtlasCatalogPlan,
+  createProcPlantFiveTierAtlasMemoryCache,
+  classifyProcPlantFiveTierAtlasIndexedDbError,
   fitProcPlantCrownMask,
   fitProcPlantCrownVoxelMask,
   buildProcPlantTemplateWithCrownLightPruning,
   PROCPLANT_PLACEMENT_DECAL_GLB_CONTRACT,
+  PROCPLANT_IMPORTED_HERO_DECAL_CONTRACT,
+  createProcPlantImportedHeroDecalPackage,
   appendProcPlantVineGuidePoint,
   applyProcPlantVineGuidePackage,
   createProcPlantVineGuidePackage,
   createProcPlantVineGuideTarget,
   appendProcPlantVineGuidePointOnStaticSupport,
+  attachProcPlantVineGuidePointToLiveSupport,
+  createProcPlantVineLiveSupportPackage,
+  rebuildProcPlantVineGuideFromLiveSupports,
   type ProcPlantGraph,
+  type ProcPlantImportedHeroDecalTarget,
   type ProcPlantThreePlacementDecalBindingMetadata,
 } from "procplants";
 
@@ -123,6 +133,12 @@ const optInBuild = buildProcPlantTemplateWithCrownLightPruning(genome, 612072, d
   crownLightPruning: { enabled: false },
 });
 const decalExportSupport: ProcPlantThreePlacementDecalBindingMetadata["exportSupport"] = "metadata-only";
+const importedDecalTarget: ProcPlantImportedHeroDecalTarget = {
+  sourceContentHash: "source", authoringContentHash: "authoring", instanceId: "instance", nodePath: "root/trunk",
+  meshIndex: 0, primitiveIndex: 0, materialIndex: 0, transformsBaked: true, vertexCount: 3, triangleCount: 1,
+  geometrySignature: "geometry-v1-fnv1a32:12345678",
+};
+const importedDecals = createProcPlantImportedHeroDecalPackage(importedDecalTarget);
 const vineGenome = procPlantPresets.floweringWallCreeper!;
 let vineGuide = createProcPlantVineGuidePackage(createProcPlantVineGuideTarget(vineGenome, 612072));
 const staticSnap = appendProcPlantVineGuidePointOnStaticSupport(vineGuide, [0, 0.2, 0], {
@@ -132,6 +148,30 @@ if (!staticSnap.changed) throw new Error("static vine support export drift");
 vineGuide = staticSnap.authored;
 vineGuide = appendProcPlantVineGuidePoint(vineGuide, [0.2, 1, 0]);
 const authoredVine = applyProcPlantVineGuidePackage(vineGenome, 612072, vineGuide);
+const lod5AtlasPlan = createProcPlantFiveTierAtlasBuildManifest(genome, 612072, defaultPlantEnvironment(), {
+  width: 16,
+  height: 16,
+  azimuthCount: 4,
+  elevations: [0],
+  maxAtlasSize: 256,
+});
+const lod5CatalogPlan = createProcPlantFiveTierAtlasCatalogPlan([{
+  presetId: genome.id,
+  genome,
+  seed: 612072,
+  buildOptions: { width: 16, height: 16, azimuthCount: 2, elevations: [0], maxAtlasSize: 128 },
+}], { maxEntries: 2, maxTotalAtlasBytes: 1024 * 1024 });
+const lod5CatalogCache = createProcPlantFiveTierAtlasMemoryCache({ maxEntries: 2, maxDocumentBytes: 1024 * 1024 });
+let liveVine = createProcPlantVineLiveSupportPackage(vineGuide);
+const livePose = {
+  id: "consumer-trellis",
+  kind: "object3d" as const,
+  supportSignatureVersion: 1 as const,
+  supportSignature: "consumer-trellis-v1",
+  localToGuide: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] as const,
+};
+liveVine = attachProcPlantVineGuidePointToLiveSupport(vineGuide, liveVine, vineGuide.points[0]!.id, livePose);
+const liveRebuild = rebuildProcPlantVineGuideFromLiveSupports(vineGuide, liveVine, [livePose]);
 
 if (PROCPLANT_GENERATOR_CONTRACT_REVISION !== 3) throw new Error("unexpected contract revision");
 if (PROCPLANT_SUPPORTED_INSTANCE_KINDS.length !== 20) throw new Error("unexpected kind registry");
@@ -142,7 +182,14 @@ if (voxelFit.crown.volumes.length !== 2) throw new Error("crown voxel-mask fit e
 if (optInBuild.crownLightPruning.status !== "disabled") throw new Error("full-entry crown-pruning contract drift");
 if (decalExportSupport !== "metadata-only") throw new Error("placement decal renderer type export drift");
 if (PROCPLANT_PLACEMENT_DECAL_GLB_CONTRACT !== "procplants.placement-decal-glb") throw new Error("placement decal GLB export drift");
+if (PROCPLANT_IMPORTED_HERO_DECAL_CONTRACT !== "procplants.imported-hero-decals" || importedDecals.operations.length !== 0) throw new Error("imported hero decal export drift");
 if (authoredVine.status !== "applied" || authoredVine.genome.vine?.guide?.length !== 2) throw new Error("vine guide authoring export drift");
+if (!lod5AtlasPlan.cacheKey.startsWith("procplants-lod5-atlas-v1-")) throw new Error("five-tier atlas build export drift");
+if (!lod5CatalogPlan.cacheKey.startsWith("procplants-lod5-atlas-catalog-v1-")) throw new Error("five-tier atlas catalog export drift");
+if (lod5CatalogCache.stats().entries !== 0) throw new Error("five-tier atlas memory cache export drift");
+if (classifyProcPlantFiveTierAtlasIndexedDbError(new DOMException("full", "QuotaExceededError")) !== "quota") throw new Error("five-tier atlas IndexedDB cache export drift");
+lod5CatalogCache.dispose();
+if (liveRebuild.status !== "rebuilt" || liveVine.bindings.length !== 1) throw new Error("live vine support export drift");
 console.log(JSON.stringify({ revision: PROCPLANT_GENERATOR_CONTRACT_REVISION, kind, triangles: prototype.idx.length / 3 }));
 `);
   await writeFile(join(consumerRoot, "src", "runtime.mjs"), `

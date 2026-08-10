@@ -110,6 +110,18 @@ export interface ProcPlantFiveTierLodPackage {
   };
   /** Borrowed. The package never mutates or disposes caller-owned atlas bytes. */
   atlas: ProcPlantImpostorAtlas;
+  /** Present only when compiled from a validated persisted WebGL atlas asset. */
+  atlasAsset?: {
+    contract: "procplants.five-tier-atlas-asset";
+    version: 1;
+    cacheKey: string;
+    buildContract: "procplants.five-tier-atlas-build";
+    buildVersion: 1;
+    genomeId: string;
+    seed: number;
+    sourceLod0ContentHash: string;
+    atlasContentHash: string;
+  };
 }
 
 export interface ProcPlantFiveTierCompileOptions {
@@ -425,6 +437,17 @@ export const validateProcPlantFiveTierLodPackage = (
     || value.impostor.viewCoverage !== (elevations.size > 1 ? "hemisphere" : "azimuth")) {
     throw new Error("five-tier LOD package impostor metadata is inconsistent");
   }
+  if (value.atlasAsset !== undefined && (
+    value.atlasAsset.contract !== "procplants.five-tier-atlas-asset"
+    || value.atlasAsset.version !== 1
+    || value.atlasAsset.buildContract !== "procplants.five-tier-atlas-build"
+    || value.atlasAsset.buildVersion !== 1
+    || !/^procplants-lod5-atlas-v1-[0-9a-f]{8}$/.test(value.atlasAsset.cacheKey)
+    || value.atlasAsset.genomeId !== value.genomeId
+    || value.atlasAsset.seed !== value.seed
+    || value.atlasAsset.sourceLod0ContentHash !== value.sourceLod0ContentHash
+    || value.atlasAsset.atlasContentHash !== value.atlas.contentHash
+  )) throw new Error("five-tier LOD package atlas asset provenance is invalid");
   return value;
 };
 
@@ -537,6 +560,7 @@ export const exportProcPlantFiveTierLodGlb = async (
     seed: source.seed,
     lodSelection: source.lodSelection,
     impostor: atlasManifest(source.atlas),
+    ...(source.atlasAsset ? { atlasAsset: source.atlasAsset } : {}),
     standards: { metadata: "glTF-extras", khronosLodExtension: null },
   };
   const binaryParts: Uint8Array[] = [];

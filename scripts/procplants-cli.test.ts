@@ -133,4 +133,22 @@ console.log("ok 4 - CLI returns documented usage exit codes");
   ]);
 }
 console.log("ok 5 - compile emits deterministic numbered seed variants");
-console.log("1..5");
+
+resetOutput();
+files.set("fern.json", JSON.stringify(procPlantPresets.phiFern));
+const planArgs = [
+  "lod5-atlas-plan", "fern.json", "--seed", "612072", "--out", "lod5-plan-a.json",
+  "--width", "16", "--height", "16", "--azimuths", "4", "--elevations", "0,0.5235987755982988",
+  "--padding", "2", "--samples", "0", "--max-atlas-size", "256", "--max-atlas-bytes", "262144",
+];
+assert.equal(await runProcPlantCli(planArgs, io), PROCPLANT_CLI_EXIT.success);
+resetOutput();
+assert.equal(await runProcPlantCli(planArgs.map((value) => value === "lod5-plan-a.json" ? "lod5-plan-b.json" : value), io), PROCPLANT_CLI_EXIT.success);
+assert.equal(files.get("lod5-plan-a.json"), files.get("lod5-plan-b.json"));
+const lod5Plan = JSON.parse(files.get("lod5-plan-a.json")!);
+assert.equal(lod5Plan.contract, "procplants.five-tier-atlas-build");
+assert.equal(lod5Plan.source.lod0ContentHash, "fnv1a32-add017a3");
+assert.equal(lod5Plan.capture.plan.views.length, 8);
+assert.match(lod5Plan.cacheKey, /^procplants-lod5-atlas-v1-[0-9a-f]{8}$/);
+console.log("ok 6 - CLI emits deterministic bounded five-tier WebGL atlas build manifests without pretending to capture in Node");
+console.log("1..6");
