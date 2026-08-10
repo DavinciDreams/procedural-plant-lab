@@ -49,7 +49,7 @@ This report separates deterministic geometry/build evidence from live standalone
 | Meshopt encoder | 20.60 kB | 8.24 kB | Lazy and opt-in during compressed GLB export |
 | EZ-tree vendor backend | 3,998.39 kB | 2,986.72 kB | Separate optional worker/backend chunk |
 
-The complete reusable ESM entry includes the public grouped-surface, tangent-ready Three geometry, live baked-material, grouped GLB binding, renderer-owned placement decals, evidence-bound decal PNG/GLB adoption, damage/growth/topology, crown-light pruning, mesh/BVH, validated graph authoring, specialized typed DAG adapters, static and signature-bound live vine authoring, constructive-crown tools, versioned five-tier WebGL atlas assets, catalog coordination, and its durable IndexedDB cache adapter, clustered visibility, and WebGPU planning. The `procplants/core` runtime/Tellus entry excludes the full-entry atlas/catalog/cache/decal, vine-support, voxel-viewport, GLTFExporter, meshopt, material-authoring, KTX2 decoder, and injected-device WebGPU paths. The explicit `procplants/webgpu` entry is not used by the WebGL lab or Tellus. Exact cumulative full/core/package byte counts are refreshed after the combined build and package gates below.
+The complete reusable ESM entry includes the public grouped-surface, tangent-ready Three geometry, live baked-material, grouped GLB binding, renderer-owned placement decals, evidence-bound decal PNG/GLB adoption, damage/growth/topology, crown-light pruning, mesh/BVH, validated graph authoring, specialized typed DAG adapters, static and signature-bound live vine authoring, constructive-crown tools, versioned five-tier WebGL atlas assets, catalog coordination, and its durable IndexedDB cache adapter, clustered visibility, and WebGPU planning. The `procplants/core` runtime/Tellus entry excludes the full-entry atlas/catalog/cache/decal, vine-support, voxel-viewport, GLTFExporter, meshopt, material-authoring, KTX2 decoder, and injected-device WebGPU paths. The explicit `procplants/webgpu` entry is not used by the WebGL lab or Tellus. The final built dependency closures are 1,328,726 raw / 334,222 gzip for the full entry, 567,109 / 133,264 for `procplants/core`, and 48,174 / 13,256 for the explicit WebGPU entry. The packed package is 622.6 kB (2.5 MB unpacked, 269 files), and a fresh Bun/strict-TypeScript consumer imports both package entries and executes the revision-3 runtime.
 
 The explicit bootstrap remains 11,169 bytes raw / 3,930 bytes gzip. It then fetches the lab and shared generator dependency; the complete parser-discovered interactive closure is 1,039,767 raw / 279,074 gzip, 926 bytes below the fixed 280 kB gate and 1,358 bytes below the cumulative 280,432-byte baseline. Placement resolution, generated/imported GLB authoring/export, JSON-only projections/download, durable atlas UI, imported-hero decal interaction, and static/live vine support implementations remain lazy. The decal pixel/GLB adoption path, renderer-owned decal adapter, vine-guide package, crown-mask and voxel-mask viewports, tangent/PBR adapters, manual-spine editor, force editor, and graph editor also remain lazy. The KTX2 adapter, loader, and Basis assets form a nested lazy path behind hero GLB import and are absent from the interactive closure until the selected source material requires them. Browser resource-timing assertions prove these specialized implementation chunks are absent before their first interaction. This improves first paint and initial parse work; it does not claim lower total bytes before the first plant is interactive.
 
@@ -174,31 +174,34 @@ geometries/textures. Pool disposal released all pool references and bounded
 memory-cache disposal returned its entries/document bytes to zero.
 
 The pool never disposes caller-owned WebGL renderers, and the adoption callback
-borrows its asset/package only for that invocation. Durable cache storage and
-any retained adopted assets are caller responsibilities. No catalog planning,
+borrows its asset/package only for that invocation. Catalog/library callers may
+inject their own cache and own any retained adopted assets; the standalone lazy
+lab UI instead owns a bounded IndexedDB adapter with durable reload, eviction,
+corruption/quota/size failure handling, clear, and disposal. No catalog planning,
 cache lookup, or capture occurs on startup or through `procplants/core`.
 
 ## Tellus parity worktree evidence
 
-Draft Tellus PR #177 removes the 5,782-line vendored generator, exact-pins the
-Procplants package foundation, and uses a thin `procplants/core` contract-v3
-adapter with UV0 and exhaustive dispatch for all 20 instance kinds. Its frozen
-automatic-ecology allowlist contains the existing 13 presets, so new varieties
-remain opt-in. Installed-package fixture parity, 427 tests, strict typecheck,
-and the production build pass. The pin predates the cumulative authoring stack
-and must be refreshed to the final merged SHA or immutable release.
+Tellus PR #177 merged as `ba92eb3`, removing the 5,782-line vendored generator
+in favor of a thin exact-SHA `procplants/core` contract-v3/UV0 adapter with
+exhaustive dispatch for all 20 instance kinds. Its frozen 13-preset automatic
+ecology allowlist keeps the new varieties opt-in. PR #178 merged as `acc9ca4`
+and adopts package LOD0/LOD1/LOD2 geometry for eleven audited ground-cover
+cohorts. The deterministic 49-chunk reference places 180 plants as 114 renderer
+instances across 110.243 by 111.407 metres at 51,304 triangles and 184 non-empty
+draws with no ground-cover shadows; the grass-coexistence case adds 1,712 grass
+instances at 75,016 total triangles and 9 draws. Nine new covers remain
+placement-only, and the low-FPS queue test proves bounded scheduling rather
+than frame rate.
 
-Stacked draft #178 adopts package LOD0/LOD1/LOD2 geometry for eleven audited
-ground-cover cohorts. The deterministic 49-chunk reference places 180 plants
-as 114 renderer instances across 110.243 by 111.407 metres at 51,304 triangles
-and 184 non-empty draws, with no ground-cover shadow casters, receivers, or
-proxies. Its grass-coexistence case adds 1,712 grass instances at 75,016 total
-triangles and 9 draws without ground-cover shadows. Nine new ground covers are
-placement-only. The low-FPS queue test proves bounded scheduling, not frame
-rate.
-
-Against clean Tellus `origin/master`, #177's production JavaScript sum grew by
-104,006 raw bytes (+1.09%) and 30,839 level-9 gzip bytes (+1.06%). Both Tellus
-PRs are open drafts with green CI. Their tests construct deterministic Three.js
-scene state but do not exercise the default browser WebGL renderer, measure GPU
-time/FPS on a representative device, or prove served/deployed capacity.
+PRs #179 and #180 repinned the installed package through exact Procplants SHA
+`d00de0431acb5edeada9b5018becaa561487f9bc`; the current indexed Phi/conifer
+integration intentionally changes the active contract-v3 fixture and therefore
+requires another exact-SHA repin after this branch merges. PR #181 merged the
+WebGL-first field harness and localized invalidation fixes. Its recorded Intel
+Iris Xe/D3D11 run drained in 16.025 seconds, reduced procplant chunk builds from
+3,331 to 172, and reported three five-second samples at 56.61 FPS, 16.7 ms p95,
+and 8.2 ms average GPU timer. PR #182 then corrected stale renderer wording;
+Tellus remains hard-default WebGL because it is faster there. These are one
+controlled-machine diagnostics, not served/deployed or representative-device
+capacity proof, and Procplants' opt-in WebGPU path is not Tellus evidence.
