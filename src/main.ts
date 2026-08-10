@@ -117,7 +117,6 @@ import {
 import type {
   ProcPlantMaterializedPlacementDecal,
   ProcPlantOrganPlacementPackage,
-  ProcPlantPlaceableOrganKind,
 } from "./procplant-organ-placement-overrides";
 import type {
   ProcPlantWeberPennOrganPlacementPackage,
@@ -1441,6 +1440,7 @@ const loadProcPlantOrganPlacement = () => {
   return procPlantOrganPlacementPromise;
 };
 const loadProcPlantWeberPennOrganPlacement = () => import("./procplant-weber-penn-organ-placement");
+const loadProcPlantLabPlacementAuthoring = () => import("./procplant-lab-placement-authoring");
 const loadProcPlantPlacementDecalThree = () => {
   if (procPlantPlacementDecalThreeModule) return Promise.resolve(procPlantPlacementDecalThreeModule);
   if (procPlantPlacementDecalThreePromise) return procPlantPlacementDecalThreePromise;
@@ -2981,52 +2981,6 @@ const disposeHeroPlacementTool = () => {
     heroPlacementTool = null;
   }
   app.dataset.organPlacementToolReady = "false";
-};
-
-const placementKind = (): ProcPlantPlaceableOrganKind => {
-  const value = placementKindSelect.value;
-  switch (value) {
-    case "flower":
-    case "fruit":
-    case "berry":
-    case "cone":
-    case "thorn":
-    case "aerialRoot":
-    case "coniferSpray":
-    case "fernFrond":
-    case "palmFrond":
-    case "mossTuft":
-    case "branch":
-    case "knot":
-    case "decal":
-      return value;
-    default:
-      return "leaf";
-  }
-};
-
-const placementScale: Record<ProcPlantPlaceableOrganKind, number> = {
-  leaf: 1,
-  flower: 1,
-  fruit: 0.16,
-  berry: 0.14,
-  cone: 0.22,
-  thorn: 0.18,
-  aerialRoot: 0.38,
-  coniferSpray: 0.72,
-  fernFrond: 0.86,
-  palmFrond: 1,
-  mossTuft: 0.28,
-  branch: 0.48,
-  knot: 0.18,
-  decal: 0.18,
-};
-const placementColors: Partial<Record<ProcPlantPlaceableOrganKind, { color: number; secondaryColor?: number }>> = {
-  fruit: { color: 0xc7472f, secondaryColor: 0x6e281c },
-  berry: { color: 0x92324d, secondaryColor: 0x4b1728 },
-  cone: { color: 0x76502d, secondaryColor: 0x3f2a19 },
-  thorn: { color: 0x6f5a3c, secondaryColor: 0x3d2f20 },
-  aerialRoot: { color: 0x6a5438, secondaryColor: 0x3b3024 },
 };
 
 const syncPlacementButtons = () => {
@@ -5250,120 +5204,34 @@ canvas.addEventListener("click", async (event) => {
   }
   tool.object.updateMatrixWorld(true);
   const localPoint = tool.object.worldToLocal(hit.point.clone());
-  const weberMetadata = target.weberPennTrim;
-  if (weberMetadata) {
-    const kind = placementKind();
-    const key = currentPruneKey();
-    const existing = organPlacementPackages.get(key);
-    if (existing && existing.contract !== "procplants.weber-penn-organ-placement-overrides") {
-      setSaveStatus("Undo placements for the prior plant first.");
-      return;
-    }
-    const placementModule = await loadProcPlantWeberPennOrganPlacement();
-    if (!placementModeVisible || heroLodState !== target || target.graph !== heroLodState.graph) return;
-    const appended = placementModule.appendProcPlantWeberPennOrganPlacementFromPicker({
-      placementPackage: existing ?? null,
-      target: weberMetadata.target,
-      attachments: target.graph.attachments,
-      pickerStemIds: weberMetadata.pickerStemIds,
-      attachmentStemIds: weberMetadata.attachmentStemIds,
-      pickerSegmentId: hit.segmentId,
-      localPoint,
-      kind,
-      flowerAvailable: Boolean(selectedGenome().flower),
-      scale: placementScale[kind],
-      ...placementColors[kind],
-    });
-    if (!appended.operation) {
-      setSaveStatus("Placement rejected.");
-      return;
-    }
-    organPlacementPackages.set(key, appended.package);
-    app.dataset.weberPennOrganPlacementAttachment = appended.attachmentId!;
-    app.dataset.weberPennOrganPlacementOwner = appended.ownerStemId!;
-    syncPlacementButtons();
-    setSaveStatus("Placement added.");
-    regenerate();
-    return;
-  }
-  const segment = target.graph.segmentRecords.find((candidate) => candidate.id === hit.segmentId);
-  const start = segment ? target.graph.stems[segment.startNodeIndex] : null;
-  const end = segment ? target.graph.stems[segment.endNodeIndex] : null;
-  if (!segment || !start || !end) {
-    setSaveStatus("That segment no longer has a stable graph frame.");
-    return;
-  }
-  if (segment.id.startsWith("placed-branch:") || segment.id.startsWith("placed-knot:")) {
-    setSaveStatus("Place additional parts on a source branch; authored outputs are regenerated rather than stable placement targets.");
-    return;
-  }
-  const axis = end.position.clone().sub(start.position);
-  const axisLengthSq = axis.lengthSq();
-  if (axisLengthSq < 1e-10) {
-    setSaveStatus("That segment is too short for a stable placement.");
-    return;
-  }
-  const axialT = THREE.MathUtils.clamp(localPoint.clone().sub(start.position).dot(axis) / axisLengthSq, 0.02, 0.98);
-  const placementModule = await loadProcPlantOrganPlacement();
-  if (!placementModeVisible || heroLodState !== target || target.graph !== heroLodState.graph) return;
-  const azimuth = placementModule.deriveProcPlantOrganPlacementAzimuth(target.graph, segment.id, axialT, localPoint);
-  if (azimuth === null) {
-    setSaveStatus("A stable radial frame could not be derived for that segment.");
-    return;
-  }
   const genome = selectedGenome();
-  const source = placementModule.createProcPlantOrganPlacementTarget(genome.id, state.seed, target.graph);
   const key = currentPruneKey();
-  let placementPackage = organPlacementPackages.get(key);
-  if (placementPackage?.contract === "procplants.weber-penn-organ-placement-overrides") {
-    setSaveStatus("Undo placements for the prior plant first.");
-    return;
-  }
-  if (placementPackage && (
-    placementPackage.target.genomeId !== source.genomeId
-    || placementPackage.target.seed !== source.seed
-    || placementPackage.target.graphSignatureVersion !== source.graphSignatureVersion
-    || placementPackage.target.graphSignature !== source.graphSignature
-  )) {
-    setSaveStatus("Existing placements target a different graph topology. Undo them before placing on this regenerated plant.");
-    return;
-  }
-  placementPackage ??= placementModule.createProcPlantOrganPlacementPackage(source);
-  const kind = placementKind();
-  if (kind === "flower" && !genome.flower) {
-    setSaveStatus("This plant has no flower geometry; choose another supported part.");
-    return;
-  }
-  if (kind === "decal") {
-    if (!livePlacementDecalBinding || livePlacementDecalBinding.disposed) {
-      setSaveStatus("Bind a decal image before placing an exact renderer-owned UV0 patch.");
-      return;
-    }
-  }
-  const appended = placementModule.appendProcPlantOrganPlacement(placementPackage, {
-    kind,
-    segmentId: segment.id,
-    axialT,
-    azimuth,
-    scale: placementScale[kind],
-    ...placementColors[kind],
-    ...(kind === "decal" && livePlacementDecalBinding
-      ? { decal: livePlacementDecalBinding.binding }
-      : {}),
+  const placement = (await loadProcPlantLabPlacementAuthoring()).resolveProcPlantLabPlacement({
+    placementPackage: organPlacementPackages.get(key) ?? null,
+    graph: target.graph,
+    weberPenn: target.weberPennTrim,
+    pickerSegmentId: hit.segmentId,
+    localPoint,
+    kind: placementKindSelect.value,
+    genomeId: genome.id,
+    seed: state.seed,
+    flowerAvailable: Boolean(genome.flower),
+    decalBinding: livePlacementDecalBinding && !livePlacementDecalBinding.disposed
+      ? livePlacementDecalBinding.binding
+      : null,
   });
-  if (!appended.operation) {
-    setSaveStatus(
-      appended.reason === "spacing"
-        ? "That placement is too close to another authored organ on this segment."
-        : appended.reason === "cap"
-          ? "The 96-part authored placement cap has been reached."
-          : "That placement could not be represented safely.",
-    );
+  if (!placementModeVisible || heroLodState !== target || target.graph !== heroLodState.graph) return;
+  if (placement.status === "rejected" || !placement.placementPackage) {
+    setSaveStatus(placement.message);
     return;
   }
-  organPlacementPackages.set(key, appended.package);
+  organPlacementPackages.set(key, placement.placementPackage);
+  if (placement.attachmentId && placement.ownerStemId) {
+    app.dataset.weberPennOrganPlacementAttachment = placement.attachmentId;
+    app.dataset.weberPennOrganPlacementOwner = placement.ownerStemId;
+  }
   syncPlacementButtons();
-  setSaveStatus(`Placing ${kind} on ${segment.id} at ${(appended.operation.axialT * 100).toFixed(0)}%…`);
+  setSaveStatus(placement.message);
   regenerate();
 });
 
