@@ -85,6 +85,7 @@ Good starting experiments:
 - A reusable dense impostor pool buckets static placements by plant-local atlas view with shared resources, stable buffers, visibility/culling/view hysteresis, and at most one draw per occupied view. After an explicit hero bake, a matching same-preset/seed biome cohort uses it for live LOD3 placements without duplicating LOD0-2 geometry.
 - Auto/manual imported-mesh spine fitting with bark UVs, wind weights, nearest-spine attributes, and stable anchors.
 - A bounded self-contained hero-GLB importer inspects scene/mesh/material references, emits stable node/mesh provenance and world matrices, optionally bakes static matrix/TRS hierarchies into isolated positions and inverse-transpose normals, and extracts embedded PNG/JPEG/WebP/KTX2 texture bytes without a renderer dependency. The lab can import a supported GLB, auto-fit a spine, opt into lazy viewport handles to move/add/remove spine points and rebuild the authored mesh atomically, assign bark UV/wind/anchors/collars, preview procedural leaves, and export the authored hero.
+- A renderer-independent hero-bark authoring contract selects one capped imported UV region or matching fitted-spine band, derives byte-tileable base/height/normal PNG resources from explicitly decoded imported PNG pixels, audits coverage/seams/work/provenance, and exposes owned base/normal pixel sources to the material baker. With no decoded pixels it emits an explicitly labeled procedural surrogate, never a scan-quality claim.
 - Spine-bound imported meshes can emit stable, spaced leaf/branch/accessory attachment transforms with surface-envelope clearance and right-handed frames.
 - Imported spine-bound attachment frames can drive bounded, order-independent junction-collar displacement/weight attributes or nonmutating baked surface swell.
 - Deterministic indexed/non-indexed triangle-mesh queries use a bounded static BVH for exact closest points, optional signed clearance on closed meshes, and growth-obstacle projection; affine transforms and stable ties are supported.
@@ -206,6 +207,7 @@ npm run test:tellus-contract
 - `src/procplant-meshopt-compression.ts` applies bounded deterministic lossless `EXT_meshopt_compression` to eligible GLB geometry views.
 - `src/procplant-glb-validation.ts` strictly validates emitted GLB structure, accessors, Procplants metadata, variant manifests, and decoded meshopt payloads/fallbacks.
 - `src/procplant-hero-glb-import.ts` inspects and extracts bounded self-contained hero mesh/texture data.
+- `src/procplant-hero-bark-extraction.ts` derives bounded, audited tileable bark resources from imported UV regions or fitted-spine bands.
 - `src/procplant-hero-spine-editor.ts` provides immutable, undoable manual-spine state plus lazy Three.js viewport handles.
 - `src/procplant-material-graph.ts` compiles renderer-independent typed surface graphs into portable binding and bake plans.
 - `src/procplant-material-gltf-plan.ts` converts direct compiled bindings into standards-honest glTF PBR plans and diagnostics.

@@ -27,6 +27,7 @@ export * from "./procplant-mesh-query";
 export * from "./procplant-meshopt-compression";
 export * from "./procplant-glb-validation";
 export * from "./procplant-hero-glb-import";
+export * from "./procplant-hero-bark-extraction";
 export * from "./procplant-hero-spine-authoring";
 export * from "./procplant-hero-spine-editor";
 export * from "./procplant-material-graph";
