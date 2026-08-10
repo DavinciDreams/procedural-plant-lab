@@ -5,6 +5,62 @@ import type {
 import type { ProcPlantPlacementDecalPixelSource } from "./procplant-placement-decal-glb";
 import type { ProcPlantBakedMaterialBundle } from "./procplant-material-bake";
 import type { ProcPlantWeberPennBuildMetadata } from "./procplants";
+import type { Group } from "three";
+
+export const PROCPLANT_LAB_GLB_PREPARING_MESSAGE = "Preparing GLB with vertex color, sway, tintability, and contract metadata…";
+export const reportProcPlantLabGlbExportFailure = (error: unknown) => {
+  console.error("[procplants] GLB export failed.", error);
+  return `GLB export failed: ${error instanceof Error ? error.message : String(error)}`;
+};
+
+export const preflightProcPlantLabGlbExport = (options: {
+  heroReady: boolean;
+  authoredDecals: number;
+  activeBinding: boolean;
+  retainedPixels: boolean;
+  materializedDecals: number;
+  importedHero: boolean;
+  dataset: DOMStringMap;
+}): { allowed: boolean; exportableDecals: boolean; message?: string } => {
+  if (!options.heroReady) return { allowed: false, exportableDecals: false, message: "Generate a plant before exporting GLB." };
+  const exportableDecals = options.authoredDecals > 0
+    && options.activeBinding
+    && options.retainedPixels
+    && options.materializedDecals === options.authoredDecals;
+  if (options.authoredDecals > 0 && !exportableDecals) {
+    options.dataset.lastGlbPlacementDecalsRejected = String(options.authoredDecals);
+    return {
+      allowed: false,
+      exportableDecals,
+      message: "GLB export stopped: every decal needs the exact active binding plus retained source bytes and decoded pixels. Rebind the matching image or remove the unresolved decals.",
+    };
+  }
+  if (options.authoredDecals > 0 && options.importedHero) {
+    options.dataset.lastGlbPlacementDecalsRejected = String(options.authoredDecals);
+    return {
+      allowed: false,
+      exportableDecals,
+      message: "GLB export stopped: placement decals are not adopted onto imported-hero exports. Remove them or export the generated hero; no material target is guessed.",
+    };
+  }
+  delete options.dataset.lastGlbPlacementDecalsRejected;
+  return { allowed: true, exportableDecals };
+};
+
+export const exportProcPlantLabImportedGlb = async (options: {
+  preview: Group;
+  audit: Record<string, unknown> | null;
+  contentHash: string;
+  dataset: DOMStringMap;
+}) => {
+  const { downloadProcPlantLabHeroPreview } = await import("./procplant-lab-authoring-imports");
+  const exported = await downloadProcPlantLabHeroPreview(options.preview, options.audit, options.contentHash);
+  options.dataset.heroImportLastExportBytes = String(exported.byteLength);
+  options.dataset.heroImportLastExportMaterials = String(exported.materials);
+  options.dataset.heroImportLastExportTextures = String(exported.textures);
+  options.dataset.heroImportLastExportImages = String(exported.images);
+  return "Imported hero GLB exported with fitted spine, bark UV, wind, collars, and instanced branch, leaf, and accessory anchors.";
+};
 
 type ProcPlantAuthoringToolsModule = typeof import("./procplant-authoring-tools");
 

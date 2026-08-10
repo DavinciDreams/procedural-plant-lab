@@ -127,7 +127,6 @@ import type {
 } from "./procplant-placement-decal-three";
 import type { ProcPlantPlacementDecalPixelSource } from "./procplant-placement-decal-glb";
 import type { ProcPlantVineGuidePackage } from "./procplant-vine-guide-authoring";
-import type { ProcPlantVineLiveSupportPackage } from "./procplant-vine-live-support";
 import type { ProcPlantBakedMaterialBundle } from "./procplant-material-bake";
 import type { ProcPlantThreeBakedMaterialSet } from "./procplant-three-material-adapter";
 import type { ProcPlantThreeMaterialShaderSetInstallation } from "./procplant-three-material-shader";
@@ -762,9 +761,8 @@ let livePlacementDecalPixelSource: ProcPlantPlacementDecalPixelSource | null = n
 let livePlacementDecalFileName = "";
 const retiredPlacementDecalBindings: ProcPlantThreePlacementDecalBindingHandle[] = [];
 let vineGuidePackage: ProcPlantVineGuidePackage | null = null;
-let vineLiveSupportPackage: ProcPlantVineLiveSupportPackage | null = null;
-let vineLiveSupportSourceGuide: ProcPlantVineGuidePackage | null = null;
-let vineLiveSupportTrellis: THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial> | null = null;
+let vineLiveSupportUi: import("./procplant-vine-live-support-ui").ProcPlantLabLiveVineUi | null = null;
+let vineLiveSupportUiPromise: Promise<import("./procplant-vine-live-support-ui").ProcPlantLabLiveVineUi> | null = null;
 let pruneModeVisible = false;
 let placementModeVisible = false;
 let vineGuideModeVisible = false;
@@ -1298,7 +1296,6 @@ type ProcPlantPlacementDecalThreeModule = typeof import("./procplant-placement-d
 type ProcPlantVineGuideAuthoringModule = typeof import("./procplant-vine-guide-authoring");
 type ProcPlantVineSurfaceAuthoringModule = typeof import("./procplant-vine-surface-authoring");
 type ProcPlantFiveTierAtlasCatalogUiModule = typeof import("./procplant-five-tier-atlas-catalog-ui");
-type ProcPlantVineLiveSupportModule = typeof import("./procplant-vine-live-support");
 type ProcPlantGeneratorGraphOperation = import("./procplant-generator-graph").ProcPlantGeneratorGraphOperation;
 let procPlantRulesModule: ProcPlantRulesModule | null = null;
 let procPlantRulesPromise: Promise<ProcPlantRulesModule> | null = null;
@@ -1329,8 +1326,6 @@ let procPlantVineSurfaceAuthoringModule: ProcPlantVineSurfaceAuthoringModule | n
 let procPlantVineSurfaceAuthoringPromise: Promise<ProcPlantVineSurfaceAuthoringModule> | null = null;
 let procPlantFiveTierAtlasCatalogUiPromise: Promise<ProcPlantFiveTierAtlasCatalogUiModule> | null = null;
 let procPlantFiveTierAtlasCatalogUi: import("./procplant-five-tier-atlas-catalog-ui").ProcPlantFiveTierAtlasCatalogUi | null = null;
-let procPlantVineLiveSupportModule: ProcPlantVineLiveSupportModule | null = null;
-let procPlantVineLiveSupportPromise: Promise<ProcPlantVineLiveSupportModule> | null = null;
 const graphOverrideOperations = new Map<string, ProcPlantGeneratorGraphOperation[]>();
 const loadProcPlantFiveTierAtlasCatalogUi = () => {
   if (procPlantFiveTierAtlasCatalogUiPromise) return procPlantFiveTierAtlasCatalogUiPromise;
@@ -1476,18 +1471,6 @@ const loadProcPlantVineSurfaceAuthoring = () => {
     procPlantVineSurfaceAuthoringPromise = null;
   });
   return procPlantVineSurfaceAuthoringPromise;
-};
-const loadProcPlantVineLiveSupport = () => {
-  if (procPlantVineLiveSupportModule) return Promise.resolve(procPlantVineLiveSupportModule);
-  if (procPlantVineLiveSupportPromise) return procPlantVineLiveSupportPromise;
-  procPlantVineLiveSupportPromise = import("./procplant-vine-live-support").then((module) => {
-    procPlantVineLiveSupportModule = module;
-    app.dataset.vineLiveSupportLoaded = "true";
-    return module;
-  }).finally(() => {
-    procPlantVineLiveSupportPromise = null;
-  });
-  return procPlantVineLiveSupportPromise;
 };
 const loadProcPlantRules = () => {
   if (procPlantRulesModule) return Promise.resolve(procPlantRulesModule);
@@ -3117,31 +3100,40 @@ const refreshVineGuideVisualization = () => {
   scene.add(group);
 };
 
-const disposeVineLiveSupportTrellis = () => {
-  if (!vineLiveSupportTrellis) return;
-  scene.remove(vineLiveSupportTrellis);
-  vineLiveSupportTrellis.geometry.dispose();
-  vineLiveSupportTrellis.material.dispose();
-  vineLiveSupportTrellis = null;
-  app.dataset.vineLiveSupportDisposed = "true";
-};
-
 const syncVineLiveSupportButtons = () => {
   const guideReady = Boolean(vineGuidePackage && vineGuidePackage.points.length >= 2 && heroLodState?.mesh);
-  attachVineLiveSupportButton.disabled = regenerationBusy || !guideReady || vineLiveSupportPackage !== null;
-  deformVineLiveSupportButton.disabled = regenerationBusy || !vineLiveSupportPackage || !vineLiveSupportTrellis;
-  resetVineLiveSupportButton.disabled = regenerationBusy || !vineLiveSupportPackage;
-  app.dataset.vineLiveSupportStatus = vineLiveSupportPackage ? (app.dataset.vineLiveSupportStatus ?? "attached") : "canonical";
-  app.dataset.vineLiveSupportBindings = String(vineLiveSupportPackage?.bindings.length ?? 0);
+  if (vineLiveSupportUi) return vineLiveSupportUi.sync();
+  attachVineLiveSupportButton.disabled = true;
+  deformVineLiveSupportButton.disabled = true;
+  resetVineLiveSupportButton.disabled = true;
+  app.dataset.vineLiveSupportStatus = "canonical";
+  app.dataset.vineLiveSupportBindings = "0";
+  if (!guideReady || regenerationBusy || vineLiveSupportUiPromise) return;
+  vineLiveSupportUiPromise = import("./procplant-vine-live-support-ui").then((module) => {
+    const ui = module.createProcPlantLabLiveVineUi({
+      app,
+      scene,
+      renderer,
+      attachButton: attachVineLiveSupportButton,
+      deformButton: deformVineLiveSupportButton,
+      resetButton: resetVineLiveSupportButton,
+      getBusy: () => regenerationBusy,
+      getGuide: () => vineGuidePackage,
+      setGuide: (authored) => { vineGuidePackage = authored; },
+      getGuideRoot: () => heroLodState?.mesh ?? null,
+      refreshGuide: refreshVineGuideVisualization,
+      syncGuide: syncVineGuideButtons,
+      setStatus: setSaveStatus,
+      regenerate,
+    });
+    vineLiveSupportUi = ui;
+    return ui;
+  }).finally(() => { vineLiveSupportUiPromise = null; });
 };
 
 const syncVineGuideButtons = () => {
   const available = Boolean(selectedSourceGenome().vine);
-  if (!available && vineLiveSupportPackage) {
-    vineLiveSupportPackage = null;
-    vineLiveSupportSourceGuide = null;
-    disposeVineLiveSupportTrellis();
-  }
+  if (!available) vineLiveSupportUi?.clear();
   if (!available && vineGuideModeVisible) {
     vineGuideModeVisible = false;
     disposeVineGuideVisualization();
@@ -4797,11 +4789,7 @@ vineGuideSupportModeButton.addEventListener("click", async () => {
 
 undoVineGuideButton.addEventListener("click", async () => {
   if (!vineGuidePackage || regenerationBusy) return;
-  if (vineLiveSupportPackage) {
-    vineLiveSupportPackage = null;
-    vineLiveSupportSourceGuide = null;
-    disposeVineLiveSupportTrellis();
-  }
+  vineLiveSupportUi?.clear();
   const module = await loadProcPlantVineGuideAuthoring();
   vineGuidePackage = module.undoLastProcPlantVineGuidePoint(vineGuidePackage);
   if (vineGuidePackage.points.length === 0) vineGuidePackage = null;
@@ -4815,112 +4803,11 @@ undoVineGuideButton.addEventListener("click", async () => {
 
 resetVineGuideButton.addEventListener("click", () => {
   if (!vineGuidePackage || regenerationBusy) return;
-  vineLiveSupportPackage = null;
-  vineLiveSupportSourceGuide = null;
-  disposeVineLiveSupportTrellis();
+  vineLiveSupportUi?.clear();
   vineGuidePackage = null;
   syncVineGuideButtons();
   refreshVineGuideVisualization();
   setSaveStatus("Resetting the vine to its exact canonical guide/support behavior…");
-  regenerate();
-});
-
-attachVineLiveSupportButton.addEventListener("click", async () => {
-  const authored = vineGuidePackage;
-  const guideRoot = heroLodState?.mesh;
-  if (regenerationBusy || !authored || authored.points.length < 2 || !guideRoot || vineLiveSupportPackage) return;
-  const [module, guideModule] = await Promise.all([loadProcPlantVineLiveSupport(), loadProcPlantVineGuideAuthoring()]);
-  if (regenerationBusy || vineGuidePackage !== authored || heroLodState?.mesh !== guideRoot) return;
-  const xs = authored.points.map((point) => point.position[0]);
-  const ys = authored.points.map((point) => point.position[1]);
-  const zs = authored.points.map((point) => point.position[2]);
-  const center = new THREE.Vector3(
-    (Math.min(...xs) + Math.max(...xs)) * 0.5,
-    (Math.min(...ys) + Math.max(...ys)) * 0.5,
-    (Math.min(...zs) + Math.max(...zs)) * 0.5 - 0.04,
-  );
-  const trellis = new THREE.Mesh(
-    new THREE.BoxGeometry(Math.max(0.5, Math.max(...xs) - Math.min(...xs) + 0.35), Math.max(0.8, Math.max(...ys) - Math.min(...ys) + 0.35), 0.06),
-    new THREE.MeshStandardMaterial({ color: 0x8a633f, roughness: 0.82, metalness: 0.02, transparent: true, opacity: 0.78 }),
-  );
-  guideRoot.updateWorldMatrix(true, false);
-  const world = guideRoot.matrixWorld.clone().multiply(new THREE.Matrix4().makeTranslation(center.x, center.y, center.z));
-  world.decompose(trellis.position, trellis.quaternion, trellis.scale);
-  trellis.updateMatrixWorld(true);
-  trellis.name = "procplant-live-vine-trellis";
-  scene.add(trellis);
-  const pose = module.createProcPlantVineLiveSupportPoseFromObject3D(trellis, {
-    id: "lab-live-trellis",
-    kind: "triangle-mesh",
-    supportSignature: "lab-live-trellis-box-v1",
-    guideRoot,
-  });
-  let attachment = module.createProcPlantVineLiveSupportPackage(authored);
-  for (const point of authored.points) {
-    attachment = module.attachProcPlantVineGuidePointToLiveSupport(authored, attachment, point.id, pose);
-  }
-  vineLiveSupportSourceGuide = guideModule.deserializeProcPlantVineGuidePackage(guideModule.serializeProcPlantVineGuidePackage(authored));
-  vineLiveSupportPackage = attachment;
-  vineLiveSupportTrellis = trellis;
-  app.dataset.vineLiveSupportDisposed = "false";
-  app.dataset.vineLiveSupportStatus = "attached";
-  app.dataset.vineLiveSupportSupportId = pose.id;
-  app.dataset.vineLiveSupportGeometrySignature = pose.supportSignature;
-  app.dataset.vineLiveSupportDraws = String(renderer.info.render.calls);
-  app.dataset.vineLiveSupportBackend = renderer.capabilities.isWebGL2 ? "webgl2" : "webgl1";
-  syncVineLiveSupportButtons();
-  setSaveStatus("Attached every guide point to stable trellis-local coordinates. The caller still owns transform updates and rebuild timing.");
-});
-
-deformVineLiveSupportButton.addEventListener("click", async () => {
-  const authored = vineGuidePackage;
-  const attachment = vineLiveSupportPackage;
-  const trellis = vineLiveSupportTrellis;
-  const guideRoot = heroLodState?.mesh;
-  if (regenerationBusy || !authored || !attachment || !trellis || !guideRoot) return;
-  const module = await loadProcPlantVineLiveSupport();
-  if (regenerationBusy || vineGuidePackage !== authored || vineLiveSupportPackage !== attachment || vineLiveSupportTrellis !== trellis) return;
-  trellis.position.x += 0.24;
-  trellis.position.y += 0.08;
-  trellis.scale.y *= 1.12;
-  trellis.updateMatrixWorld(true);
-  guideRoot.updateWorldMatrix(true, false);
-  const pose = module.createProcPlantVineLiveSupportPoseFromObject3D(trellis, {
-    id: "lab-live-trellis",
-    kind: "triangle-mesh",
-    supportSignature: "lab-live-trellis-box-v1",
-    guideRoot,
-  });
-  const rebuilt = module.rebuildProcPlantVineGuideFromLiveSupports(authored, attachment, [pose], { maxPointMotion: 2 });
-  app.dataset.vineLiveSupportStatus = rebuilt.status;
-  app.dataset.vineLiveSupportReason = rebuilt.reason ?? "none";
-  app.dataset.vineLiveSupportTransformedPoints = String(rebuilt.audit.transformedPoints);
-  if (rebuilt.status !== "rebuilt") {
-    setSaveStatus(`Live support rebuild failed closed: ${rebuilt.reason}.`);
-    syncVineLiveSupportButtons();
-    return;
-  }
-  vineGuidePackage = rebuilt.authored;
-  vineLiveSupportPackage = rebuilt.attachment;
-  refreshVineGuideVisualization();
-  syncVineGuideButtons();
-  setSaveStatus(`Rebuilt ${rebuilt.audit.transformedPoints} attached guide points after the caller-owned trellis transform update.`);
-  regenerate();
-});
-
-resetVineLiveSupportButton.addEventListener("click", () => {
-  if (regenerationBusy || !vineLiveSupportPackage) return;
-  if (vineLiveSupportSourceGuide) vineGuidePackage = vineLiveSupportSourceGuide;
-  vineLiveSupportPackage = null;
-  vineLiveSupportSourceGuide = null;
-  disposeVineLiveSupportTrellis();
-  app.dataset.vineLiveSupportStatus = "canonical";
-  app.dataset.vineLiveSupportBindings = "0";
-  delete app.dataset.vineLiveSupportReason;
-  delete app.dataset.vineLiveSupportTransformedPoints;
-  refreshVineGuideVisualization();
-  syncVineGuideButtons();
-  setSaveStatus("Disposed the live trellis and restored the exact pre-attachment V1 guide.");
   regenerate();
 });
 
@@ -4974,11 +4861,7 @@ canvas.addEventListener("click", async (event) => {
   vineGuidePackage ??= module.createProcPlantVineGuidePackage(
     module.createProcPlantVineGuideTarget(sourceGenome, state.seed),
   );
-  if (vineLiveSupportPackage) {
-    vineLiveSupportPackage = null;
-    vineLiveSupportSourceGuide = null;
-    disposeVineLiveSupportTrellis();
-  }
+  vineLiveSupportUi?.clear();
   try {
     if (vineGuideStaticSupportEnabled) {
       const surface = await loadProcPlantVineSurfaceAuthoring();
@@ -5978,75 +5861,34 @@ exportImpostorButton.addEventListener("click", async () => {
 });
 
 exportGlbButton.addEventListener("click", async () => {
-  if (!heroLodState) {
-    setSaveStatus("Generate a plant before exporting GLB.");
-    return;
-  }
-  if (heroImportModel) {
-    const model = heroImportModel;
-    const authored = heroImportDecalPackage;
-    let decals: ProcPlantMaterializedPlacementDecal[] = [];
-    if (authored?.operations.length) {
-      if (!model.importedDecalTarget || !livePlacementDecalBinding || livePlacementDecalBinding.disposed || !livePlacementDecalPixelSource) {
-        app.dataset.lastGlbImportedHeroDecalsRejected = String(authored.operations.length);
-        setSaveStatus("Imported-hero GLB export stopped: restore the exact static target and matching PNG/WebP/JPEG binding, or undo unresolved decals.");
-        return;
-      }
-      const module = await import("./procplant-imported-hero-decal");
-      const applied = module.applyProcPlantImportedHeroDecals(model.importedDecalTarget, model.trunk.geometry, authored, [livePlacementDecalBinding.binding]);
-      if (!applied.targetMatched || applied.decals.length !== authored.operations.length || applied.unsupported.length > 0) {
-        app.dataset.lastGlbImportedHeroDecalsRejected = String(authored.operations.length);
-        setSaveStatus("Imported-hero GLB export stopped: a primitive signature, triangle, or image binding is stale. No partial decal export was produced.");
-        return;
-      }
-      decals = applied.decals;
-    }
-    delete app.dataset.lastGlbImportedHeroDecalsRejected;
-    exportGlbButton.disabled = true;
-    try {
-      const module = await import("./procplant-lab-authoring-imports");
-      const adopted = decals.length > 0
-        ? await module.exportProcPlantLabHeroPreviewWithPlacementDecals(model.group, heroImportAudit, decals, livePlacementDecalPixelSource!)
-        : { bytes: await module.exportProcPlantLabHeroPreview(model.group, heroImportAudit), draws: 0, triangles: 0, embeddedBytes: 0, contentHash: "none" };
-      const url = URL.createObjectURL(new Blob([adopted.bytes], { type: "model/gltf-binary" }));
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `procplant-imported-hero-${app.dataset.heroImportHash ?? state.seed}.glb`;
-      link.click();
-      URL.revokeObjectURL(url);
-      app.dataset.heroImportLastExportBytes = String(adopted.bytes.byteLength);
-      app.dataset.lastGlbImportedHeroDecals = String(adopted.draws);
-      app.dataset.lastGlbImportedHeroDecalTriangles = String(adopted.triangles);
-      app.dataset.lastGlbImportedHeroDecalEmbeddedBytes = String(adopted.embeddedBytes);
-      setSaveStatus(decals.length > 0
-        ? `Imported hero GLB exported with ${decals.length} signature-bound UV0 decal draw${decals.length === 1 ? "" : "s"} and deterministic embedded PNG.`
-        : "Imported hero GLB exported with fitted spine, source material, and authored attachments.");
-    } catch (error) {
-      console.error("[procplants] Imported hero GLB export failed.", error);
-      setSaveStatus(`Imported hero GLB export failed: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      exportGlbButton.disabled = false;
-    }
-    return;
-  }
+  const glbModule = await import("./procplant-lab-glb-export");
   const authoredDecals = currentPlacementPackage()?.operations.filter((operation) => operation.kind === "decal").length ?? 0;
-  const exportableDecals = authoredDecals > 0
-    && livePlacementDecalBinding
-    && !livePlacementDecalBinding.disposed
-    && livePlacementDecalPixelSource
-    && heroLodState.placementDecalRecords.length === authoredDecals;
-  if (authoredDecals > 0 && !exportableDecals) {
-    app.dataset.lastGlbPlacementDecalsRejected = String(authoredDecals);
-    setSaveStatus("GLB export stopped: every decal needs the exact active binding plus retained source bytes and decoded pixels. Rebind the matching image or remove the unresolved decals.");
-    return;
-  }
-  delete app.dataset.lastGlbPlacementDecalsRejected;
+  const preflight = glbModule.preflightProcPlantLabGlbExport({
+    heroReady: Boolean(heroLodState),
+    authoredDecals,
+    activeBinding: Boolean(livePlacementDecalBinding && !livePlacementDecalBinding.disposed),
+    retainedPixels: Boolean(livePlacementDecalPixelSource),
+    materializedDecals: heroLodState?.placementDecalRecords.length ?? 0,
+    importedHero: Boolean(heroImportPreview),
+    dataset: app.dataset,
+  });
+  if (!preflight.allowed || !heroLodState) return setSaveStatus(preflight.message ?? "GLB export is not ready.");
+  const exportableDecals = preflight.exportableDecals;
   exportGlbButton.disabled = true;
-  setSaveStatus("Preparing GLB with vertex color, sway, tintability, and contract metadata…");
+  setSaveStatus(glbModule.PROCPLANT_LAB_GLB_PREPARING_MESSAGE);
   const activeLod = heroLodState.controller.active;
   try {
+    if (heroImportPreview) {
+      setSaveStatus(await glbModule.exportProcPlantLabImportedGlb({
+        preview: heroImportPreview,
+        audit: heroImportAudit,
+        contentHash: app.dataset.heroImportHash ?? String(state.seed),
+        dataset: app.dataset,
+      }));
+      return;
+    }
     const authoring = await loadProcPlantAuthoringTools();
-    const exported = await (await import("./procplant-lab-glb-export")).exportProcPlantLabGeneratedGlb({
+    const exported = await glbModule.exportProcPlantLabGeneratedGlb({
       authoring,
       activeLod,
       name: `${state.primary}-${state.seed}-lod${activeLod.level}`,
@@ -6064,14 +5906,14 @@ exportGlbButton.addEventListener("click", async () => {
     });
     setSaveStatus(exported.message);
   } catch (error) {
-    console.error("[procplants] GLB export failed.", error);
-    setSaveStatus(`GLB export failed: ${error instanceof Error ? error.message : String(error)}`);
+    setSaveStatus(glbModule.reportProcPlantLabGlbExportFailure(error));
   } finally {
     exportGlbButton.disabled = false;
   }
 });
 
 document.querySelector<HTMLButtonElement>("#exportJson")!.addEventListener("click", async () => {
+  const jsonModule = await import("./procplant-lab-json-export");
   const genome = selectedGenome();
   const env = envFromState();
   const graphEditorModule = await loadProcPlantGraphEditorUi();
@@ -6095,6 +5937,7 @@ document.querySelector<HTMLButtonElement>("#exportJson")!.addEventListener("clic
         seed: state.seed,
       })
     : null;
+  const pruningJson = jsonModule.summarizeProcPlantLabJsonPruning(currentPruneOperations(), currentPruneHistory());
   const payload = {
     version: 1,
     savedAt: new Date().toISOString(),
@@ -6113,33 +5956,16 @@ document.querySelector<HTMLButtonElement>("#exportJson")!.addEventListener("clic
       activeLeafCutout: cutoutLeafId,
       heroImport: heroImportAudit,
       materialBake: materialBakeAudit,
-      spatialForces: state.spatialForces
-        ? {
-            state: state.spatialForces,
-            status: app.dataset.spatialForceStatus ?? "canonical",
-            diagnostic: spatialForceDiagnostic,
-            audit: spatialForceAudit,
-          }
-        : null,
+      spatialForces: jsonModule.summarizeProcPlantLabJsonSpatialForces(
+        state.spatialForces,
+        app.dataset.spatialForceStatus ?? "canonical",
+        spatialForceDiagnostic,
+        spatialForceAudit,
+      ),
       freeformCrown: state.crownField ? cloneProcPlantFreeformCrown(state.crownField) : genome.spaceColonization?.freeform ?? null,
-      impostor: heroLodState?.impostor
-        ? {
-            contract: heroLodState.impostor.atlas.contract,
-            version: heroLodState.impostor.atlas.version,
-            contentHash: heroLodState.impostor.atlas.contentHash,
-            width: heroLodState.impostor.atlas.width,
-            height: heroLodState.impostor.atlas.height,
-            padding: heroLodState.impostor.atlas.padding,
-            entries: heroLodState.impostor.atlas.entries.map((entry) => ({
-              id: entry.id,
-              uv: entry.uv,
-              paddedUv: entry.paddedUv,
-              outward: entry.view.outward,
-            })),
-          }
-        : null,
-      graphOperations: currentPruneOperations().map((segmentId) => ({ operation: "remove", segmentId })),
-      graphOperationGroups: currentPruneHistory().map((segmentIds) => ({ operation: "remove", segmentIds: [...segmentIds] })),
+      impostor: jsonModule.summarizeProcPlantLabJsonImpostor(heroLodState?.impostor),
+      graphOperations: pruningJson.operations,
+      graphOperationGroups: pruningJson.groups,
       organPlacements: currentPlacementPackage(),
       importedHeroDecals: heroImportDecalPackage,
       importedHeroDecalStatus: heroImportModel
@@ -6151,22 +5977,18 @@ document.querySelector<HTMLButtonElement>("#exportJson")!.addEventListener("clic
           }
         : null,
       placementDecalBinding: livePlacementDecalBinding && !livePlacementDecalBinding.disposed
-        ? {
-            ...livePlacementDecalBinding.metadata,
+        ? jsonModule.summarizeProcPlantLabJsonDecalBinding({
+            metadata: livePlacementDecalBinding.metadata,
             sourceFile: livePlacementDecalFileName,
             width: Number(app.dataset.placementDecalBindingWidth ?? 0),
             height: Number(app.dataset.placementDecalBindingHeight ?? 0),
-            pixelExportReady: Boolean(livePlacementDecalPixelSource),
-            sourceMimeType: livePlacementDecalPixelSource?.sourceMimeType,
-            sourceSha256: livePlacementDecalPixelSource?.sourceSha256,
-            rgbaSha256: livePlacementDecalPixelSource?.rgbaSha256,
-            pngSha256: livePlacementDecalPixelSource?.pngSha256,
+            pixelSource: livePlacementDecalPixelSource,
             liveDraws: heroLodState?.placementDecals?.audit.draws ?? 0,
             liveTriangles: heroLodState?.placementDecals?.audit.triangles ?? 0,
-          }
+          })
         : null,
       vineGuide: vineGuidePackage,
-      vineLiveSupport: vineLiveSupportPackage,
+      vineLiveSupport: vineLiveSupportUi?.attachment ?? null,
       weberPennTrim: heroLodState?.weberPennTrim
         ? {
             target: heroLodState.weberPennTrim.target,
@@ -6184,32 +6006,13 @@ document.querySelector<HTMLButtonElement>("#exportJson")!.addEventListener("clic
         : null,
       generatorGraph,
       generatorOverrides,
-      generatorApplyAudit: {
-        changed: generatorApplyAudit.changed,
-        applied: generatorApplyAudit.applied,
-        unsupported: generatorApplyAudit.unsupported,
-      },
+      generatorApplyAudit: jsonModule.summarizeProcPlantLabJsonApplyAudit(generatorApplyAudit),
       generatorPreview: graphEditorState.preview,
-      productionDag: graphEditorState.production
-        ? {
-            version: graphEditorState.production.version,
-            path: graphEditorState.production.path,
-            work: graphEditorState.production.work,
-            previewHash: graphEditorState.production.previewHash,
-            records: graphEditorState.production.records,
-          }
-        : null,
+      productionDag: jsonModule.summarizeProcPlantLabJsonProduction(graphEditorState.production),
     },
     url: currentShareUrl(true),
   };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-  const link = document.createElement("a");
-  const slug = `${state.primary}-${state.secondary}-${state.seed}`.replace(/[^a-z0-9-]+/gi, "-");
-  link.href = URL.createObjectURL(blob);
-  link.download = `procplant-${slug}.json`;
-  link.click();
-  URL.revokeObjectURL(link.href);
-  setSaveStatus("JSON exported.");
+  setSaveStatus(jsonModule.downloadProcPlantLabJson(payload, state));
 });
 
 document.querySelector<HTMLButtonElement>("#savePreset")!.addEventListener("click", (event) => {
@@ -6435,6 +6238,8 @@ window.addEventListener("pagehide", () => {
   impostorBakeAbort?.abort();
   procPlantFiveTierAtlasCatalogUi?.dispose();
   procPlantFiveTierAtlasCatalogUi = null;
+  vineLiveSupportUi?.dispose();
+  vineLiveSupportUi = null;
   heroDebugOverlayRequest++;
   disposeCrownVolumeTool();
   disposeVineGuideVisualization();
