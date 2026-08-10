@@ -14,6 +14,10 @@
     "./core": {
       "types": "./dist-lib/types/core.d.ts",
       "import": "./dist-lib/core.js"
+    },
+    "./webgpu": {
+      "types": "./dist-lib/types/webgpu.d.ts",
+      "import": "./dist-lib/webgpu.js"
     }
   },
   "scripts": {
@@ -33,6 +37,7 @@
     "test:visibility-clusters": "node scripts/run-visibility-cluster-tests.mjs",
     "test:three-visibility-lod": "node scripts/run-three-visibility-lod-adapter-tests.mjs",
     "test:webgpu-visibility": "node scripts/run-webgpu-visibility-tests.mjs",
+    "test:webgpu-browser": "node scripts/run-webgpu-visibility-browser-smoke.mjs",
     "test:prune-selection": "node scripts/run-prune-tool-selection-tests.mjs",
     "test:weber-penn-trim": "node scripts/run-weber-penn-trim-tests.mjs",
     "test:organ-placement": "node scripts/run-organ-placement-override-tests.mjs",
