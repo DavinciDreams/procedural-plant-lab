@@ -2992,7 +2992,6 @@ const performRegeneration = async (request: number) => {
     delete app.dataset.materialLiveTangents;
     materialBakeStatus.textContent = "The baked material was detached because the plant genome or generator seed changed. Bake again for this plant.";
   }
-  const env = envFromState();
   const graphSourceGenome = selectedBaseGenome(false);
   const generatorOverrides = graphOverrideOperations.get(graphSourceGenome.id) ?? [];
   const productionDag = generatorOverrides.length > 0 && procPlantGraphEditorUiModule

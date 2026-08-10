@@ -7922,11 +7922,12 @@ export const compileProcPlantLodsFromTemplate = (
   const fullTriangles = source.idx.length / 3;
   if (fullTriangles <= 6) throw new Error(`ProcPlant LOD compilation requires more than 6 source triangles; received ${fullTriangles}`);
   const treeScale = genome.habit === "tree" || genome.habit === "conifer" || genome.habit === "palm" ? 1.5 : 0.75;
+  const cardOrientation = plantCardOrientation(genome, source);
   const templates: Record<0 | 1 | 2 | 3, ProcPlantTemplate> = {
     0: cloneTemplate(source),
     1: createPlantClusterTemplate(source),
-    2: createPlantCardTemplate(source, true),
-    3: createPlantCardTemplate(source, false),
+    2: createPlantCardTemplate(source, true, cardOrientation),
+    3: createPlantCardTemplate(source, false, cardOrientation),
   };
   const labels = ["full", "clustered", "billboard-cross", "impostor"] as const;
   const distances = [0, 18 * treeScale, 42 * treeScale, 86 * treeScale] as const;
