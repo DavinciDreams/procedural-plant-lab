@@ -72,7 +72,7 @@ export const renderProcPlantGraphEditor = (options: ProcPlantGraphEditorRenderOp
 
   const editorNote = document.createElement("p");
   editorNote.className = "graph-editor-note";
-  editorNote.textContent = "Edited standard graph backends compile through typed stage artifacts. Stage seeds drive independent architecture, branch, foliage, and reproductive streams; compatible rewires and parent scopes select real dependency and stem outputs. Specialized backends and invalid artifact edges fail closed.";
+  editorNote.textContent = "Edited graph-native backends compile through typed stage artifacts. Guided vines expose a strict static-centerline chain with independently seeded foliage and reproductive organs; their branch stage stays disabled and live guide/collision edits fail closed. Other specialized backends and invalid artifact edges remain unsupported.";
   const editorActions = document.createElement("div");
   editorActions.className = "graph-editor-actions";
   const resetGraphButton = document.createElement("button");

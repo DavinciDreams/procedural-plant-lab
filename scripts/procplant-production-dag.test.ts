@@ -478,6 +478,175 @@ assert.throws(
   /placement cannot be projected/,
 );
 
+const vineGenome = structuredClone(procPlantPresets.floweringWallCreeper!);
+const vineSeed = 0x710e2026;
+const vineCanonical = createProcPlantAuthoringGraph(vineGenome, vineSeed);
+const vineLegacy = buildProcPlantTemplate(vineGenome, vineSeed, environment);
+const vineCanonicalResult = compileProcPlantProductionDag(
+  vineGenome, vineCanonical, environment, { canonicalSeed: vineSeed },
+);
+assert.equal(vineCanonicalResult.path, "legacy-canonical");
+assert.equal(templateHash(vineCanonicalResult.build.template), templateHash(vineLegacy.template),
+  "the canonical guided-vine graph must retain exact legacy bytes");
+
+const vineStages = new Map(vineCanonical.nodes.map((node) => [node.stage, node]));
+const vineArchitecture = vineStages.get("architecture")!;
+const vineBranching = vineStages.get("branching")!;
+const vineFoliage = vineStages.get("foliage")!;
+const vineReproductive = vineStages.get("reproductive")!;
+const vineDeformation = vineStages.get("deformation")!;
+const vineMaterial = vineStages.get("material")!;
+const vineLod = vineStages.get("lod")!;
+assert.equal(vineStages.get("source")!.parameters?.backend, "guided-vine");
+assert.equal(vineBranching.enabled, false, "static guided vines must not advertise a branch stage they do not execute");
+assert.equal(vineArchitecture.count, vineGenome.nodeCount);
+assert.ok((vineFoliage.count ?? 0) > 0);
+assert.ok((vineReproductive.count ?? 0) > 0);
+assert.deepEqual(vineFoliage.dependsOn, [vineArchitecture.id]);
+assert.deepEqual(vineReproductive.dependsOn, [vineFoliage.id]);
+assert.deepEqual(vineDeformation.dependsOn, [vineFoliage.id, vineReproductive.id]);
+
+const vineEdited = applyProcPlantGeneratorGraphOperations(vineCanonical, [
+  { op: "set-seed", nodeId: vineFoliage.id, value: 0x1010 },
+  { op: "set-seed", nodeId: vineReproductive.id, value: 0x2020 },
+]);
+const vineA = compileProcPlantProductionDag(vineGenome, vineEdited, environment, { canonicalSeed: vineSeed });
+const vineB = compileProcPlantProductionDag(vineGenome, vineEdited, environment, { canonicalSeed: vineSeed });
+assert.equal(vineA.path, "typed-artifacts");
+assert.equal(templateHash(vineA.build.template), templateHash(vineB.build.template));
+assert.deepEqual(vineA.records, vineB.records);
+assert.equal(vineA.records.find((record) => record.stage === "branching")?.status, "disabled");
+assert.equal(vineA.artifacts[vineArchitecture.id]?.kind, "graph");
+assert.equal(vineA.artifacts[vineFoliage.id]?.kind, "graph");
+assert.equal(vineA.artifacts[vineReproductive.id]?.kind, "graph");
+
+const vineOrganSignature = (kind: "leaf" | "mossTuft" | "flower") => (graph: ProcPlantGraph) =>
+  graph.organs.filter((organ) => organ.kind === kind).map((organ) => ({
+    position: organ.position.toArray(),
+    direction: organ.direction.toArray(),
+    right: organ.right.toArray(),
+    scale: organ.scale,
+  }));
+const vineLeaves = vineOrganSignature("leaf");
+const vineFlowers = vineOrganSignature("flower");
+
+const vineFoliageChangedGraph = applyProcPlantGeneratorGraphOperations(vineEdited, [
+  { op: "set-seed", nodeId: vineFoliage.id, value: 0x1011 },
+]);
+const vineFoliageChanged = compileProcPlantProductionDag(
+  vineGenome, vineFoliageChangedGraph, environment, { canonicalSeed: vineSeed },
+);
+assert.deepEqual(structure(vineFoliageChanged.build.graph), structure(vineA.build.graph),
+  "guided-vine foliage seeds must preserve the static guide-derived centerline");
+assert.notDeepEqual(vineLeaves(vineFoliageChanged.build.graph), vineLeaves(vineA.build.graph));
+assert.deepEqual(vineFlowers(vineFoliageChanged.build.graph), vineFlowers(vineA.build.graph),
+  "foliage seeds must not perturb independently seeded flowers");
+
+const vineReproductiveChangedGraph = applyProcPlantGeneratorGraphOperations(vineEdited, [
+  { op: "set-seed", nodeId: vineReproductive.id, value: 0x2021 },
+]);
+const vineReproductiveChanged = compileProcPlantProductionDag(
+  vineGenome, vineReproductiveChangedGraph, environment, { canonicalSeed: vineSeed },
+);
+assert.deepEqual(vineLeaves(vineReproductiveChanged.build.graph), vineLeaves(vineA.build.graph));
+assert.notDeepEqual(vineFlowers(vineReproductiveChanged.build.graph), vineFlowers(vineA.build.graph));
+
+const vineArchitectureChangedGraph = applyProcPlantGeneratorGraphOperations(vineEdited, [
+  { op: "set-count", nodeId: vineArchitecture.id, value: 12 },
+]);
+const vineArchitectureChanged = compileProcPlantProductionDag(
+  vineGenome, vineArchitectureChangedGraph, environment, { canonicalSeed: vineSeed },
+);
+assert.equal(vineArchitectureChanged.build.graph.stems.length, 13,
+  "guided-vine architecture count must resample the static centerline at a real resolution");
+assert.notDeepEqual(structure(vineArchitectureChanged.build.graph), structure(vineA.build.graph));
+
+const vineMaterialChangedGraph = applyProcPlantGeneratorGraphOperations(vineEdited, [{
+  op: "set-parameters", nodeId: vineMaterial.id,
+  value: { leafColorA: 0x224466, leafColorB: 0x335577 },
+}]);
+const vineMaterialChanged = compileProcPlantProductionDag(
+  vineGenome, vineMaterialChangedGraph, environment, { canonicalSeed: vineSeed },
+);
+assert.deepEqual(structure(vineMaterialChanged.build.graph), structure(vineA.build.graph));
+assert.notEqual(templateHash(vineMaterialChanged.build.template), templateHash(vineA.build.template),
+  "guided-vine material edits must rebuild real leaf geometry colors");
+
+const vineLeafCurveChangedGraph = applyProcPlantGeneratorGraphOperations(vineEdited, [{
+  op: "set-curve", nodeId: vineFoliage.id, value: { base: 0.11, tip: 0.075, curve: 1 },
+}]);
+const vineLeafCurveChanged = compileProcPlantProductionDag(
+  vineGenome, vineLeafCurveChangedGraph, environment, { canonicalSeed: vineSeed },
+);
+assert.deepEqual(structure(vineLeafCurveChanged.build.graph), structure(vineA.build.graph));
+assert.notDeepEqual(vineLeaves(vineLeafCurveChanged.build.graph), vineLeaves(vineA.build.graph),
+  "guided-vine foliage curves must change real branch-relative leaf scales");
+
+const vineLodChangedGraph = applyProcPlantGeneratorGraphOperations(vineEdited, [{
+  op: "set-parameters", nodeId: vineLod.id, value: { levels: [0, 2, 3] },
+}]);
+const vineLodChanged = compileProcPlantProductionDag(
+  vineGenome, vineLodChangedGraph, environment, { canonicalSeed: vineSeed },
+);
+assert.deepEqual(vineLodChanged.lods.map((lod) => lod.level), [0, 2, 3]);
+
+const vineRewired = applyProcPlantGeneratorGraphOperations(vineEdited, [
+  { op: "remove-dependency", nodeId: vineFoliage.id, dependencyId: vineArchitecture.id },
+  { op: "add-dependency", nodeId: vineFoliage.id, dependencyId: vineStages.get("source")!.id },
+]);
+assert.throws(
+  () => compileProcPlantProductionDag(vineGenome, vineRewired, environment, { canonicalSeed: vineSeed }),
+  /dependency rewire cannot be projected/,
+);
+const vineUnsupportedScope = applyProcPlantGeneratorGraphOperations(vineEdited, [{
+  op: "set-parent-scope", nodeId: vineFoliage.id, value: { mode: "root" },
+}]);
+assert.throws(
+  () => compileProcPlantProductionDag(vineGenome, vineUnsupportedScope, environment, { canonicalSeed: vineSeed }),
+  /parent scope cannot be projected/,
+);
+const vineUnsupportedPlacement = applyProcPlantGeneratorGraphOperations(vineEdited, [{
+  op: "set-placement", nodeId: vineFoliage.id, value: { mode: "tips" },
+}]);
+assert.throws(
+  () => compileProcPlantProductionDag(vineGenome, vineUnsupportedPlacement, environment, { canonicalSeed: vineSeed }),
+  /placement cannot be projected/,
+);
+const vineFalseArchitectureSeed = applyProcPlantGeneratorGraphOperations(vineEdited, [{
+  op: "set-seed", nodeId: vineArchitecture.id, value: 77,
+}]);
+assert.throws(
+  () => compileProcPlantProductionDag(vineGenome, vineFalseArchitectureSeed, environment, { canonicalSeed: vineSeed }),
+  /no independently seeded guided-vine operation/,
+);
+const vineLiveGuideClaim = structuredClone(vineEdited);
+vineLiveGuideClaim.nodes.find((node) => node.id === vineArchitecture.id)!.parameters = {
+  ...vineArchitecture.parameters,
+  sceneGuideQuery: "live",
+};
+assert.throws(
+  () => compileProcPlantProductionDag(vineGenome, vineLiveGuideClaim, environment, { canonicalSeed: vineSeed }),
+  /static guide\/support and collision inputs are immutable/,
+  "the adapter must fail closed rather than imply live guide/collision queries",
+);
+
+const mossVineGenome = structuredClone(procPlantPresets.hangingMoss!);
+const mossVineCanonical = createProcPlantAuthoringGraph(mossVineGenome, vineSeed);
+const mossVineLegacy = buildProcPlantTemplate(mossVineGenome, vineSeed, environment);
+const mossVineCanonicalResult = compileProcPlantProductionDag(
+  mossVineGenome, mossVineCanonical, environment, { canonicalSeed: vineSeed },
+);
+assert.equal(templateHash(mossVineCanonicalResult.build.template), templateHash(mossVineLegacy.template));
+const mossFoliage = mossVineCanonical.nodes.find((node) => node.stage === "foliage")!;
+const mossVineEdited = applyProcPlantGeneratorGraphOperations(mossVineCanonical, [
+  { op: "set-seed", nodeId: mossFoliage.id, value: 0x3030 },
+]);
+const mossVineTyped = compileProcPlantProductionDag(
+  mossVineGenome, mossVineEdited, environment, { canonicalSeed: vineSeed },
+);
+assert.equal(mossVineTyped.path, "typed-artifacts");
+assert.ok(mossVineTyped.build.graph.organs.every((organ) => organ.kind === "mossTuft"));
+
 const unsupportedGenome = procPlantPresets.phiFern!;
 const unsupportedGraph = applyProcPlantGeneratorGraphOperations(
   createProcPlantAuthoringGraph(unsupportedGenome, seed),

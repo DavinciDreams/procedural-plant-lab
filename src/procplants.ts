@@ -3070,6 +3070,190 @@ export const buildProcPlantGraphIr = (
   return { stems, segments, organs, segmentRecords, attachments };
 };
 
+/** Build the deterministic static centerline used by the guided-vine backend. */
+export const buildGuidedVineProcPlantArchitectureGraph = (
+  genome: ProcPlantGenome,
+  nodeCount = genome.nodeCount,
+): ProcPlantGraph => {
+  if (!genome.vine) throw new Error("guided-vine genome options are required");
+  const path = resolveProcPlantVinePath(genome.vine, nodeCount);
+  const rootDirection = path[1]!.clone().sub(path[0]!);
+  if (rootDirection.lengthSq() < 1e-8) rootDirection.copy(UP);
+  rootDirection.normalize();
+  const rootRadius = genome.moss ? 0.004 : 0.012;
+  const stems: StemNode[] = [{
+    position: path[0]!.clone(),
+    direction: rootDirection,
+    radius: genome.moss ? 0.004 : Math.max(0.006, rootRadius),
+    depth: 0,
+    t: 0,
+    index: 0,
+  }];
+  const segments: Array<[number, number]> = [];
+  let previous = stems[0]!;
+  for (let index = 1; index < path.length; index++) {
+    const t = index / Math.max(1, path.length - 1);
+    const position = path[index]!.clone();
+    const direction = position.clone().sub(previous.position);
+    if (direction.lengthSq() < 1e-8) direction.copy(previous.direction);
+    direction.normalize();
+    const node: StemNode = {
+      position,
+      direction,
+      radius: stems[0]!.radius * THREE.MathUtils.lerp(0.92, 0.28, t),
+      depth: 0,
+      t,
+      index: stems.length,
+    };
+    stems.push(node);
+    segments.push([previous.index, node.index]);
+    previous = node;
+  }
+  return buildProcPlantGraphIr(stems, segments, []);
+};
+
+const cloneProcPlantGraphParts = (graph: ProcPlantGraph) => ({
+  stems: graph.stems.map((stem, index) => ({
+    ...stem,
+    index,
+    position: stem.position.clone(),
+    direction: stem.direction.clone(),
+  })),
+  segments: graph.segments.map(([start, end]) => [start, end] as [number, number]),
+  organs: graph.organs.map((organ) => ({
+    ...organ,
+    position: organ.position.clone(),
+    direction: organ.direction.clone(),
+    right: organ.right.clone(),
+  })),
+});
+
+/** Add independently seeded foliage to a completed static guided-vine centerline. */
+export const addGuidedVineProcPlantFoliage = (
+  genome: ProcPlantGenome,
+  graph: ProcPlantGraph,
+  seed: number,
+  maximumOrgans = Number.MAX_SAFE_INTEGER,
+): ProcPlantGraph => {
+  if (!genome.vine) throw new Error("guided-vine genome options are required");
+  const { stems, segments, organs } = cloneProcPlantGraphParts(graph);
+  const rng = rngFromSeed(seed);
+  const leafEvery = Math.max(1, Math.round(genome.vine.leafEvery ?? 1));
+  const organsPerNode = genome.moss
+    ? Math.max(1, Math.min(4, Math.round(genome.moss.tuftsPerClump)))
+    : procPlantPhyllotaxyOrgansPerNode(genome);
+  const maximum = Math.max(0, Math.floor(maximumOrgans));
+  let added = 0;
+  for (let index = 1; index < stems.length && added < maximum; index++) {
+    if (index % leafEvery !== 0) continue;
+    const node = stems[index]!;
+    for (let slot = 0; slot < organsPerNode && added < maximum; slot++) {
+      const sample = resolveProcPlantPhyllotaxy(genome, index, slot);
+      const frame = branchRelativeFoliageFrame(
+        node.direction,
+        sample.azimuth + (rng() - 0.5) * 0.12,
+        genome.moss ? Math.PI / 3.2 : Math.PI / 2.35,
+        genome.vine.mode === "hang" ? -0.05 : genome.moss ? 0.48 : 0.22,
+        tangentBasis(node.direction).right,
+      );
+      const density = THREE.MathUtils.clamp(curve(genome.leaf.density, node.t), 0, 1.5);
+      if (rng() > density) continue;
+      organs.push({
+        kind: genome.moss ? "mossTuft" : "leaf",
+        position: node.position.clone().addScaledVector(frame.radial, node.radius + 0.004),
+        direction: frame.direction,
+        right: frame.right,
+        scale: (genome.moss ? genome.moss.height : curve(genome.leaf.length, node.t)) * (0.86 + rng() * 0.24),
+        t: node.t,
+      });
+      added++;
+    }
+  }
+  return buildProcPlantGraphIr(stems, segments, organs);
+};
+
+/** Add independently seeded flowers/accessories to populated guided-vine foliage. */
+export const addGuidedVineProcPlantReproductiveOrgans = (
+  genome: ProcPlantGenome,
+  graph: ProcPlantGraph,
+  seed: number,
+  maximumOrgans = Number.MAX_SAFE_INTEGER,
+): ProcPlantGraph => {
+  if (!genome.vine) throw new Error("guided-vine genome options are required");
+  const { stems, segments, organs } = cloneProcPlantGraphParts(graph);
+  const rng = rngFromSeed(seed);
+  const maximum = Math.max(0, Math.floor(maximumOrgans));
+  let added = 0;
+  const flowerEvery = Math.max(0, Math.round(genome.vine.flowerEvery ?? 0));
+  const flowerStartT = THREE.MathUtils.clamp(genome.vine.flowerStartT ?? 0.45, 0, 1);
+  if (genome.flower && flowerEvery > 0) {
+    for (let index = 1; index < stems.length && added < maximum; index++) {
+      const node = stems[index]!;
+      if (node.t < flowerStartT || index % flowerEvery !== 0) continue;
+      const frame = branchRelativeFoliageFrame(
+        node.direction,
+        resolveProcPlantPhyllotaxy(genome, index + 0.5).azimuth,
+        Math.PI / 2.55,
+        0.28,
+        tangentBasis(node.direction).right,
+      );
+      organs.push({
+        kind: "flower",
+        position: node.position.clone().addScaledVector(frame.radial, node.radius + 0.01),
+        direction: frame.direction,
+        right: frame.right,
+        scale: 0.72 + rng() * 0.2,
+        t: node.t,
+      });
+      added++;
+    }
+  }
+  for (const gene of genome.accessoryOrgans ?? []) {
+    if (added >= maximum) break;
+    const startT = THREE.MathUtils.clamp(gene.startT ?? 0.2, 0, 1);
+    const endT = THREE.MathUtils.clamp(gene.endT ?? 1, startT, 1);
+    const minDepth = Math.max(0, Math.floor(gene.minDepth ?? 0));
+    const maxDepth = Math.max(minDepth, Math.floor(gene.maxDepth ?? Number.MAX_SAFE_INTEGER));
+    let candidates = stems.filter((node) => node.index !== 0 && node.t >= startT && node.t <= endT && node.depth >= minDepth && node.depth <= maxDepth);
+    if (candidates.length === 0) candidates = stems.filter((node) => node.index !== 0);
+    const count = Math.min(Math.max(0, Math.min(32, Math.round(gene.count))), maximum - added);
+    const size = Math.max(0.003, gene.size);
+    for (let index = 0; index < count && candidates.length > 0; index++) {
+      const stratum = (index + 0.18 + rng() * 0.64) / Math.max(1, count);
+      const node = candidates[Math.min(candidates.length - 1, Math.floor(stratum * candidates.length))]!;
+      const sample = resolveProcPlantPhyllotaxy(genome, node.index + index / Math.max(1, count));
+      const azimuth = sample.azimuth + (rng() - 0.5) * 0.28;
+      const frame = branchRelativeFoliageFrame(
+        node.direction,
+        azimuth,
+        Math.PI / 2.08,
+        gene.kind === "thorn" ? -0.04 : 0.08,
+        tangentBasis(node.direction).right,
+      );
+      let direction = frame.direction.clone();
+      if (gene.kind === "fruit" || gene.kind === "berry") direction.lerp(new THREE.Vector3(0, -1, 0), 0.68).normalize();
+      else if (gene.kind === "cone") direction.lerp(new THREE.Vector3(0, -1, 0), 0.36).normalize();
+      else if (gene.kind === "thorn") direction = frame.radial.clone().addScaledVector(node.direction, -0.16).normalize();
+      else direction = frame.radial.clone().multiplyScalar(0.24).add(new THREE.Vector3(0, -1, 0)).normalize();
+      let right = frame.right.clone().projectOnPlane(direction);
+      if (right.lengthSq() < 0.0001) right = tangentBasis(direction).right;
+      right.normalize();
+      organs.push({
+        kind: gene.kind,
+        position: node.position.clone().addScaledVector(frame.radial, node.radius + size * (gene.kind === "thorn" ? 0.04 : 0.12)),
+        direction,
+        right,
+        scale: size * (0.88 + rng() * 0.24),
+        t: node.t,
+        color: gene.color,
+        secondaryColor: gene.secondaryColor,
+      });
+      added++;
+    }
+  }
+  return buildProcPlantGraphIr(stems, segments, organs);
+};
+
 const flowerLoadBend = (
   genome: ProcPlantGenome,
   position: THREE.Vector3,

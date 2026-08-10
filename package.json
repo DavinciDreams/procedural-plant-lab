@@ -120,6 +120,7 @@
     "test:chain-tube-browser-smoke": "node scripts/run-chain-tube-browser-smoke.mjs",
     "test:spline-crown-browser-smoke": "node scripts/run-spline-crown-browser-smoke.mjs",
     "test:production-dag-browser-smoke": "node scripts/run-production-dag-browser-smoke.mjs",
+    "test:guided-vine-dag-browser-smoke": "node scripts/run-guided-vine-dag-browser-smoke.mjs",
     "test:core-library": "node scripts/run-core-library-smoke.mjs",
     "test:package-consumer": "node scripts/run-package-consumer-smoke.mjs",
     "write:tellus-contract": "node scripts/run-tellus-contract-fixture.mjs --write",
