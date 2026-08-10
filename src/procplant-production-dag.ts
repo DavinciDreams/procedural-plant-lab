@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import {
   buildSpaceColonizedProcPlantStageParts,
+  buildBranchModuleProcPlantStageParts,
   buildProcPlantGraphIr,
   buildProcPlantTemplate,
   buildProcPlantTemplateFromGraph,
@@ -8,7 +9,9 @@ import {
   compileProcPlantLodsFromTemplate,
   defaultPlantEnvironment,
   materializeProcPlantParts,
+  materializeBranchModuleProcPlantParts,
   type ProcPlantCompiledLod,
+  type ProcPlantBranchModuleStageParts,
   type ProcPlantEnvironment,
   type ProcPlantGenome,
   type ProcPlantGraph,
@@ -69,6 +72,12 @@ export interface ProcPlantSpaceColonizationPlanStageArtifact extends ArtifactBas
   runtime: { windFlex: number; phototropism: number };
 }
 
+export interface ProcPlantBranchModulePlanStageArtifact extends ArtifactBase<"branch-module-plan", "architecture"> {
+  genome: ProcPlantGenome;
+  environment: ProcPlantEnvironment;
+  runtime: { windFlex: number; phototropism: number };
+}
+
 export interface ProcPlantSpaceColonizationPartsStageArtifact extends ArtifactBase<
   "space-colonization-parts",
   "branching" | "foliage" | "deformation"
@@ -77,6 +86,18 @@ export interface ProcPlantSpaceColonizationPartsStageArtifact extends ArtifactBa
   environment: ProcPlantEnvironment;
   parts: ProcPlantInstancedParts;
   growthSeed: number;
+  foliageSeed: number | null;
+  runtime: { windFlex: number; phototropism: number };
+}
+
+export interface ProcPlantBranchModulePartsStageArtifact extends ArtifactBase<
+  "branch-module-parts",
+  "branching" | "foliage" | "deformation"
+> {
+  genome: ProcPlantGenome;
+  environment: ProcPlantEnvironment;
+  parts: ProcPlantBranchModuleStageParts;
+  structureSeed: number;
   foliageSeed: number | null;
   runtime: { windFlex: number; phototropism: number };
 }
@@ -108,6 +129,8 @@ export type ProcPlantProductionStageArtifact =
   | ProcPlantGraphStageArtifact
   | ProcPlantSpaceColonizationPlanStageArtifact
   | ProcPlantSpaceColonizationPartsStageArtifact
+  | ProcPlantBranchModulePlanStageArtifact
+  | ProcPlantBranchModulePartsStageArtifact
   | ProcPlantMaterialStageArtifact
   | ProcPlantLodStageArtifact
   | ProcPlantOutputStageArtifact;
@@ -264,7 +287,6 @@ const productionBackend = (genome: ProcPlantGenome) => genome.weberPenn
 const assertSupportedBackend = (genome: ProcPlantGenome) => {
   const unsupported = [
     genome.weberPenn && "weber-penn",
-    genome.branchModules && "branch-module-graph",
     genome.vine && "guided-vine",
     genome.grass && "grass-specialization",
     genome.fern && "fern-specialization",
@@ -277,6 +299,9 @@ const assertSupportedBackend = (genome: ProcPlantGenome) => {
   }
   if (genome.spaceColonization && (genome.flower || (genome.accessoryOrgans?.length ?? 0) > 0)) {
     throw new ProcPlantProductionDagError("typed space-colonization DAG does not support reproductive organs");
+  }
+  if (genome.branchModules && (genome.flower || (genome.accessoryOrgans?.length ?? 0) > 0)) {
+    throw new ProcPlantProductionDagError("typed branch-module DAG does not support reproductive organs");
   }
 };
 
@@ -326,7 +351,7 @@ const validateProductionNodeParameters = (node: ProcPlantGeneratorNode, genome: 
       throw new ProcPlantProductionDagError(`${node.id}.parameters must preserve source genome identity`);
     }
     const backend = productionBackend(genome);
-    if (parameters.backend !== backend || (backend !== "procplant-graph" && backend !== "space-colonization")) {
+    if (parameters.backend !== backend || !["procplant-graph", "space-colonization", "branch-module-graph"].includes(backend)) {
       throw new ProcPlantProductionDagError(`${node.id}.parameters.backend ${String(parameters.backend)} is unsupported by the typed production backend`);
     }
   } else if (node.stage === "architecture") {
@@ -347,7 +372,7 @@ const validateProductionNodeParameters = (node: ProcPlantGeneratorNode, genome: 
     }
   } else if (node.stage === "branching") {
     const backend = productionBackend(genome);
-    if (parameters.backend !== backend || (backend !== "procplant-graph" && backend !== "space-colonization")) {
+    if (parameters.backend !== backend || !["procplant-graph", "space-colonization", "branch-module-graph"].includes(backend)) {
       throw new ProcPlantProductionDagError(`${node.id}.parameters.backend ${String(parameters.backend)} is unsupported by the typed production backend`);
     }
     const angle = parameters.angle;
@@ -361,6 +386,9 @@ const validateProductionNodeParameters = (node: ProcPlantGeneratorNode, genome: 
     finite(record.depthDecay, `${node.id}.parameters.angle.depthDecay`, 0, 1);
     if (genome.spaceColonization && ((node.count ?? 0) < 2 || (node.count ?? 0) > 100_000)) {
       throw new ProcPlantProductionDagError(`${node.id}.count must be in 2..100000 for space colonization`);
+    }
+    if (genome.branchModules && ((node.count ?? 0) < 1 || (node.count ?? 0) > PROCPLANT_PRODUCTION_DAG_MAX_GRAPH_STEMS)) {
+      throw new ProcPlantProductionDagError(`${node.id}.count is outside the supported branch-module range`);
     }
   } else if (node.stage === "foliage") {
     if (!["leaf", "coniferSpray", "palmFrond", "mossTuft"].includes(String(parameters.foliageKind))) {
@@ -432,6 +460,68 @@ const validateSpaceColonizationNodeSemantics = (
   }
   if (node.stage === "branching" && stableJson(node.parameters) !== stableJson(canonicalNode.parameters)) {
     throw new ProcPlantProductionDagError(`${node.id}.parameters cannot be projected into the space-colonization backend`);
+  }
+};
+
+const validateBranchModuleNodeSemantics = (
+  node: ProcPlantGeneratorNode,
+  canonicalNode: ProcPlantGeneratorNode | undefined,
+) => {
+  if (!canonicalNode || canonicalNode.id !== node.id) {
+    throw new ProcPlantProductionDagError(`${node.id} is not a canonical branch-module stage; additional specialized nodes are unsupported`);
+  }
+  if (node.enabled !== canonicalNode.enabled) {
+    throw new ProcPlantProductionDagError(`${node.id}.enabled cannot be projected into the branch-module backend`);
+  }
+  if (stableJson([...node.dependsOn].sort()) !== stableJson([...canonicalNode.dependsOn].sort())) {
+    throw new ProcPlantProductionDagError(`${node.id}.dependsOn cannot be rewired for the branch-module backend`);
+  }
+  if (node.stage !== "branching" && node.stage !== "foliage" && node.seedOverride !== canonicalNode.seedOverride) {
+    throw new ProcPlantProductionDagError(`${node.id} has no independent stochastic operation; seed overrides are unsupported`);
+  }
+  if (node.stage === "reproductive" && node.enabled) {
+    throw new ProcPlantProductionDagError(`${node.id} reproductive execution is unsupported for branch modules`);
+  }
+
+  if (["architecture", "branching", "foliage"].includes(node.stage)
+    && stableJson(node.placement) !== stableJson(canonicalNode.placement)) {
+    throw new ProcPlantProductionDagError(`${node.id}.placement cannot be projected into the branch-module backend`);
+  }
+
+  if (node.stage === "branching") {
+    const actualScope = node.parentScope;
+    const expectedScope = canonicalNode.parentScope;
+    if (!actualScope || !expectedScope || actualScope.mode !== "stages" || expectedScope.mode !== "stages"
+      || stableJson([...actualScope.stages].sort()) !== stableJson([...expectedScope.stages].sort())) {
+      throw new ProcPlantProductionDagError(`${node.id}.parentScope cannot be rewired for the branch-module backend`);
+    }
+    if (actualScope.maxDepth !== undefined
+      && (!Number.isInteger(actualScope.maxDepth) || actualScope.maxDepth < 1 || actualScope.maxDepth > 6)) {
+      throw new ProcPlantProductionDagError(`${node.id}.parentScope.maxDepth must be an integer in 1..6 for branch modules`);
+    }
+  } else if (stableJson(node.parentScope) !== stableJson(canonicalNode.parentScope)) {
+    throw new ProcPlantProductionDagError(`${node.id}.parentScope cannot be projected into the branch-module backend`);
+  }
+
+  if (node.stage !== "architecture" && node.stage !== "foliage"
+    && stableJson(node.curve) !== stableJson(canonicalNode.curve)) {
+    throw new ProcPlantProductionDagError(`${node.id}.curve cannot be projected into the branch-module backend`);
+  }
+
+  if (node.stage !== "architecture" && node.stage !== "branching"
+    && stableJson(node.count) !== stableJson(canonicalNode.count)) {
+    throw new ProcPlantProductionDagError(`${node.id}.count cannot be projected into the branch-module backend`);
+  }
+
+  if (node.stage === "foliage") {
+    const actual = node.parameters ?? {};
+    const expected = canonicalNode.parameters ?? {};
+    if (actual.foliageKind !== expected.foliageKind || actual.phyllotaxy !== expected.phyllotaxy) {
+      throw new ProcPlantProductionDagError(`${node.id}.parameters only supports branch-module leaf shape edits`);
+    }
+  } else if (node.stage !== "material" && node.stage !== "deformation" && node.stage !== "lod"
+    && stableJson(node.parameters) !== stableJson(canonicalNode.parameters)) {
+    throw new ProcPlantProductionDagError(`${node.id}.parameters cannot be projected into the branch-module backend`);
   }
 };
 
@@ -538,6 +628,30 @@ const spaceColonizationPartsArtifact = (
     other !== candidate && candidate.lineage.every((id) => other.lineage.includes(id)) && other.lineage.length > candidate.lineage.length));
   if (retained.length !== 1) throw new ProcPlantProductionDagError(`${node.id} requires exactly one terminal space-colonization parts artifact`);
   return retained[0]!;
+};
+
+const branchModulePlanArtifact = (
+  node: ProcPlantGeneratorNode,
+  dependencies: readonly ProcPlantProductionStageArtifact[],
+) => {
+  const artifacts = scopeDependencies(node, dependencies).filter(
+    (artifact): artifact is ProcPlantBranchModulePlanStageArtifact => artifact.kind === "branch-module-plan",
+  );
+  if (artifacts.length !== 1) throw new ProcPlantProductionDagError(`${node.id} requires exactly one branch-module architecture plan`);
+  return artifacts[0]!;
+};
+
+const branchModulePartsArtifact = (
+  node: ProcPlantGeneratorNode,
+  dependencies: readonly ProcPlantProductionStageArtifact[],
+  expectedStage: ProcPlantBranchModulePartsStageArtifact["stage"],
+) => {
+  const artifacts = scopeDependencies(node, dependencies).filter(
+    (artifact): artifact is ProcPlantBranchModulePartsStageArtifact =>
+      artifact.kind === "branch-module-parts" && artifact.stage === expectedStage,
+  );
+  if (artifacts.length !== 1) throw new ProcPlantProductionDagError(`${node.id} requires exactly one branch-module ${expectedStage} artifact`);
+  return artifacts[0]!;
 };
 
 const mergeGraphArtifacts = (artifacts: readonly ProcPlantGraphStageArtifact[]) => {
@@ -711,6 +825,17 @@ const artifactHashPayload = (artifact: ProcPlantUnhashedStageArtifact) => {
     lineage: artifact.lineage, graph: graphHash(artifact.parts.graph), stems: templateHash(artifact.parts.stems),
     growthSeed: artifact.growthSeed, foliageSeed: artifact.foliageSeed, runtime: artifact.runtime,
   };
+  if (artifact.kind === "branch-module-plan") return {
+    kind: artifact.kind, stage: artifact.stage, nodeId: artifact.nodeId, seed: artifact.seed,
+    lineage: artifact.lineage, branchModules: artifact.genome.branchModules,
+    nodeCount: artifact.genome.nodeCount, internode: artifact.genome.internode, runtime: artifact.runtime,
+  };
+  if (artifact.kind === "branch-module-parts") return {
+    kind: artifact.kind, stage: artifact.stage, nodeId: artifact.nodeId, seed: artifact.seed,
+    lineage: artifact.lineage, graph: graphHash(artifact.parts.graph),
+    stems: templateHash(artifact.parts.stems), foliage: templateHash(artifact.parts.foliage),
+    structureSeed: artifact.structureSeed, foliageSeed: artifact.foliageSeed, runtime: artifact.runtime,
+  };
   if (artifact.kind === "material") return { kind: artifact.kind, nodeId: artifact.nodeId, seed: artifact.seed, lineage: artifact.lineage, graph: graphHash(artifact.graph), template: templateHash(artifact.template) };
   if (artifact.kind === "lod") return { kind: artifact.kind, nodeId: artifact.nodeId, seed: artifact.seed, lineage: artifact.lineage, levels: artifact.lods.map((lod) => [lod.level, templateHash(lod.template)]), runtime: artifact.runtime };
   return { kind: artifact.kind, nodeId: artifact.nodeId, seed: artifact.seed, lineage: artifact.lineage, template: templateHash(artifact.build.template), runtime: artifact.runtime };
@@ -739,6 +864,10 @@ const artifactWork = (artifact: ProcPlantProductionStageArtifact) => {
   if (artifact.kind === "space-colonization-parts") return artifact.parts.graph.stems.length
     + artifact.parts.graph.segments.length + artifact.parts.graph.organs.length
     + artifact.parts.stems.pos.length / 3 + artifact.parts.instances.length;
+  if (artifact.kind === "branch-module-plan") return 1;
+  if (artifact.kind === "branch-module-parts") return artifact.parts.graph.stems.length
+    + artifact.parts.graph.segments.length
+    + artifact.parts.stems.pos.length / 3 + artifact.parts.foliage.pos.length / 3;
   if (artifact.kind === "material") return artifact.template.pos.length / 3 + artifact.template.idx.length;
   if (artifact.kind === "lod") return artifact.lods.reduce((sum, lod) => sum + lod.vertices + lod.triangles, 0);
   return artifact.build.template.pos.length / 3 + artifact.build.template.idx.length;
@@ -792,6 +921,7 @@ export const compileProcPlantProductionDag = (
   for (const node of graph.nodes) {
     validateProductionNodeParameters(node, genome);
     if (genome.spaceColonization) validateSpaceColonizationNodeSemantics(node, canonicalNodeById.get(node.id));
+    if (genome.branchModules) validateBranchModuleNodeSemantics(node, canonicalNodeById.get(node.id));
     const unsupported = node.dependsOn
       .map((id) => nodeById.get(id)!)
       .filter((dependency) => !ALLOWED_ARTIFACT_STAGES[node.stage].includes(dependency.stage));
@@ -829,6 +959,8 @@ export const compileProcPlantProductionDag = (
       const source = sources[0]!;
       const architectureGenome: ProcPlantGenome = {
         ...source.genome,
+        nodeCount: node.count ?? source.genome.nodeCount,
+        internode: node.curve ? { ...node.curve } : source.genome.internode,
         apicalDominance: Number(node.parameters?.apicalDominance ?? source.genome.apicalDominance),
         phyllotaxisAngle: Number(node.parameters?.phyllotaxisAngle ?? source.genome.phyllotaxisAngle),
         ...(source.genome.spaceColonization
@@ -847,6 +979,12 @@ export const compileProcPlantProductionDag = (
       if (architectureGenome.spaceColonization) {
         artifact = withArtifactHash({
           kind: "space-colonization-plan", stage: "architecture", nodeId, seed,
+          lineage: lineageFor(node, sources), genome: architectureGenome,
+          environment: source.environment, runtime,
+        });
+      } else if (architectureGenome.branchModules) {
+        artifact = withArtifactHash({
+          kind: "branch-module-plan", stage: "architecture", nodeId, seed,
           lineage: lineageFor(node, sources), genome: architectureGenome,
           environment: source.environment, runtime,
         });
@@ -871,6 +1009,24 @@ export const compileProcPlantProductionDag = (
           kind: "space-colonization-parts", stage: "branching", nodeId, seed,
           lineage: lineageFor(node, [input]), genome: branchedGenome, environment: input.environment,
           parts, growthSeed: seed, foliageSeed: null, runtime: input.runtime,
+        });
+      } else if (genome.branchModules) {
+        const input = branchModulePlanArtifact(node, dependencies);
+        const branchedGenome: ProcPlantGenome = {
+          ...input.genome,
+          branchModules: {
+            ...input.genome.branchModules!,
+            moduleBudget: node.count!,
+            levels: node.parentScope?.maxDepth ?? input.genome.branchModules!.levels,
+          },
+        };
+        const parts = buildBranchModuleProcPlantStageParts(
+          branchedGenome, { structure: seed, foliage: 0 }, input.environment, { includeFoliage: false },
+        );
+        artifact = withArtifactHash({
+          kind: "branch-module-parts", stage: "branching", nodeId, seed,
+          lineage: lineageFor(node, [input]), genome: branchedGenome, environment: input.environment,
+          parts, structureSeed: seed, foliageSeed: null, runtime: input.runtime,
         });
       } else {
         const inputs = graphArtifacts(node, dependencies);
@@ -905,6 +1061,25 @@ export const compileProcPlantProductionDag = (
           kind: "space-colonization-parts", stage: "foliage", nodeId, seed,
           lineage: lineageFor(node, [input]), genome: foliageGenome, environment: input.environment,
           parts, growthSeed: input.growthSeed, foliageSeed: seed, runtime: input.runtime,
+        });
+      } else if (genome.branchModules) {
+        const input = branchModulePartsArtifact(node, dependencies, "branching");
+        if (input.stage !== "branching") throw new ProcPlantProductionDagError(`${node.id} requires a branch-module branching artifact`);
+        const foliageGenome: ProcPlantGenome = {
+          ...input.genome,
+          leaf: {
+            ...input.genome.leaf,
+            shape: node.parameters?.shape as ProcPlantGenome["leaf"]["shape"],
+            length: node.curve ? { ...node.curve } : input.genome.leaf.length,
+          },
+        };
+        const parts = buildBranchModuleProcPlantStageParts(
+          foliageGenome, { structure: input.structureSeed, foliage: seed }, input.environment,
+        );
+        artifact = withArtifactHash({
+          kind: "branch-module-parts", stage: "foliage", nodeId, seed,
+          lineage: lineageFor(node, [input]), genome: foliageGenome, environment: input.environment,
+          parts, structureSeed: input.structureSeed, foliageSeed: seed, runtime: input.runtime,
         });
       } else {
         const inputs = graphArtifacts(node, dependencies);
@@ -941,6 +1116,15 @@ export const compileProcPlantProductionDag = (
             phototropism: Number(node.parameters?.phototropism ?? input.runtime.phototropism),
           },
         });
+      } else if (genome.branchModules) {
+        const input = branchModulePartsArtifact(node, dependencies, "foliage");
+        artifact = withArtifactHash({
+          ...input, stage: "deformation", nodeId, seed, lineage: lineageFor(node, [input]),
+          runtime: {
+            windFlex: Number(node.parameters?.windFlex ?? input.runtime.windFlex),
+            phototropism: Number(node.parameters?.phototropism ?? input.runtime.phototropism),
+          },
+        });
       } else {
         const inputs = graphArtifacts(node, dependencies);
         const base = mergeGraphArtifacts(inputs);
@@ -967,6 +1151,23 @@ export const compileProcPlantProductionDag = (
           genome: materialGenome, environment: input.environment, graph: parts.graph, template,
           stats: { ...parts.stats, triangles: template.idx.length / 3 },
         });
+      } else if (genome.branchModules) {
+        const input = branchModulePartsArtifact(node, dependencies, "foliage");
+        if (input.foliageSeed === null) throw new ProcPlantProductionDagError(`${node.id} requires a populated branch-module foliage artifact`);
+        const materialGenome = cloneGenomeForMaterial(input.genome, node);
+        materialGenome.branchModules = {
+          ...materialGenome.branchModules!,
+          leafColor: Number(node.parameters?.leafColorA ?? materialGenome.leaf.colorA),
+        };
+        const parts = buildBranchModuleProcPlantStageParts(
+          materialGenome, { structure: input.structureSeed, foliage: input.foliageSeed }, input.environment,
+        );
+        const template = materializeBranchModuleProcPlantParts(parts);
+        artifact = withArtifactHash({
+          kind: "material", stage: "material", nodeId, seed, lineage: lineageFor(node, [input]),
+          genome: materialGenome, environment: input.environment, graph: parts.graph, template,
+          stats: { ...parts.stats, triangles: template.idx.length / 3 },
+        });
       } else {
         const inputs = graphArtifacts(node, dependencies);
         const base = mergeGraphArtifacts(inputs);
@@ -980,8 +1181,8 @@ export const compileProcPlantProductionDag = (
       }
     } else if (node.stage === "lod") {
       const materials = scopedDependencies.filter((entry): entry is ProcPlantMaterialStageArtifact => entry.kind === "material");
-      const deformations = scopedDependencies.filter((entry): entry is ProcPlantGraphStageArtifact | ProcPlantSpaceColonizationPartsStageArtifact =>
-        (entry.kind === "graph" || entry.kind === "space-colonization-parts") && entry.stage === "deformation");
+      const deformations = scopedDependencies.filter((entry): entry is ProcPlantGraphStageArtifact | ProcPlantSpaceColonizationPartsStageArtifact | ProcPlantBranchModulePartsStageArtifact =>
+        (entry.kind === "graph" || entry.kind === "space-colonization-parts" || entry.kind === "branch-module-parts") && entry.stage === "deformation");
       if (materials.length !== 1) throw new ProcPlantProductionDagError(`${node.id} requires exactly one material artifact`);
       if (deformations.length > 1) throw new ProcPlantProductionDagError(`${node.id} accepts at most one deformation artifact`);
       const material = materials[0]!;
@@ -1009,6 +1210,7 @@ export const compileProcPlantProductionDag = (
     }
     const boundedGraph = artifact.kind === "graph" ? artifact.graph
       : artifact.kind === "space-colonization-parts" ? artifact.parts.graph
+      : artifact.kind === "branch-module-parts" ? artifact.parts.graph
         : null;
     if (boundedGraph && (boundedGraph.stems.length > PROCPLANT_PRODUCTION_DAG_MAX_GRAPH_STEMS || boundedGraph.organs.length > PROCPLANT_PRODUCTION_DAG_MAX_GRAPH_ORGANS)) {
       throw new ProcPlantProductionDagError(`${node.id} exceeds production graph geometry caps`);

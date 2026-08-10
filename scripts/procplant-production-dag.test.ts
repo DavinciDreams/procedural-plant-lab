@@ -310,6 +310,174 @@ assert.throws(
   /placement cannot be projected/,
 );
 
+const branchModuleGenome = structuredClone(procPlantPresets.weepingWillow!);
+const branchModuleSeed = 0x807026;
+const branchModuleCanonical = createProcPlantAuthoringGraph(branchModuleGenome, branchModuleSeed);
+const branchModuleLegacy = buildProcPlantTemplate(branchModuleGenome, branchModuleSeed, environment);
+assert.equal(
+  templateHash(branchModuleLegacy.template),
+  "7f3f2a2d08d4257aa121e00325fe168dc65dbf5e6314d886ede4aa00edaa72b4",
+  "the branch-module stage split must preserve the pre-adapter legacy bytes",
+);
+const branchModuleCanonicalResult = compileProcPlantProductionDag(
+  branchModuleGenome, branchModuleCanonical, environment, { canonicalSeed: branchModuleSeed },
+);
+assert.equal(branchModuleCanonicalResult.path, "legacy-canonical");
+assert.equal(templateHash(branchModuleCanonicalResult.build.template), templateHash(branchModuleLegacy.template));
+
+const branchModuleStages = new Map(branchModuleCanonical.nodes.map((node) => [node.stage, node]));
+const branchModuleArchitecture = branchModuleStages.get("architecture")!;
+const branchModuleBranching = branchModuleStages.get("branching")!;
+const branchModuleFoliage = branchModuleStages.get("foliage")!;
+const branchModuleMaterial = branchModuleStages.get("material")!;
+const branchModuleDeformation = branchModuleStages.get("deformation")!;
+const branchModuleLod = branchModuleStages.get("lod")!;
+assert.equal(branchModuleStages.get("source")!.parameters?.backend, "branch-module-graph");
+assert.equal(branchModuleBranching.count, branchModuleGenome.branchModules!.moduleBudget);
+
+const branchModuleEdited = applyProcPlantGeneratorGraphOperations(branchModuleCanonical, [
+  { op: "set-seed", nodeId: branchModuleBranching.id, value: 8101 },
+  { op: "set-seed", nodeId: branchModuleFoliage.id, value: 8202 },
+]);
+const branchModuleA = compileProcPlantProductionDag(
+  branchModuleGenome, branchModuleEdited, environment, { canonicalSeed: branchModuleSeed },
+);
+const branchModuleB = compileProcPlantProductionDag(
+  branchModuleGenome, branchModuleEdited, environment, { canonicalSeed: branchModuleSeed },
+);
+assert.equal(branchModuleA.path, "typed-artifacts");
+assert.equal(templateHash(branchModuleA.build.template), templateHash(branchModuleB.build.template));
+assert.deepEqual(branchModuleA.records, branchModuleB.records);
+assert.equal(branchModuleA.artifacts[branchModuleArchitecture.id]?.kind, "branch-module-plan");
+assert.equal(branchModuleA.artifacts[branchModuleBranching.id]?.kind, "branch-module-parts");
+assert.equal(branchModuleA.artifacts[branchModuleFoliage.id]?.kind, "branch-module-parts");
+assert.equal(branchModuleA.records.find((record) => record.stage === "reproductive")?.status, "disabled");
+
+const branchModuleBranchArtifact = branchModuleA.artifacts[branchModuleBranching.id];
+const branchModuleFoliageArtifact = branchModuleA.artifacts[branchModuleFoliage.id];
+assert.equal(branchModuleBranchArtifact?.kind, "branch-module-parts");
+assert.equal(branchModuleFoliageArtifact?.kind, "branch-module-parts");
+if (branchModuleBranchArtifact?.kind === "branch-module-parts" && branchModuleFoliageArtifact?.kind === "branch-module-parts") {
+  assert.equal(templateHash(branchModuleBranchArtifact.parts.stems), templateHash(branchModuleFoliageArtifact.parts.stems),
+    "foliage materialization must retain the exact branch-module structure artifact");
+  assert.equal(branchModuleBranchArtifact.parts.foliage.idx.length, 0);
+  assert.ok(branchModuleFoliageArtifact.parts.foliage.idx.length > 0);
+}
+
+const branchModuleFoliageChangedGraph = applyProcPlantGeneratorGraphOperations(branchModuleEdited, [
+  { op: "set-seed", nodeId: branchModuleFoliage.id, value: 8203 },
+]);
+const branchModuleFoliageChanged = compileProcPlantProductionDag(
+  branchModuleGenome, branchModuleFoliageChangedGraph, environment, { canonicalSeed: branchModuleSeed },
+);
+assert.deepEqual(structure(branchModuleFoliageChanged.build.graph), structure(branchModuleA.build.graph),
+  "branch-module foliage seeds must preserve the independently seeded structure");
+const changedFoliageArtifact = branchModuleFoliageChanged.artifacts[branchModuleFoliage.id];
+assert.equal(changedFoliageArtifact?.kind, "branch-module-parts");
+if (changedFoliageArtifact?.kind === "branch-module-parts" && branchModuleFoliageArtifact?.kind === "branch-module-parts") {
+  assert.notEqual(templateHash(changedFoliageArtifact.parts.foliage), templateHash(branchModuleFoliageArtifact.parts.foliage),
+    "branch-module foliage seeds must drive real foliage geometry");
+}
+
+const branchModuleStructureChangedGraph = applyProcPlantGeneratorGraphOperations(branchModuleEdited, [
+  { op: "set-seed", nodeId: branchModuleBranching.id, value: 8102 },
+]);
+const branchModuleStructureChanged = compileProcPlantProductionDag(
+  branchModuleGenome, branchModuleStructureChangedGraph, environment, { canonicalSeed: branchModuleSeed },
+);
+assert.notDeepEqual(structure(branchModuleStructureChanged.build.graph), structure(branchModuleA.build.graph),
+  "branch-module branching seeds must drive actual module growth");
+
+const branchModuleBudgetGraph = applyProcPlantGeneratorGraphOperations(branchModuleEdited, [
+  { op: "set-count", nodeId: branchModuleBranching.id, value: 48 },
+]);
+const branchModuleBudgetResult = compileProcPlantProductionDag(
+  branchModuleGenome, branchModuleBudgetGraph, environment, { canonicalSeed: branchModuleSeed },
+);
+assert.ok(branchModuleBudgetResult.build.graph.segments.length < branchModuleA.build.graph.segments.length,
+  "branch stage count must apply the real module budget");
+
+const branchModuleArchitectureGraph = applyProcPlantGeneratorGraphOperations(branchModuleEdited, [
+  { op: "set-count", nodeId: branchModuleArchitecture.id, value: branchModuleGenome.nodeCount + 8 },
+]);
+const branchModuleArchitectureResult = compileProcPlantProductionDag(
+  branchModuleGenome, branchModuleArchitectureGraph, environment, { canonicalSeed: branchModuleSeed },
+);
+assert.notEqual(templateHash(branchModuleArchitectureResult.build.template), templateHash(branchModuleA.build.template),
+  "architecture count must feed the backend's real height calculation");
+
+const branchModuleMaterialGraph = applyProcPlantGeneratorGraphOperations(branchModuleEdited, [{
+  op: "set-parameters", nodeId: branchModuleMaterial.id,
+  value: { leafColorA: 0x224466, leafColorB: 0x335577 },
+}]);
+const branchModuleMaterialResult = compileProcPlantProductionDag(
+  branchModuleGenome, branchModuleMaterialGraph, environment, { canonicalSeed: branchModuleSeed },
+);
+assert.deepEqual(structure(branchModuleMaterialResult.build.graph), structure(branchModuleA.build.graph));
+assert.notEqual(templateHash(branchModuleMaterialResult.build.template), templateHash(branchModuleA.build.template),
+  "material edits must rebuild real branch-module leaf colors");
+
+const branchModuleDepthGraph = applyProcPlantGeneratorGraphOperations(branchModuleEdited, [{
+  op: "set-parent-scope", nodeId: branchModuleBranching.id,
+  value: { mode: "stages", stages: ["architecture", "branching"], maxDepth: 2 },
+}]);
+const branchModuleDepthResult = compileProcPlantProductionDag(
+  branchModuleGenome, branchModuleDepthGraph, environment, { canonicalSeed: branchModuleSeed },
+);
+assert.ok(Math.max(...branchModuleDepthResult.build.graph.stems.map((stem) => stem.depth)) <= 2,
+  "branch parent depth must apply the backend's real module levels");
+
+const branchModuleRuntimeGraph = applyProcPlantGeneratorGraphOperations(branchModuleEdited, [{
+  op: "set-parameters", nodeId: branchModuleDeformation.id,
+  value: { windFlex: 1.1, phototropism: 0.22 },
+}]);
+const branchModuleRuntimeResult = compileProcPlantProductionDag(
+  branchModuleGenome, branchModuleRuntimeGraph, environment, { canonicalSeed: branchModuleSeed },
+);
+const branchModuleRuntimeOutput = branchModuleRuntimeResult.artifacts[branchModuleStages.get("output")!.id];
+assert.equal(branchModuleRuntimeOutput?.kind, "output");
+if (branchModuleRuntimeOutput?.kind === "output") {
+  assert.deepEqual(branchModuleRuntimeOutput.runtime, { windFlex: 1.1, phototropism: 0.22 });
+}
+
+const branchModuleLodGraph = applyProcPlantGeneratorGraphOperations(branchModuleEdited, [{
+  op: "set-parameters", nodeId: branchModuleLod.id, value: { levels: [0, 2, 3] },
+}]);
+const branchModuleLodResult = compileProcPlantProductionDag(
+  branchModuleGenome, branchModuleLodGraph, environment, { canonicalSeed: branchModuleSeed },
+);
+assert.deepEqual(branchModuleLodResult.lods.map((lod) => lod.level), [0, 2, 3],
+  "branch-module LOD stage must select real emitted runtime tiers");
+
+const branchModuleRewired = applyProcPlantGeneratorGraphOperations(branchModuleEdited, [
+  { op: "remove-dependency", nodeId: branchModuleFoliage.id, dependencyId: branchModuleBranching.id },
+]);
+assert.throws(
+  () => compileProcPlantProductionDag(branchModuleGenome, branchModuleRewired, environment, { canonicalSeed: branchModuleSeed }),
+  /dependsOn cannot be rewired/,
+);
+const branchModuleUnsupportedSeed = applyProcPlantGeneratorGraphOperations(branchModuleEdited, [
+  { op: "set-seed", nodeId: branchModuleArchitecture.id, value: 8303 },
+]);
+assert.throws(
+  () => compileProcPlantProductionDag(branchModuleGenome, branchModuleUnsupportedSeed, environment, { canonicalSeed: branchModuleSeed }),
+  /no independent stochastic operation/,
+);
+const branchModuleUnsupportedFoliageCount = applyProcPlantGeneratorGraphOperations(branchModuleEdited, [
+  { op: "set-count", nodeId: branchModuleFoliage.id, value: (branchModuleFoliage.count ?? 1) + 1 },
+]);
+assert.throws(
+  () => compileProcPlantProductionDag(branchModuleGenome, branchModuleUnsupportedFoliageCount, environment, { canonicalSeed: branchModuleSeed }),
+  /count cannot be projected/,
+);
+const branchModuleUnsupportedPlacement = applyProcPlantGeneratorGraphOperations(branchModuleEdited, [{
+  op: "set-placement", nodeId: branchModuleFoliage.id, value: { mode: "tips", density: 0.25 },
+}]);
+assert.throws(
+  () => compileProcPlantProductionDag(branchModuleGenome, branchModuleUnsupportedPlacement, environment, { canonicalSeed: branchModuleSeed }),
+  /placement cannot be projected/,
+);
+
 const unsupportedGenome = procPlantPresets.phiFern!;
 const unsupportedGraph = applyProcPlantGeneratorGraphOperations(
   createProcPlantAuthoringGraph(unsupportedGenome, seed),

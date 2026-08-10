@@ -6707,6 +6707,28 @@ interface BranchModuleAnchor {
   nodeIndex: number;
 }
 
+export interface ProcPlantBranchModuleStageSeeds {
+  /** Controls trunk/module growth and bark variation. */
+  structure: number;
+  /** Controls only foliage selection, orientation, scale, and color variation. */
+  foliage: number;
+}
+
+export interface ProcPlantBranchModuleStageOptions {
+  /** Omit foliage while retaining the exact structure and attachment graph. */
+  includeFoliage?: boolean;
+}
+
+export interface ProcPlantBranchModuleStageParts {
+  stems: ProcPlantTemplate;
+  foliage: ProcPlantTemplate;
+  graph: ProcPlantGraph;
+  stats: ProcPlantStats & {
+    stemTriangles: number;
+    foliageTriangles: number;
+  };
+}
+
 const branchModuleDefaults = (genome: ProcPlantGenome) => {
   const palette = genome.branchModules?.palette ?? "decurrent-broadleaf";
   const conifer = palette === "excurrent-conifer";
@@ -6807,14 +6829,18 @@ const addBranchModuleFoliage = (
   return leaves;
 };
 
-const buildBranchModuleGraphTemplate = (
+export const buildBranchModuleProcPlantStageParts = (
   genome: ProcPlantGenome,
-  seed = 1,
+  seeds: ProcPlantBranchModuleStageSeeds,
   env: ProcPlantEnvironment = defaultPlantEnvironment(),
-): { template: ProcPlantTemplate; graph: ProcPlantGraph; stats: ProcPlantStats } => {
+  stageOptions: ProcPlantBranchModuleStageOptions = {},
+): ProcPlantBranchModuleStageParts => {
+  if (!genome.branchModules) throw new Error("branch-module genome options are required");
+  const structureSeed = seeds.structure >>> 0;
+  const foliageSeed = seeds.foliage >>> 0;
   const options = branchModuleDefaults(genome);
-  const rng = rngFromSeed(seed ^ 0x4f1bbcdc);
-  const builder = new TemplateBuilder();
+  const rng = rngFromSeed(structureSeed ^ 0x4f1bbcdc);
+  const stemBuilder = new TemplateBuilder();
   const stems: StemNode[] = [];
   const segments: Array<[number, number]> = [];
   const organs: Organ[] = [];
@@ -6853,7 +6879,7 @@ const buildBranchModuleGraphTemplate = (
       const t = i / trunkSegments;
       const photo = lightVector.clone().multiplyScalar(options.tropism * shade * t * 0.18);
       const crowdNarrowing = new THREE.Vector3(0, crowding * options.collisionBias * t * 0.18, 0);
-      const bend = new THREE.Vector3(Math.cos(seed * 0.013 + trunk) * realism.trunkBend, 0, Math.sin(seed * 0.017 + trunk) * realism.trunkBend)
+      const bend = new THREE.Vector3(Math.cos(structureSeed * 0.013 + trunk) * realism.trunkBend, 0, Math.sin(structureSeed * 0.017 + trunk) * realism.trunkBend)
         .multiplyScalar(t * 0.035);
       const dir = previous.direction.clone().add(photo).add(crowdNarrowing).add(bend).normalize();
       const length = height / trunkSegments * (options.palette === "shrub" ? 0.74 : 1) * (0.92 + rng() * 0.16);
@@ -6982,13 +7008,17 @@ const buildBranchModuleGraphTemplate = (
     const a = stems[ai]!;
     const b = stems[bi]!;
     const bark = barkColor.clone();
-    const delta = (hashUnit(seed + bi * 19) - 0.5) * realism.colorVariance * 0.5;
+    const delta = (hashUnit(structureSeed + bi * 19) - 0.5) * realism.colorVariance * 0.5;
     if (delta > 0) bark.lerp(new THREE.Color(0xffffff), delta);
     else bark.lerp(new THREE.Color(0x050805), -delta);
-    addStemSegment(builder, a, b, bark);
+    addStemSegment(stemBuilder, a, b, bark);
   }
-  const leaves = addBranchModuleFoliage(builder, genome, seed, env, anchors);
-  const template = builder.build();
+  const stemsTemplate = stemBuilder.build();
+  const foliageBuilder = new TemplateBuilder();
+  const leaves = stageOptions.includeFoliage === false
+    ? 0
+    : addBranchModuleFoliage(foliageBuilder, genome, foliageSeed, env, anchors);
+  const foliageTemplate = foliageBuilder.build();
   const graph = buildProcPlantGraphIr(stems, segments, organs);
   const segmentByEndNode = new Map(graph.segmentRecords.map((segment) => [segment.endNodeIndex, segment]));
   graph.attachments = anchors.map((anchor, index): ProcPlantAttachmentAnchor => {
@@ -7013,14 +7043,38 @@ const buildBranchModuleGraphTemplate = (
     };
   });
   return {
-    template,
+    stems: stemsTemplate,
+    foliage: foliageTemplate,
     graph,
     stats: {
       stems: segments.length,
       leaves,
       flowers: 0,
-      triangles: template.idx.length / 3,
+      triangles: (stemsTemplate.idx.length + foliageTemplate.idx.length) / 3,
+      stemTriangles: stemsTemplate.idx.length / 3,
+      foliageTriangles: foliageTemplate.idx.length / 3,
     },
+  };
+};
+
+export const materializeBranchModuleProcPlantParts = (
+  parts: ProcPlantBranchModuleStageParts,
+): ProcPlantTemplate => combineTemplates(parts.stems, parts.foliage);
+
+const buildBranchModuleGraphTemplate = (
+  genome: ProcPlantGenome,
+  seed = 1,
+  env: ProcPlantEnvironment = defaultPlantEnvironment(),
+): { template: ProcPlantTemplate; graph: ProcPlantGraph; stats: ProcPlantStats } => {
+  const parts = buildBranchModuleProcPlantStageParts(
+    genome,
+    { structure: seed, foliage: seed },
+    env,
+  );
+  return {
+    template: materializeBranchModuleProcPlantParts(parts),
+    graph: parts.graph,
+    stats: parts.stats,
   };
 };
 
