@@ -11,6 +11,7 @@ export * from "./procplant-attachment-materializer";
 export * from "./procplant-authoring-graph";
 export * from "./procplant-debug";
 export * from "./procplant-dense-impostor-pool";
+export * from "./procplant-damage-topology";
 export * from "./procplant-export";
 export * from "./procplant-foliage-relaxation";
 export * from "./procplant-generator-graph";
