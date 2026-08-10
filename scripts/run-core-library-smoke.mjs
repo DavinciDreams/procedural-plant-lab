@@ -8,6 +8,7 @@ const projectRoot = resolve(import.meta.dirname, "..");
 const outputRoot = join(projectRoot, "dist-lib");
 const corePath = join(outputRoot, "core.js");
 const fullPath = join(outputRoot, "procplants.js");
+const webgpuPath = join(outputRoot, "webgpu.js");
 
 const staticImportPattern = /(?:\bfrom\s*|\bimport\s*)["'](\.\.?\/[^"']+)["']/g;
 const transitiveFiles = async (entryPath) => {
@@ -44,6 +45,7 @@ const footprint = async (entryPath) => {
 
 const core = await import(`${pathToFileURL(corePath).href}?smoke=${Date.now()}`);
 const full = await import(`${pathToFileURL(fullPath).href}?smoke=${Date.now()}`);
+const webgpu = await import(`${pathToFileURL(webgpuPath).href}?smoke=${Date.now()}`);
 for (const symbol of [
   "PROCPLANT_GENERATOR_CONTRACT_REVISION",
   "PROCPLANT_SUPPORTED_INSTANCE_KINDS",
@@ -77,6 +79,12 @@ for (const symbol of Object.keys(core)) {
 assert.equal(typeof full.runProcPlantCli, "function");
 assert.equal(typeof full.exportProcPlantGlb, "function");
 assert.equal(typeof full.createProcPlantCutout, "function");
+assert.equal(typeof webgpu.createProcPlantWebGpuVisibilityPlan, "function");
+assert.equal(typeof webgpu.createProcPlantWebGpuVisibilityRuntime, "function");
+assert.equal("createProcPlantWebGpuVisibilityRuntime" in core, false,
+  "the injected-device runtime must remain outside the core/Tellus entry");
+assert.equal("createProcPlantWebGpuVisibilityRuntime" in full, false,
+  "the injected-device runtime must remain outside the default full entry");
 assert.equal(core.TELLUS_PROCPLANT_PACKAGE_CONTRACT, "tellus.procplants.package.v1");
 assert.equal(core.PROCPLANT_GENERATOR_CONTRACT_REVISION, 3);
 assert.equal(new Set(core.PROCPLANT_SUPPORTED_INSTANCE_KINDS).size, core.PROCPLANT_SUPPORTED_INSTANCE_KINDS.length);
@@ -98,6 +106,7 @@ assert.deepEqual(tellusPackage.catalog, []);
 
 const coreFootprint = await footprint(corePath);
 const fullFootprint = await footprint(fullPath);
+const webgpuFootprint = await footprint(webgpuPath);
 assert.ok(coreFootprint.rawBytes < fullFootprint.rawBytes, "core transitive footprint must be smaller than the full entry");
 assert.ok(coreFootprint.rawBytes / fullFootprint.rawBytes < 0.65, "core must retain a material raw-size advantage");
 assert.ok(coreFootprint.gzipBytes / fullFootprint.gzipBytes < 0.65, "core must retain a material gzip-size advantage");
@@ -108,5 +117,6 @@ console.log(JSON.stringify({
   message: "procplants core library smoke passed",
   core: coreFootprint,
   full: fullFootprint,
+  webgpu: webgpuFootprint,
   entry: basename(corePath),
 }));

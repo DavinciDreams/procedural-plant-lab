@@ -63,7 +63,7 @@ Good starting experiments:
 - Browser-native alpha cutout tracing, deterministic multi-island/hole triangulation, direct point editing and freehand island/hole creation, atlas packing, edge-dilated mip padding, UV/pivot/attachment/bend metadata, and mesh helpers.
 - Low-poly fruit, berry, cone, thorn, and aerial-root organs with branch-relative placement.
 - A reusable instanced placement LOD pool with hysteresis, culling, explicit allocation-free updates, and migration statistics.
-- Renderer-independent visibility clusters provide conservative storage-buffer-ready instance/cluster bounds, WebGL/WebGPU frustum planes, and allocation-stable CPU reference culling/LOD compaction for dense downstream renderers. A bounded WebGPU plan adds deterministic buffer layouts, WGSL reset/classify/finalize kernels, indirect draw commands, device-limit checks, and CPU parity without claiming live device adoption.
+- Renderer-independent visibility clusters provide conservative storage-buffer-ready instance/cluster bounds, WebGL/WebGPU frustum planes, and allocation-stable CPU reference culling/LOD compaction for dense downstream renderers. A bounded WebGPU plan and opt-in injected-device runtime add deterministic buffer layouts, WGSL reset/classify/finalize kernels, owned/reused GPU buffers, indirect draw commands, device-limit checks, readback parity diagnostics, loss/abort handling, and idempotent disposal. The WebGL lab remains the default and no downstream indirect renderer or device FPS claim is implied.
 - Dense Weber-Penn tree placements migrate between real compiled LOD tiers after their worker compile completes.
 - Canonical graph-backed woody cohorts also migrate asynchronously while companion plants and local-light variants stay intact.
 - Eleven canonical fern/ground-cover cohorts migrate through the same allocation-free placement pool; density-1 Phi Fern and Clover measurements reduced live biome triangles by 73.5% and 59.4% respectively after the atomic worker swap.
@@ -215,6 +215,9 @@ npm run test:tellus-contract
 - `src/procplant-visibility-clusters.ts` builds GPU-ready visibility clusters and allocation-stable CPU reference selections.
 - `src/procplant-three-visibility-lod-adapter.ts` applies those clusters to live Three.js camera frusta and placement LOD pools without steady-state allocation.
 - `src/procplant-webgpu-visibility.ts` plans bounded visibility buffers, WGSL compute passes, LOD compaction, and indirect draw commands with a CPU reference oracle.
+- `src/procplant-webgpu-visibility-runtime.ts` executes that plan on an injected WebGPU device while owning/reusing buffers and exposing opt-in readback validation.
+
+The injected-device runtime is available from the explicit `procplants/webgpu` package entry. It is excluded from both the default browser startup graph and `procplants/core`; importing the existing plan API from the root/core entries remains supported.
 - `src/procplant-organ-placement-overrides.ts` serializes and applies target-bound branch-relative leaf/flower/fruit placements.
 - `src/procplant-resource-growth.ts` allocates maintenance, reserves, and growth from directional light resources.
 - `src/procplant-crown-light.ts` samples bounded deterministic stem/organ occlusion and adapts it directly to resource growth.

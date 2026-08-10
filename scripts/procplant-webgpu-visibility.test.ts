@@ -9,6 +9,15 @@ import {
   referenceProcPlantWebGpuVisibility,
   updateProcPlantWebGpuVisibilityView,
 } from "../src/procplant-webgpu-visibility";
+import {
+  compareProcPlantWebGpuVisibilityReadback,
+  createProcPlantWebGpuVisibilityRuntime,
+  type ProcPlantGpuBufferLike,
+  type ProcPlantGpuCommandEncoderLike,
+  type ProcPlantGpuComputePassLike,
+  type ProcPlantGpuComputePipelineLike,
+  type ProcPlantGpuDeviceLike,
+} from "../src/procplant-webgpu-visibility-runtime";
 
 const centers = new Float32Array([0, 0, 0, 5, 0, 0, 20, 0, 0]);
 const radii = new Float32Array([0.1, 0.1, 0.1]);
@@ -84,4 +93,201 @@ assert.throws(
   /strictly increase/,
 );
 
-console.log("procplant WebGPU visibility plan tests passed");
+class FakeBuffer implements ProcPlantGpuBufferLike {
+  readonly bytes: Uint8Array;
+  destroyed = 0;
+  mapped = false;
+
+  constructor(readonly size: number, readonly usage: number, readonly label = "") {
+    this.bytes = new Uint8Array(size);
+  }
+
+  destroy() { this.destroyed++; }
+  async mapAsync() { this.mapped = true; }
+  getMappedRange(offset = 0, size = this.size - offset) {
+    assert.equal(this.mapped, true, "readback buffers must be mapped before access");
+    assert.equal(offset, 0);
+    assert.equal(size, this.size);
+    return this.bytes.buffer;
+  }
+  unmap() { this.mapped = false; }
+}
+
+interface FakeCommandBuffer { readonly operations: readonly (() => void)[] }
+
+class FakeComputePass implements ProcPlantGpuComputePassLike {
+  constructor(private readonly calls: string[]) {}
+  setPipeline(pipeline: unknown) { this.calls.push(`pipeline:${String((pipeline as { label?: string }).label)}`); }
+  setBindGroup(index: number, bindGroup: unknown) { this.calls.push(`bind:${index}:${String((bindGroup as { label?: string }).label)}`); }
+  dispatchWorkgroups(x: number, y = 1, z = 1) { this.calls.push(`dispatch:${x},${y},${z}`); }
+  end() { this.calls.push("end"); }
+}
+
+class FakeCommandEncoder implements ProcPlantGpuCommandEncoderLike {
+  readonly operations: (() => void)[] = [];
+  constructor(private readonly calls: string[]) {}
+  beginComputePass() { this.calls.push("begin"); return new FakeComputePass(this.calls); }
+  copyBufferToBuffer(source: ProcPlantGpuBufferLike, sourceOffset: number, destination: ProcPlantGpuBufferLike, destinationOffset: number, size: number) {
+    const sourceBuffer = source as FakeBuffer;
+    const destinationBuffer = destination as FakeBuffer;
+    this.calls.push(`copy:${sourceOffset}:${destinationOffset}:${size}`);
+    this.operations.push(() => destinationBuffer.bytes.set(sourceBuffer.bytes.subarray(sourceOffset, sourceOffset + size), destinationOffset));
+  }
+  finish(): FakeCommandBuffer { this.calls.push("finish"); return { operations: this.operations }; }
+}
+
+class FakePipeline implements ProcPlantGpuComputePipelineLike {
+  constructor(readonly label: string) {}
+  getBindGroupLayout(index: number) { assert.equal(index, 0); return `${this.label}:layout`; }
+}
+
+const fullLimits = {
+  maxBufferSize: 128 * 1024 * 1024,
+  maxStorageBufferBindingSize: 128 * 1024 * 1024,
+  maxUniformBufferBindingSize: 64 * 1024,
+  maxComputeWorkgroupsPerDimension: 65_535,
+  maxComputeWorkgroupSizeX: 256,
+  maxComputeInvocationsPerWorkgroup: 256,
+  maxStorageBuffersPerShaderStage: 8,
+  maxUniformBuffersPerShaderStage: 12,
+  maxBindingsPerBindGroup: 8,
+};
+
+class FakeDevice implements ProcPlantGpuDeviceLike {
+  readonly buffers: FakeBuffer[] = [];
+  readonly calls: string[] = [];
+  readonly features = { has: (feature: string) => feature === "timestamp-query" };
+  readonly queue = {
+    writeBuffer: (buffer: ProcPlantGpuBufferLike, bufferOffset: number, data: ArrayBufferView) => {
+      const target = buffer as FakeBuffer;
+      target.bytes.set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength), bufferOffset);
+      this.calls.push(`write:${target.label}:${data.byteLength}`);
+    },
+    submit: (commandBuffers: readonly unknown[]) => {
+      for (const command of commandBuffers as readonly FakeCommandBuffer[]) {
+        for (const operation of command.operations) operation();
+      }
+      this.calls.push(`submit:${commandBuffers.length}`);
+    },
+  };
+
+  constructor(readonly limits = fullLimits) {}
+  createBuffer(descriptor: { label?: string; size: number; usage: number }) {
+    const buffer = new FakeBuffer(descriptor.size, descriptor.usage, descriptor.label);
+    this.buffers.push(buffer);
+    this.calls.push(`buffer:${descriptor.label}:${descriptor.size}:${descriptor.usage}`);
+    return buffer;
+  }
+  createShaderModule(descriptor: { label?: string; code: string }) {
+    assert.match(descriptor.code, /@compute/);
+    return { label: descriptor.label, code: descriptor.code };
+  }
+  async createComputePipelineAsync(descriptor: { label?: string }) {
+    this.calls.push(`compile:${descriptor.label}`);
+    return new FakePipeline(descriptor.label ?? "pipeline");
+  }
+  createBindGroup(descriptor: { label?: string; entries: readonly unknown[] }) {
+    this.calls.push(`group:${descriptor.label}:${descriptor.entries.length}`);
+    return { label: descriptor.label };
+  }
+  createCommandEncoder() { return new FakeCommandEncoder(this.calls); }
+}
+
+const device = new FakeDevice();
+const inputSnapshot = first.buffers.input.initialData.slice();
+const runtime = await createProcPlantWebGpuVisibilityRuntime(device, first, {
+  label: "visibility test",
+  requiredFeatures: ["timestamp-query"],
+});
+assert.deepEqual(first.buffers.input.initialData, inputSnapshot, "runtime creation must not mutate plan inputs");
+assert.equal(device.buffers.length, 7, "runtime should own exactly the seven planned buffers before readback");
+assert.equal(runtime.diagnostics.state, "ready");
+assert.equal(runtime.diagnostics.allocatedBytes, first.totalBytes);
+assert.equal((runtime.buffers.indirect as FakeBuffer).usage & 0x100, 0x100, "indirect result must have INDIRECT usage");
+assert.equal((runtime.buffers.output as FakeBuffer).usage & 0x4, 0x4, "output must support readback copies");
+
+runtime.dispatch(view, [1, 1, 1]);
+assert.equal(runtime.diagnostics.dispatchCount, 1);
+assert.equal(device.buffers.length, 7, "steady-state dispatch must not allocate GPU buffers");
+assert.equal(device.calls.filter((call) => call.startsWith("dispatch:")).length, 3);
+assert.deepEqual(device.calls.filter((call) => call.startsWith("pipeline:")).slice(-3), [
+  "pipeline:visibility test reset pipeline",
+  "pipeline:visibility test classify pipeline",
+  "pipeline:visibility test finalize pipeline",
+]);
+const writesBeforeInvalidDispatch = device.calls.filter((call) => call.startsWith("write:")).length;
+assert.throws(() => runtime.dispatch(view, [1, Number.NaN, 1]), /must be finite/);
+assert.equal(device.calls.filter((call) => call.startsWith("write:")).length, writesBeforeInvalidDispatch,
+  "invalid dispatch input must fail before mutating GPU buffers");
+
+const outputWords = new Uint32Array(first.buffers.output.byteLength / 4);
+outputWords.set(reference.visibilityFlags, first.offsets.output.visibilityFlags);
+new Int32Array(outputWords.buffer, first.offsets.output.instanceLods * 4, first.instanceCount).set(reference.instanceLods);
+outputWords.set(reference.lodInstanceIndices, first.offsets.output.lodInstanceIndices);
+device.queue.writeBuffer(runtime.buffers.output, 0, outputWords);
+device.queue.writeBuffer(runtime.buffers.lodCounts, 0, reference.lodCounts);
+device.queue.writeBuffer(runtime.buffers.indirect, 0, reference.indirectCommands);
+const gpuResult = await runtime.readback();
+assert.deepEqual(compareProcPlantWebGpuVisibilityReadback(gpuResult, reference), { matches: true, mismatchCount: 0 });
+const mismatched = { ...gpuResult, visibilityFlags: gpuResult.visibilityFlags.slice() };
+mismatched.visibilityFlags[0] = 0;
+assert.equal(compareProcPlantWebGpuVisibilityReadback(mismatched, reference).matches, false);
+assert.equal(runtime.diagnostics.readbackCount, 1);
+assert.equal(device.buffers.length, 8, "readback should lazily allocate one reusable staging buffer");
+
+const bufferCountBeforeReuse = device.buffers.length;
+runtime.setPlan(first);
+assert.equal(device.buffers.length, bufferCountBeforeReuse, "same-sized plan rebuild must reuse owned GPU buffers");
+assert.equal(runtime.diagnostics.bufferRebuildCount, 0);
+
+const growthCenters = new Float32Array(96 * 3);
+for (let index = 0; index < 96; index++) growthCenters[index * 3] = index * 0.5;
+const growthClusters = buildProcPlantVisibilityClusters(
+  { centers: growthCenters, radii: new Float32Array(96).fill(0.1) },
+  { cellSize: 4, maxInstancesPerCluster: 8 },
+);
+const growthPlan = createProcPlantWebGpuVisibilityPlan(growthClusters, lodDistances, draws);
+const oldOutput = runtime.buffers.output as FakeBuffer;
+runtime.setPlan(growthPlan);
+assert.ok(device.buffers.length > bufferCountBeforeReuse, "larger plans must allocate replacement capacity");
+assert.equal(oldOutput.destroyed, 1, "replaced buffers must be destroyed exactly once");
+assert.equal(runtime.diagnostics.bufferRebuildCount, 1);
+runtime.dispose();
+runtime.dispose();
+assert.equal(runtime.diagnostics.state, "disposed");
+assert.equal((runtime.buffers.output as FakeBuffer).destroyed, 1, "dispose must be idempotent");
+assert.throws(() => runtime.dispatch(view), /disposed/);
+
+await assert.rejects(
+  createProcPlantWebGpuVisibilityRuntime(new FakeDevice({ ...fullLimits, maxStorageBuffersPerShaderStage: 3 }), first),
+  /cannot support/,
+);
+await assert.rejects(
+  createProcPlantWebGpuVisibilityRuntime(new FakeDevice(), first, { requiredFeatures: ["shader-f16"] }),
+  /missing required feature/,
+);
+await assert.rejects(
+  createProcPlantWebGpuVisibilityRuntime(new FakeDevice(), first, { maxAllocatedBytes: first.totalBytes - 4 }),
+  /exceeds maxAllocatedBytes/,
+);
+
+const controller = new AbortController();
+const abortDevice = new FakeDevice();
+const abortRuntime = await createProcPlantWebGpuVisibilityRuntime(abortDevice, first, { signal: controller.signal });
+controller.abort();
+assert.equal(abortRuntime.diagnostics.state, "disposed");
+assert.throws(() => abortRuntime.dispatch(view), /disposed/);
+
+let resolveLost!: (info: { reason?: string; message?: string }) => void;
+const lost = new Promise<{ reason?: string; message?: string }>((resolve) => { resolveLost = resolve; });
+const lostDevice = new FakeDevice() as FakeDevice & { lost: Promise<{ reason?: string; message?: string }> };
+lostDevice.lost = lost;
+const lostRuntime = await createProcPlantWebGpuVisibilityRuntime(lostDevice, first);
+resolveLost({ reason: "destroyed", message: "test loss" });
+await Promise.resolve();
+assert.equal(lostRuntime.diagnostics.state, "lost");
+assert.match(lostRuntime.diagnostics.lostReason ?? "", /test loss/);
+assert.throws(() => lostRuntime.dispatch(view), /device is lost/);
+lostRuntime.dispose();
+
+console.log("procplant WebGPU visibility plan and injected runtime tests passed");

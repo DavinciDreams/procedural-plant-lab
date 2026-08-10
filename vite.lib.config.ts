@@ -9,6 +9,7 @@ export default defineConfig({
       entry: {
         procplants: resolve(import.meta.dirname, "src/index.ts"),
         core: resolve(import.meta.dirname, "src/core.ts"),
+        webgpu: resolve(import.meta.dirname, "src/webgpu.ts"),
       },
       formats: ["es"],
       fileName: (_format, entryName) => `${entryName}.js`,
