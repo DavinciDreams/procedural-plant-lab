@@ -18,6 +18,7 @@ export * from "./procplant-damage-topology";
 export * from "./procplant-export";
 export * from "./procplant-foliage-relaxation";
 export * from "./procplant-five-tier-lod";
+export * from "./procplant-five-tier-atlas-build";
 export * from "./procplant-generator-graph";
 export * from "./procplant-graph-resource-growth";
 export * from "./procplant-growth-simulation";

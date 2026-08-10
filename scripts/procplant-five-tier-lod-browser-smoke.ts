@@ -1,14 +1,17 @@
 import * as THREE from "three";
 import {
-  bindProcPlantFiveTierAtlas,
-  compileProcPlantFiveTierLods,
+  captureProcPlantFiveTierAtlasAsset,
+  compileProcPlantFiveTierLodsFromAtlasAsset,
+  createProcPlantFiveTierAtlasBuildManifest,
+  parseProcPlantFiveTierAtlasAsset,
+  serializeProcPlantFiveTierAtlasAsset,
+} from "../src/procplant-five-tier-atlas-build";
+import {
   exportProcPlantFiveTierLodGlb,
   selectProcPlantFiveTierLod,
 } from "../src/procplant-five-tier-lod";
 import {
-  buildProcPlantImpostorAtlas,
   createProcPlantImpostorAtlasTexture,
-  createProcPlantImpostorCapturePlan,
 } from "../src/procplant-impostor";
 import { createProcPlantThreeGeometry } from "../src/procplant-three-geometry";
 import { defaultPlantEnvironment, procPlantPresets } from "../src/procplants";
@@ -24,31 +27,27 @@ try {
   const genome = procPlantPresets.phiFern!;
   const seed = 612072;
   const environment = defaultPlantEnvironment();
-  const plan = createProcPlantImpostorCapturePlan({
-    min: { x: -0.7, y: 0, z: -0.7 },
-    max: { x: 0.7, y: 1.8, z: 0.7 },
-  }, { width: 32, height: 32, azimuthCount: 8, elevations: [0, Math.PI / 6] });
-  const atlas = await buildProcPlantImpostorAtlas(plan, async ({ view, width, height }) => {
-    const rgba = new Uint8ClampedArray(width * height * 4);
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const offset = (y * width + x) * 4;
-        const nx = (x + 0.5) / width * 2 - 1;
-        const ny = (y + 0.5) / height * 2 - 1;
-        const leaf = Math.abs(nx) * 0.65 + Math.abs(ny + 0.05) < 0.75;
-        rgba.set([
-          35 + view.azimuthIndex * 9,
-          150 + view.elevationIndex * 34,
-          58 + ((x ^ y) & 3) * 12,
-          leaf ? 255 : 0,
-        ], offset);
-      }
-    }
-    return { id: view.id, width, height, rgba };
-  }, { padding: 2, powerOfTwo: true, maxSize: 512 });
-  const compiled = compileProcPlantFiveTierLods(genome, seed, environment, {
-    bakedAtlas: bindProcPlantFiveTierAtlas(atlas, genome, seed, environment),
+  const canvas = document.querySelector<HTMLCanvasElement>("#gpu")!;
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, preserveDrawingBuffer: true });
+  renderer.setSize(canvas.width, canvas.height, false);
+  renderer.setPixelRatio(1);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.setClearColor(0x102018, 1);
+  const manifest = createProcPlantFiveTierAtlasBuildManifest(genome, seed, environment, {
+    width: 32,
+    height: 32,
+    azimuthCount: 8,
+    elevations: [0, Math.PI / 6],
+    padding: 2,
+    samples: 0,
+    maxAtlasSize: 512,
+    maxAtlasBytes: 1024 * 1024,
   });
+  const captured = await captureProcPlantFiveTierAtlasAsset(renderer, manifest, genome, environment);
+  const serialized = serializeProcPlantFiveTierAtlasAsset(captured);
+  const restored = parseProcPlantFiveTierAtlasAsset(serialized);
+  const atlas = restored.atlas;
+  const compiled = compileProcPlantFiveTierLodsFromAtlasAsset(genome, restored, environment);
   const glb = await exportProcPlantFiveTierLodGlb(compiled, { name: "phi-fern-lod5-browser" });
   const { GLTFLoader } = await import("three/addons/loaders/GLTFLoader.js");
   const imported = await new GLTFLoader().parseAsync(glb, "");
@@ -57,12 +56,6 @@ try {
     0,
   );
   const defaultSceneMeshes = imported.scene.children.filter((child) => child instanceof THREE.Mesh).length;
-  const canvas = document.querySelector<HTMLCanvasElement>("#gpu")!;
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, preserveDrawingBuffer: true });
-  renderer.setSize(canvas.width, canvas.height, false);
-  renderer.setPixelRatio(1);
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.setClearColor(0x102018, 1);
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(38, canvas.width / canvas.height, 0.1, 20);
   camera.position.set(0, 0.9, 4.5);
@@ -110,6 +103,13 @@ try {
     pixelHash: `fnv1a32-${hash.toString(16).padStart(8, "0")}`,
     drawCalls: renderer.info.render.calls,
     atlas: { width: atlas.width, height: atlas.height, views: atlas.entries.length, coverage: compiled.impostor.viewCoverage },
+    asset: {
+      cacheKey: restored.cacheKey,
+      contentHash: restored.atlas.contentHash,
+      documentBytes: new TextEncoder().encode(serialized).byteLength,
+      captureApi: restored.capture.api,
+      packageCacheKey: compiled.atlasAsset?.cacheKey,
+    },
     lods: compiled.lods.map(({ level, triangles, vertices, representation }) => ({ level, triangles, vertices, representation })),
     selectedLevel: selection.level,
     export: { bytes: glb.byteLength, loadedMeshes, defaultSceneMeshes },

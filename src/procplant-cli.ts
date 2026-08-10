@@ -13,6 +13,12 @@ import {
 } from "./plant-readiness";
 import { exportProcPlantGlb } from "./procplant-export";
 import { validateProcPlantGlb } from "./procplant-glb-validation";
+import {
+  compileProcPlantFiveTierLodsFromAtlasAsset,
+  createProcPlantFiveTierAtlasBuildManifest,
+  parseProcPlantFiveTierAtlasAsset,
+} from "./procplant-five-tier-atlas-build";
+import { exportProcPlantFiveTierLodGlb } from "./procplant-five-tier-lod";
 import { exportProcPlantUsda } from "./procplant-usd-export";
 import {
   exportProcPlantVariantGlbBundle,
@@ -120,6 +126,8 @@ export const PROCPLANT_CLI_USAGE = `Usage:
   procplants usda <genome.json> --profile <tellus-realtime|web-preview|hero-asset> --seed <uint32> --out <file.usda> [--lod <0|1|2|3|all>] [--collision <none|bounds-box|trunk-capsule>]
   procplants validate <genome.json|asset.glb|pattern> [...]
   procplants atlas <manifest.json|png-directory> --out <metadata.json> [--size <pixels>]
+  procplants lod5-atlas-plan <genome.json> --seed <uint32> --out <manifest.json> [--width <16-2048>] [--height <16-2048>] [--azimuths <1-64>] [--elevations <radians,...>] [--padding <0-64>] [--samples <0-16>] [--max-atlas-size <16-8192>] [--max-atlas-bytes <bytes>]
+  procplants lod5-glb <genome.json> --seed <uint32> --atlas <captured-asset.json> --out <file.glb>
 `;
 
 class ProcPlantCliInputError extends Error {}
@@ -376,6 +384,77 @@ const glbCommand = async (args: readonly string[], io: ProcPlantCliIo) => {
   io.stdout(
     `compiled ${genome.id} GLB (${lodSelection === "all" ? "all LODs" : `LOD ${lodSelection}`}, ${bytes.byteLength} bytes) -> ${outputPath}\n`,
   );
+};
+
+const optionalIntegerFlag = (
+  flags: Map<string, string>,
+  name: string,
+  min: number,
+  max: number,
+) => {
+  const raw = flags.get(name);
+  if (raw === undefined) return undefined;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < min || value > max) {
+    throw new ProcPlantCliInputError(`${name} must be an integer in [${min}, ${max}]`);
+  }
+  return value;
+};
+
+const lod5AtlasPlanCommand = async (args: readonly string[], io: ProcPlantCliIo) => {
+  const genomePath = args[0];
+  if (!genomePath || genomePath.startsWith("--")) throw new ProcPlantCliInputError("lod5-atlas-plan requires <genome.json>");
+  const flags = parseFlags(args.slice(1));
+  requireOnlyFlags(flags, [
+    "--seed", "--out", "--width", "--height", "--azimuths", "--elevations",
+    "--padding", "--samples", "--max-atlas-size", "--max-atlas-bytes",
+  ], ["--seed", "--out"]);
+  const outputPath = assertString(flags.get("--out"), "--out");
+  if (!outputPath.toLowerCase().endsWith(".json")) throw new ProcPlantCliInputError("--out must end in .json");
+  const elevationsRaw = flags.get("--elevations");
+  const elevations = elevationsRaw === undefined ? undefined : elevationsRaw.split(",").map((part, index) => {
+    const value = Number(part.trim());
+    if (!Number.isFinite(value)) throw new ProcPlantCliInputError(`--elevations[${index}] must be finite radians`);
+    return value;
+  });
+  if (elevations?.length === 0) throw new ProcPlantCliInputError("--elevations must not be empty");
+  const genome = await readGenome(genomePath, io);
+  const manifest = createProcPlantFiveTierAtlasBuildManifest(
+    genome,
+    parseSeed(flags.get("--seed")!),
+    defaultPlantEnvironment(),
+    {
+      width: optionalIntegerFlag(flags, "--width", 16, 2048),
+      height: optionalIntegerFlag(flags, "--height", 16, 2048),
+      azimuthCount: optionalIntegerFlag(flags, "--azimuths", 1, 64),
+      elevations,
+      padding: optionalIntegerFlag(flags, "--padding", 0, 64),
+      samples: optionalIntegerFlag(flags, "--samples", 0, 16),
+      maxAtlasSize: optionalIntegerFlag(flags, "--max-atlas-size", 16, 8192),
+      maxAtlasBytes: optionalIntegerFlag(flags, "--max-atlas-bytes", 1, 256 * 1024 * 1024),
+    },
+  );
+  await io.writeText(outputPath, serialize(manifest));
+  io.stdout(`planned ${genome.id} five-tier WebGL atlas (${manifest.capture.plan.views.length} views, ${manifest.atlas.expectedWidth}x${manifest.atlas.expectedHeight}, cache ${manifest.cacheKey}) -> ${outputPath}\n`);
+};
+
+const lod5GlbCommand = async (args: readonly string[], io: ProcPlantCliIo) => {
+  const genomePath = args[0];
+  if (!genomePath || genomePath.startsWith("--")) throw new ProcPlantCliInputError("lod5-glb requires <genome.json>");
+  const flags = parseFlags(args.slice(1));
+  requireOnlyFlags(flags, ["--seed", "--atlas", "--out"], ["--seed", "--atlas", "--out"]);
+  const outputPath = assertString(flags.get("--out"), "--out");
+  if (!outputPath.toLowerCase().endsWith(".glb")) throw new ProcPlantCliInputError("--out must end in .glb");
+  if (!io.writeBinary) throw new Error("lod5-glb is unavailable because this CLI adapter does not support binary writes");
+  const genome = await readGenome(genomePath, io);
+  const seed = parseSeed(flags.get("--seed")!);
+  const atlasPath = assertString(flags.get("--atlas"), "--atlas");
+  const asset = parseProcPlantFiveTierAtlasAsset(await io.readText(atlasPath));
+  if (asset.build.source.seed !== seed) throw new ProcPlantCliInputError("--seed does not match captured atlas asset seed");
+  const compiled = compileProcPlantFiveTierLodsFromAtlasAsset(genome, asset, defaultPlantEnvironment());
+  const glb = await exportProcPlantFiveTierLodGlb(compiled, { name: genome.id });
+  await io.writeBinary(outputPath, new Uint8Array(glb));
+  io.stdout(`compiled ${genome.id} five-tier GLB (atlas ${asset.atlas.contentHash}, ${glb.byteLength} bytes) -> ${outputPath}\n`);
 };
 
 const usdaCommand = async (args: readonly string[], io: ProcPlantCliIo) => {
@@ -915,6 +994,8 @@ export const runProcPlantCli = async (argv: readonly string[], io: ProcPlantCliI
     else if (command === "usda") await usdaCommand(argv.slice(1), io);
     else if (command === "validate") await validateCommand(argv.slice(1), io);
     else if (command === "atlas") await atlasCommand(argv.slice(1), io);
+    else if (command === "lod5-atlas-plan") await lod5AtlasPlanCommand(argv.slice(1), io);
+    else if (command === "lod5-glb") await lod5GlbCommand(argv.slice(1), io);
     else throw new ProcPlantCliInputError(`unknown command: ${command}`);
     return PROCPLANT_CLI_EXIT.success;
   } catch (error) {

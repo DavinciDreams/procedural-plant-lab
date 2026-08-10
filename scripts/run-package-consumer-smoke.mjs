@@ -92,6 +92,7 @@ import {
 } from "procplants/core";
 import {
   buildProcPlantGraph as buildProcPlantGraphFromFullEntry,
+  createProcPlantFiveTierAtlasBuildManifest,
   fitProcPlantCrownMask,
   fitProcPlantCrownVoxelMask,
   buildProcPlantTemplateWithCrownLightPruning,
@@ -132,6 +133,13 @@ if (!staticSnap.changed) throw new Error("static vine support export drift");
 vineGuide = staticSnap.authored;
 vineGuide = appendProcPlantVineGuidePoint(vineGuide, [0.2, 1, 0]);
 const authoredVine = applyProcPlantVineGuidePackage(vineGenome, 612072, vineGuide);
+const lod5AtlasPlan = createProcPlantFiveTierAtlasBuildManifest(genome, 612072, defaultPlantEnvironment(), {
+  width: 16,
+  height: 16,
+  azimuthCount: 4,
+  elevations: [0],
+  maxAtlasSize: 256,
+});
 
 if (PROCPLANT_GENERATOR_CONTRACT_REVISION !== 3) throw new Error("unexpected contract revision");
 if (PROCPLANT_SUPPORTED_INSTANCE_KINDS.length !== 20) throw new Error("unexpected kind registry");
@@ -143,6 +151,7 @@ if (optInBuild.crownLightPruning.status !== "disabled") throw new Error("full-en
 if (decalExportSupport !== "metadata-only") throw new Error("placement decal renderer type export drift");
 if (PROCPLANT_PLACEMENT_DECAL_GLB_CONTRACT !== "procplants.placement-decal-glb") throw new Error("placement decal GLB export drift");
 if (authoredVine.status !== "applied" || authoredVine.genome.vine?.guide?.length !== 2) throw new Error("vine guide authoring export drift");
+if (!lod5AtlasPlan.cacheKey.startsWith("procplants-lod5-atlas-v1-")) throw new Error("five-tier atlas build export drift");
 console.log(JSON.stringify({ revision: PROCPLANT_GENERATOR_CONTRACT_REVISION, kind, triangles: prototype.idx.length / 3 }));
 `);
   await writeFile(join(consumerRoot, "src", "runtime.mjs"), `

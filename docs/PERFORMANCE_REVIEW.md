@@ -47,7 +47,7 @@ This report separates deterministic geometry/build evidence from live standalone
 | Meshopt encoder | 20.60 kB | 8.24 kB | Lazy and opt-in during compressed GLB export |
 | EZ-tree vendor backend | 3,998.39 kB | 2,986.72 kB | Separate optional worker/backend chunk |
 
-The complete reusable ESM entry is 1,245,766 bytes raw / 314,152 bytes gzip transitively and includes the public grouped-surface, tangent-ready Three geometry, live baked-material, grouped GLB binding, renderer-owned placement decals, evidence-bound decal PNG/GLB adoption, damage/growth/topology, crown-light pruning, mesh/BVH, validated graph authoring, specialized typed DAG adapters, static vine-guide/support authoring, constructive-crown tools, clustered visibility, and WebGPU planning. The `procplants/core` runtime/Tellus entry remains exactly 551,301 bytes raw / 129,224 bytes gzip, 55.7% less raw and 58.9% less gzip than the full entry, and excludes the full-entry decal, vine-support, voxel-viewport, GLTFExporter, meshopt, material-authoring, KTX2 decoder, and injected-device WebGPU paths. The explicit `procplants/webgpu` entry remains 48,174 raw / 13,256 gzip and is not used by the WebGL lab or Tellus. The final dry-run package is 580,156 bytes packed / 2,337,408 bytes unpacked across 235 entries.
+The complete reusable ESM entry is 1,269,194 bytes raw / 319,859 bytes gzip transitively and includes the public grouped-surface, tangent-ready Three geometry, live baked-material, grouped GLB binding, renderer-owned placement decals, evidence-bound decal PNG/GLB adoption, damage/growth/topology, crown-light pruning, mesh/BVH, validated graph authoring, specialized typed DAG adapters, static vine-guide/support authoring, constructive-crown tools, versioned five-tier WebGL atlas assets, clustered visibility, and WebGPU planning. The `procplants/core` runtime/Tellus entry remains exactly 551,301 bytes raw / 129,224 bytes gzip, 56.6% less raw and 59.6% less gzip than the full entry, and excludes the full-entry atlas/decal, vine-support, voxel-viewport, GLTFExporter, meshopt, material-authoring, KTX2 decoder, and injected-device WebGPU paths. The explicit `procplants/webgpu` entry remains 48,174 raw / 13,256 gzip and is not used by the WebGL lab or Tellus. The final dry-run package is 588,960 bytes packed / 2,379,172 bytes unpacked across 239 entries.
 
 The explicit bootstrap keeps the parser-discovered JavaScript entry at 0.95 kB raw / 0.53 kB gzip. It then fetches the 168.33/50.25 kB lab and 854.99/224.98 kB shared generator dependency; the complete parser-discovered interactive closure is 1,034,491 raw / 278,102 gzip. The decal pixel/GLB adoption path, renderer-owned decal adapter, static vine support/BVH adapter, vine-guide package, crown-mask and voxel-mask viewports, tangent/PBR adapters, manual-spine editor, force editor, and graph editor remain lazy. The KTX2 adapter, loader, and Basis assets form a nested lazy path behind hero GLB import and are absent from the interactive closure until the selected source material requires them. Browser resource-timing assertions prove these specialized implementation chunks are absent before their first interaction. This improves first paint and initial parse work; it does not claim lower total bytes before the first plant is interactive.
 
@@ -70,12 +70,18 @@ The new broad-area ground covers use cards/low-poly organs and are covered by re
 
 The opt-in version-2 five-tier stack keeps those exact Phi Fern LOD0-2 bytes,
 then distinguishes a four-triangle/eight-vertex baked-atlas crossed tree
-impostor at LOD3 from a two-triangle/four-vertex baked billboard at LOD4. Its
-16-view hemisphere WebGL smoke rendered both far tiers in two single-pass draw
-calls and changed 8,957 framebuffer pixels. The deterministic 8-view headless
-fixture embeds a 64x64 PNG in a 133,772-byte five-tier GLB. These are bounded
-cost and render-path results; atlas memory scales with bake dimensions/views,
-and no Tellus adoption or representative-device FPS is claimed.
+impostor at LOD3 from a two-triangle/four-vertex baked billboard at LOD4. The
+automatic asset smoke planned and captured 16 real LOD0 views into a 256x128
+RGBA atlas with a caller-owned Chrome WebGL 2 renderer, serialized a 190,039-byte
+portable asset, re-hashed/reloaded it, rendered both far tiers in two
+single-pass draws with 2,619 changed pixels, and re-imported a 251,416-byte
+five-scene GLB. The deterministic 8-view injected-raster fixture uses a 16 KiB
+atlas, a bounded JSON asset document, and a standards-valid five-scene GLB. The full library
+closure is 1,269,194 raw / 319,859 gzip bytes, while startup stays 11,169 /
+3,931 and the interactive closure stays 1,034,491 / 278,102. These are bounded
+cost and WebGL correctness results; atlas memory scales with bake
+dimensions/views, and no Tellus adoption or representative-device FPS is
+claimed.
 
 Required UV0 adds exactly 8 bytes per vertex to in-memory templates and worker transfers. This is a deliberate geometry-memory tradeoff: every real LOD now has deterministic finite texture coordinates, swept bark retains tiling beyond one, and GLB export no longer has to invent coordinates before binding PBR maps.
 

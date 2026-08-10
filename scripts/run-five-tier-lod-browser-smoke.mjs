@@ -99,6 +99,11 @@ try {
   assert.ok(smoke.changedPixels > 500);
   assert.equal(smoke.drawCalls, 2);
   assert.equal(smoke.atlas.coverage, "hemisphere");
+  assert.match(smoke.asset.cacheKey, /^procplants-lod5-atlas-v1-[0-9a-f]{8}$/);
+  assert.match(smoke.asset.contentHash, /^fnv1a32-[0-9a-f]{8}$/);
+  assert.equal(smoke.asset.captureApi, "three-webgl-render-target-readback");
+  assert.equal(smoke.asset.packageCacheKey, smoke.asset.cacheKey);
+  assert.ok(smoke.asset.documentBytes > smoke.atlas.width * smoke.atlas.height * 4);
   assert.equal(smoke.selectedLevel, 4);
   assert.equal(smoke.export.loadedMeshes, 5);
   assert.equal(smoke.export.defaultSceneMeshes, 1);
