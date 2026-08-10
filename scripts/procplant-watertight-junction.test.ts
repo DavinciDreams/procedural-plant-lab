@@ -182,6 +182,22 @@ const legacyPair = merge([parentTube, childTube, secondChildTube]);
 const legacyAudit = auditProcPlantMeshTopology(legacyPair, { maxIntersectionTests: 100_000 });
 assert.ok(legacyAudit.boundaryEdges >= 15, "independent tubes must expose open hub rings rather than pass as watertight");
 assert.equal(legacyAudit.closedTwoManifold, false);
+
+// Sharing a single topological vertex does not make two faces neighbours. The
+// second triangle crosses the first again through its interior, so the audit
+// must not exempt the pair merely because both reference vertex zero.
+const sharedVertexCrossing = new THREE.BufferGeometry();
+sharedVertexCrossing.setAttribute("position", new THREE.Float32BufferAttribute([
+  0, 0, 0,
+  2, 0, 0,
+  0, 2, 0,
+  1, 0.5, -1,
+  1, 0.5, 1,
+], 3));
+sharedVertexCrossing.setIndex([0, 1, 2, 0, 3, 4]);
+const sharedVertexAudit = auditProcPlantMeshTopology(sharedVertexCrossing, { maxIntersectionTests: 100 });
+assert.equal(sharedVertexAudit.selfIntersections, 1, "single-vertex face pairs must still be checked for interior crossings");
+assert.deepEqual(sharedVertexAudit.selfIntersectionPairs, [[0, 1]]);
 const legacyTriangles = legacyPair.index!.count / 3;
 assert.ok(first.audit.triangles > legacyTriangles * 100, "implicit research candidate cost must remain explicit rather than displacing cheap collars silently");
 
@@ -205,3 +221,4 @@ parentTube.dispose();
 childTube.dispose();
 secondChildTube.dispose();
 legacyPair.dispose();
+sharedVertexCrossing.dispose();
