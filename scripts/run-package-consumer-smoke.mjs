@@ -95,7 +95,12 @@ import {
   fitProcPlantCrownMask,
   fitProcPlantCrownVoxelMask,
   buildProcPlantTemplateWithCrownLightPruning,
+  appendProcPlantVineGuidePoint,
+  applyProcPlantVineGuidePackage,
+  createProcPlantVineGuidePackage,
+  createProcPlantVineGuideTarget,
   type ProcPlantGraph,
+  type ProcPlantThreePlacementDecalBindingMetadata,
 } from "procplants";
 
 const genome: ProcPlantGenome = procPlantPresets.phiFern!;
@@ -115,6 +120,12 @@ const voxelFit = fitProcPlantCrownVoxelMask({ dimensions: [1, 2, 1], occupancy: 
 const optInBuild = buildProcPlantTemplateWithCrownLightPruning(genome, 612072, defaultPlantEnvironment(), {
   crownLightPruning: { enabled: false },
 });
+const decalExportSupport: ProcPlantThreePlacementDecalBindingMetadata["exportSupport"] = "metadata-only";
+const vineGenome = procPlantPresets.floweringWallCreeper!;
+let vineGuide = createProcPlantVineGuidePackage(createProcPlantVineGuideTarget(vineGenome, 612072));
+vineGuide = appendProcPlantVineGuidePoint(vineGuide, [0, 0, 0]);
+vineGuide = appendProcPlantVineGuidePoint(vineGuide, [0.2, 1, 0]);
+const authoredVine = applyProcPlantVineGuidePackage(vineGenome, 612072, vineGuide);
 
 if (PROCPLANT_GENERATOR_CONTRACT_REVISION !== 3) throw new Error("unexpected contract revision");
 if (PROCPLANT_SUPPORTED_INSTANCE_KINDS.length !== 20) throw new Error("unexpected kind registry");
@@ -123,6 +134,8 @@ if (prototype.uv0.length !== prototype.pos.length / 3 * 2) throw new Error("UV0 
 if (maskFit.crown.volumes.length !== 2) throw new Error("crown-mask fit export drift");
 if (voxelFit.crown.volumes.length !== 2) throw new Error("crown voxel-mask fit export drift");
 if (optInBuild.crownLightPruning.status !== "disabled") throw new Error("full-entry crown-pruning contract drift");
+if (decalExportSupport !== "metadata-only") throw new Error("placement decal renderer type export drift");
+if (authoredVine.status !== "applied" || authoredVine.genome.vine?.guide?.length !== 2) throw new Error("vine guide authoring export drift");
 console.log(JSON.stringify({ revision: PROCPLANT_GENERATOR_CONTRACT_REVISION, kind, triangles: prototype.idx.length / 3 }));
 `);
   await writeFile(join(consumerRoot, "src", "runtime.mjs"), `
