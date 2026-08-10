@@ -57,6 +57,7 @@ const forbiddenStaticEntries = [
   "src/procplant-material-graph-editor-ui.ts",
   "src/procplant-authoring-tools.ts",
   "src/procplant-crown-volume-tool.ts",
+  "src/procplant-crown-mask-fit-ui.ts",
   "src/procplant-impostor-three.ts",
   "src/procplant-lab-authoring-imports.ts",
 ];

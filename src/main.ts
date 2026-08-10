@@ -378,6 +378,7 @@ app.innerHTML = `
           <button id="crownVolumeAdd" type="button" disabled>Add Crown Lobe</button>
           <button id="crownVolumeSubtract" type="button" disabled>Add Cutout Lobe</button>
           <button id="crownVolumeRemove" type="button" disabled>Remove Selected Lobe</button>
+          <button id="fitCrownMask" type="button" aria-expanded="false" aria-controls="crownMaskFitEditor" disabled>Fit Crown Mask</button>
           <small>Axis handles scale the field. Gold points move individual bounded crown lobes.</small>
           <div id="crownLobeControls" class="advanced-grid crown-lobe-controls" hidden>
             <div class="field"><label for="crownLobeWidth"><span>Lobe width</span><span id="crownLobeWidthValue"></span></label><input id="crownLobeWidth" type="range" min="0.05" max="10" value="1" step="0.05" /></div>
@@ -407,6 +408,7 @@ app.innerHTML = `
             <small>Catmull–Rom centerlines define bounded attraction volumes. Pink splines subtract from the positive crown union.</small>
           </div>
         </div>
+        <section id="crownMaskFitEditor" class="graph-preview" aria-live="polite" hidden></section>
       </details>
       <div class="button-row">
         <button id="randomSeed" type="button">Random Seed</button>
@@ -938,6 +940,8 @@ const crownVolumeModeButton = document.querySelector<HTMLButtonElement>("#crownV
 const crownVolumeAddButton = document.querySelector<HTMLButtonElement>("#crownVolumeAdd")!;
 const crownVolumeSubtractButton = document.querySelector<HTMLButtonElement>("#crownVolumeSubtract")!;
 const crownVolumeRemoveButton = document.querySelector<HTMLButtonElement>("#crownVolumeRemove")!;
+const fitCrownMaskButton = document.querySelector<HTMLButtonElement>("#fitCrownMask")!;
+const crownMaskFitEditor = document.querySelector<HTMLElement>("#crownMaskFitEditor")!;
 const crownVolumeActions = document.querySelector<HTMLElement>("#crownVolumeActions")!;
 const crownSplineControls = document.querySelector<HTMLElement>("#crownSplineControls")!;
 const crownSplineAddButton = document.querySelector<HTMLButtonElement>("#crownSplineAdd")!;
@@ -1232,6 +1236,7 @@ type ProcPlantSpatialForceEditorUiModule = typeof import("./procplant-spatial-fo
 type ProcPlantMaterialGraphEditorUiModule = typeof import("./procplant-material-graph-editor-ui");
 type ProcPlantAuthoringToolsModule = typeof import("./procplant-authoring-tools");
 type ProcPlantCrownVolumeToolModule = typeof import("./procplant-crown-volume-tool");
+type ProcPlantCrownMaskFitUiModule = typeof import("./procplant-crown-mask-fit-ui");
 type ProcPlantOrganPlacementModule = typeof import("./procplant-organ-placement-overrides");
 type ProcPlantPlacementDecalThreeModule = typeof import("./procplant-placement-decal-three");
 type ProcPlantGeneratorGraphOperation = import("./procplant-generator-graph").ProcPlantGeneratorGraphOperation;
@@ -1248,6 +1253,9 @@ let procPlantAuthoringToolsModule: ProcPlantAuthoringToolsModule | null = null;
 let procPlantAuthoringToolsPromise: Promise<ProcPlantAuthoringToolsModule> | null = null;
 let procPlantCrownVolumeToolModule: ProcPlantCrownVolumeToolModule | null = null;
 let procPlantCrownVolumeToolPromise: Promise<ProcPlantCrownVolumeToolModule> | null = null;
+let procPlantCrownMaskFitUiModule: ProcPlantCrownMaskFitUiModule | null = null;
+let procPlantCrownMaskFitUiPromise: Promise<ProcPlantCrownMaskFitUiModule> | null = null;
+let crownMaskFitUi: import("./procplant-crown-mask-fit-ui").ProcPlantCrownMaskFitUi | null = null;
 let procPlantOrganPlacementModule: ProcPlantOrganPlacementModule | null = null;
 let procPlantOrganPlacementPromise: Promise<ProcPlantOrganPlacementModule> | null = null;
 let procPlantPlacementDecalThreeModule: ProcPlantPlacementDecalThreeModule | null = null;
@@ -1313,6 +1321,18 @@ const loadProcPlantCrownVolumeTool = () => {
     procPlantCrownVolumeToolPromise = null;
   });
   return procPlantCrownVolumeToolPromise;
+};
+const loadProcPlantCrownMaskFitUi = () => {
+  if (procPlantCrownMaskFitUiModule) return Promise.resolve(procPlantCrownMaskFitUiModule);
+  if (procPlantCrownMaskFitUiPromise) return procPlantCrownMaskFitUiPromise;
+  procPlantCrownMaskFitUiPromise = import("./procplant-crown-mask-fit-ui").then((module) => {
+    procPlantCrownMaskFitUiModule = module;
+    app.dataset.crownMaskFitUiLoaded = "true";
+    return module;
+  }).finally(() => {
+    procPlantCrownMaskFitUiPromise = null;
+  });
+  return procPlantCrownMaskFitUiPromise;
 };
 const loadProcPlantOrganPlacement = () => {
   if (procPlantOrganPlacementModule) return Promise.resolve(procPlantOrganPlacementModule);
@@ -1789,6 +1809,7 @@ const commitCrownSplineField = (field: ProcPlantFreeformCrown | null, message: s
 };
 
 let crownVolumeToolRequest = 0;
+let crownMaskFitUiRequest = 0;
 const syncCrownLobeControls = () => {
   const control = crownVolumeTool?.getSelectedControlVolume() ?? null;
   crownLobeControls.hidden = !control;
@@ -1845,6 +1866,14 @@ const syncCrownVolumeButton = () => {
   }
   crownVolumeActions.hidden = !available;
   crownVolumeModeButton.disabled = regenerationBusy || !available;
+  fitCrownMaskButton.disabled = regenerationBusy || !available;
+  if (!available && !crownMaskFitEditor.hidden) {
+    crownMaskFitUi?.dispose();
+    crownMaskFitUi = null;
+    crownMaskFitEditor.hidden = true;
+    fitCrownMaskButton.setAttribute("aria-expanded", "false");
+    fitCrownMaskButton.textContent = "Fit Crown Mask";
+  }
   crownVolumeModeButton.setAttribute("aria-pressed", String(crownVolumeModeVisible));
   crownVolumeModeButton.textContent = crownVolumeModeVisible ? "Hide Crown Handles" : "Crown Handles";
   crownVolumeAddButton.disabled = regenerationBusy || !available || !crownVolumeModeVisible || !crownVolumeTool;
@@ -4082,6 +4111,64 @@ crownVolumeModeButton.addEventListener("click", () => {
     disposeCrownVolumeTool();
     setSaveStatus("Crown handles hidden.");
   }
+});
+
+const closeCrownMaskFitUi = () => {
+  crownMaskFitUiRequest++;
+  crownMaskFitUi?.dispose();
+  crownMaskFitUi = null;
+  crownMaskFitEditor.hidden = true;
+  fitCrownMaskButton.setAttribute("aria-expanded", "false");
+  fitCrownMaskButton.textContent = "Fit Crown Mask";
+};
+
+fitCrownMaskButton.addEventListener("click", async () => {
+  if (!crownMaskFitEditor.hidden) {
+    closeCrownMaskFitUi();
+    setSaveStatus("Crown mask fitter closed.");
+    return;
+  }
+  const gene = selectedSourceGenome().spaceColonization;
+  if (!gene || regenerationBusy) return;
+  const request = ++crownMaskFitUiRequest;
+  crownMaskFitEditor.hidden = false;
+  crownMaskFitEditor.textContent = "Loading bounded crown-mask fitter…";
+  fitCrownMaskButton.setAttribute("aria-expanded", "true");
+  fitCrownMaskButton.textContent = "Hide Crown Mask Fit";
+  let module: ProcPlantCrownMaskFitUiModule;
+  try {
+    module = await loadProcPlantCrownMaskFitUi();
+  } catch (error) {
+    if (request !== crownMaskFitUiRequest) return;
+    crownMaskFitEditor.textContent = error instanceof Error ? error.message : String(error);
+    app.dataset.crownMaskFitStatus = "load-error";
+    return;
+  }
+  if (request !== crownMaskFitUiRequest || crownMaskFitEditor.hidden) return;
+  const dimensions = gene.volume.shape === "ellipsoid"
+    ? gene.volume.dimensions.map((value) => value * 2) as [number, number, number]
+    : [...gene.volume.dimensions] as [number, number, number];
+  crownMaskFitUi = module.createProcPlantCrownMaskFitUi({
+    container: crownMaskFitEditor,
+    initialBounds: { center: [...gene.volume.center], dimensions },
+    onApply: (fit) => {
+      if (regenerationBusy) {
+        setSaveStatus("Wait for the current plant rebuild before applying a crown mask.");
+        return;
+      }
+      applyCrownField(fit.crown);
+      syncCrownLobeControls();
+      syncCrownSplineControls();
+      app.dataset.crownMaskFitStatus = "applied";
+      setSaveStatus(`Applied ${fit.audit.bandCount} bounded crown volumes from the frontal silhouette.`);
+      regenerate();
+    },
+    onClose: () => {
+      closeCrownMaskFitUi();
+      setSaveStatus("Crown mask fitter closed.");
+    },
+  });
+  crownMaskFitEditor.querySelector<HTMLInputElement>('input[type="file"]')?.focus();
 });
 
 crownVolumeAddButton.addEventListener("click", () => {
