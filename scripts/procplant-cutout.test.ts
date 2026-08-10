@@ -107,6 +107,31 @@ const square = createProcPlantCutout("square", squareMask, undefined, { simplify
 assert.deepEqual(leaf.metadata, metadata, "cutout creation must preserve authored attachment metadata");
 assert.notStrictEqual(leaf.metadata, metadata, "cutout metadata must be copied");
 
+const orientedMetadata: ProcPlantCutoutMetadata = {
+  ...metadata,
+  normalDirection: { x: 0, y: 1, z: 0 },
+};
+const orientedLeaf = createProcPlantCutout("oriented-leaf", leafMask, orientedMetadata, { simplifyTolerance: 0.35 });
+const orientedGeometry = buildProcPlantCutoutGeometry(orientedLeaf, { height: 2 });
+try {
+  const normal = orientedGeometry.getAttribute("normal");
+  const position = orientedGeometry.getAttribute("position");
+  for (let index = 0; index < normal.count; index++) {
+    assert.ok(Math.abs(normal.getX(index)) < 1e-7);
+    assert.ok(Math.abs(normal.getY(index) - 1) < 1e-7);
+    assert.ok(Math.abs(normal.getZ(index)) < 1e-7);
+    assert.ok(Math.abs(position.getY(index)) < 1e-7, "authored +Y normal must rotate the card into the XZ plane");
+  }
+  assert.deepEqual(orientedGeometry.userData.procplantCutout.normalDirection, [0, 1, 0]);
+  assert.deepEqual(orientedLeaf.metadata.normalDirection, orientedMetadata.normalDirection);
+} finally {
+  orientedGeometry.dispose();
+}
+assert.throws(() => createProcPlantCutout("invalid-normal", leafMask, {
+  ...metadata,
+  normalDirection: { x: 0, y: 0, z: 0 },
+}), /normalDirection must be non-zero/);
+
 const firstAtlas = packProcPlantCutoutAtlas([leaf, square], { padding: 2, powerOfTwo: true });
 const secondAtlas = packProcPlantCutoutAtlas([square, leaf], { padding: 2, powerOfTwo: true });
 assert.deepEqual(firstAtlas, secondAtlas, "atlas placement must not depend on input order");
@@ -133,6 +158,8 @@ try {
     assert.ok(uv.getY(index) >= leafEntry.uv.v0 - 1e-7 && uv.getY(index) <= leafEntry.uv.v1 + 1e-7);
   }
   assert.deepEqual(geometry.userData.procplantCutout.metadata, metadata);
+  assert.equal(geometry.userData.procplantCutout.normalDirection, undefined,
+    "omitted normal metadata must preserve the legacy geometry payload");
   assert.deepEqual(geometry.userData.procplantCutout.attachmentPosition, [0, 0, 0]);
 } finally {
   geometry.dispose();
