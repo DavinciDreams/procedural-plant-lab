@@ -114,6 +114,7 @@ const DEFAULT_FOLIAGE_KINDS: readonly ProcPlantAttachmentKind[] = [
   "grassBlade",
   "fernLeaflet",
   "coniferSpray",
+  "fernFrond",
   "palmFrond",
   "mossTuft",
 ];

@@ -266,7 +266,8 @@ export interface ProcPlantSpaceColonizationGene {
 
 export type ProcPlantFlowerMeshKind = "flobot-daylily" | "flobot-cup" | "flobot-petal-2" | "flobot-pink-flower";
 
-export type ProcPlantAccessoryKind = "fruit" | "berry" | "cone" | "thorn" | "aerialRoot";
+export const PROCPLANT_ACCESSORY_KINDS = Object.freeze(["fruit", "berry", "cone", "thorn", "aerialRoot"] as const);
+export type ProcPlantAccessoryKind = typeof PROCPLANT_ACCESSORY_KINDS[number];
 
 export interface ProcPlantAccessoryGene {
   kind: ProcPlantAccessoryKind;
@@ -427,23 +428,41 @@ export interface ProcPlantForceField {
   strength: number;
 }
 
-export type ProcPlantInstanceKind =
-  | "leaf"
-  | "grassBlade"
-  | "petal"
-  | "flowerDisc"
-  | "daylilyBloom"
-  | "hibiscusBloom"
-  | "flobotCupBloom"
-  | "flobotPetal2Bloom"
-  | "flobotPinkBloom"
-  | "foxgloveBloom"
-  | "flowerCenter"
-  | ProcPlantAccessoryKind;
-export type ProcPlantFoliageClusterKind = "coniferSpray" | "palmFrond" | "mossTuft";
+export const PROCPLANT_BASE_INSTANCE_KINDS = Object.freeze([
+  "leaf",
+  "grassBlade",
+  "petal",
+  "flowerDisc",
+  "daylilyBloom",
+  "hibiscusBloom",
+  "flobotCupBloom",
+  "flobotPetal2Bloom",
+  "flobotPinkBloom",
+  "foxgloveBloom",
+  "flowerCenter",
+] as const);
+export type ProcPlantBaseInstanceKind = typeof PROCPLANT_BASE_INSTANCE_KINDS[number];
+export type ProcPlantInstanceKind = ProcPlantBaseInstanceKind | ProcPlantAccessoryKind;
+export const PROCPLANT_FOLIAGE_CLUSTER_KINDS = Object.freeze([
+  "coniferSpray",
+  "fernFrond",
+  "palmFrond",
+  "mossTuft",
+] as const);
+export type ProcPlantFoliageClusterKind = typeof PROCPLANT_FOLIAGE_CLUSTER_KINDS[number];
+export const PROCPLANT_SUPPORTED_INSTANCE_KINDS = Object.freeze([
+  ...PROCPLANT_BASE_INSTANCE_KINDS,
+  ...PROCPLANT_ACCESSORY_KINDS,
+  ...PROCPLANT_FOLIAGE_CLUSTER_KINDS,
+] as const);
+export type ProcPlantSupportedInstanceKind = typeof PROCPLANT_SUPPORTED_INSTANCE_KINDS[number];
+
+const PROCPLANT_SUPPORTED_INSTANCE_KIND_SET: ReadonlySet<string> = new Set(PROCPLANT_SUPPORTED_INSTANCE_KINDS);
+export const isProcPlantSupportedInstanceKind = (value: unknown): value is ProcPlantSupportedInstanceKind =>
+  typeof value === "string" && PROCPLANT_SUPPORTED_INSTANCE_KIND_SET.has(value);
 
 export interface ProcPlantInstance {
-  kind: ProcPlantInstanceKind | ProcPlantFoliageClusterKind;
+  kind: ProcPlantSupportedInstanceKind;
   matrix: THREE.Matrix4;
   color: THREE.Color;
   sway: number;
@@ -755,7 +774,9 @@ export const procPlantPresets: Record<string, ProcPlantGenome> = {
       colorB: 0x73b851,
     },
     fern: { pinnae: 19, leafletPairs: 5, arch: 0.72 },
-    clump: { count: 6, radius: 0.26, jitter: 0.55, scaleVar: 0.3, lean: 0.62 },
+    // One broad crown is the placement unit. Density belongs to the scatterer;
+    // multiplying the crown here made every placed fern pay the full cost six times.
+    clump: { count: 1, radius: 0.26, jitter: 0.55, scaleVar: 0.3, lean: 0.62 },
     lightResponse: {
       shadeAvoidance: 0.2,
       leafBoostInShade: 0.45,
@@ -3794,26 +3815,27 @@ export const buildProcPlantGraph = (
   }
 
   if (genome.habit === "fern" && genome.fern) {
-    const fronds = Math.max(4, Math.min(9, Math.round(genome.fern.pinnae / 3)));
+    // A fern reads as a few broad, low-set fronds. The dedicated silhouette
+    // preserves crown coverage with far fewer triangles than palm-style blades.
+    const fronds = Math.max(6, Math.min(10, Math.round(genome.fern.pinnae / 2.4)));
     const frondLength =
       genome.nodeCount * curve(genome.internode, 0.28) * (0.4 + genome.fern.arch * 0.16) * heightStretch;
     for (let frond = 0; frond < fronds; frond++) {
       const yaw = resolveProcPlantPhyllotaxy(genome, frond).azimuth + (rng() - 0.5) * 0.16;
+      const ring = frond / Math.max(1, fronds - 1);
       const frame = branchRelativeFoliageFrame(
         UP,
         yaw,
-        1.02 + genome.fern.arch * 0.18 + rng() * 0.1,
-        -0.04,
+        0.46 + ring * 0.72 + genome.fern.arch * 0.16 + rng() * 0.08,
+        0.34 - ring * 0.26,
       );
       organs.push({
-        // The slotted palm-frond card is also an efficient pinnate fern card:
-        // one 26-triangle silhouette replaces a chain of many leaflet meshes.
-        kind: "palmFrond",
+        kind: "fernFrond",
         position: new THREE.Vector3((rng() - 0.5) * 0.045, 0.018 + rng() * 0.018, (rng() - 0.5) * 0.045),
         direction: frame.direction,
         right: frame.right,
-        scale: frondLength * (0.84 + rng() * 0.22),
-        t: frond / Math.max(1, fronds - 1),
+        scale: frondLength * (0.9 + rng() * 0.24),
+        t: ring,
       });
     }
     return finalizeGraph();
@@ -5010,6 +5032,29 @@ const coniferSprayInstance = (
   };
 };
 
+const fernFrondInstance = (
+  genome: ProcPlantGenome,
+  organ: Organ,
+): ProcPlantInstance => {
+  const length = organ.scale;
+  const dir = organ.direction.clone().normalize();
+  const right = organ.right.clone().normalize();
+  const normal = new THREE.Vector3().crossVectors(right, dir).normalize().negate();
+  const color = new THREE.Color(genome.leaf.colorA).lerp(new THREE.Color(genome.leaf.colorB), 0.25 + organ.t * 0.35);
+  return {
+    kind: "fernFrond",
+    matrix: instanceMatrixFromFrame(
+      organ.position,
+      right,
+      dir,
+      normal,
+      new THREE.Vector3(length, length, length),
+    ),
+    color,
+    sway: 0.9,
+  };
+};
+
 const palmFrondInstance = (
   genome: ProcPlantGenome,
   organ: Organ,
@@ -5602,6 +5647,9 @@ const buildProcPlantSingleShootParts = (
     } else if (organ.kind === "coniferSpray") {
       instances.push(coniferSprayInstance(genome, organ));
       leafCount++;
+    } else if (organ.kind === "fernFrond") {
+      instances.push(fernFrondInstance(genome, organ));
+      leafCount++;
     } else if (organ.kind === "palmFrond") {
       instances.push(palmFrondInstance(genome, organ));
       leafCount++;
@@ -6074,6 +6122,57 @@ export const createProcPlantConiferSprayGeometry = (detail: "full" | "light" = "
     addNeedlePlate(0.045, 0.62, 0.26, 0.13, -0.048, 0.035, 0.018, 0.1);
   }
 
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setIndex(indices);
+  geometry.computeBoundingSphere();
+  return geometry;
+};
+
+/** Broad-at-base, tapered fern silhouette optimized for dense groundcover. */
+export const createProcPlantFernFrondGeometry = (): THREE.BufferGeometry => {
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const indices: number[] = [];
+  const addQuad = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3) => {
+    const base = positions.length / 3;
+    const normal = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a)).normalize();
+    for (const point of [a, b, c, d]) {
+      positions.push(point.x, point.y, point.z);
+      normals.push(normal.x, normal.y, normal.z);
+    }
+    indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  };
+  const halfWidth = (y: number) => {
+    const shoulder = Math.min(1, y / 0.14);
+    const taper = (1 - y) ** 0.9;
+    return 0.34 * shoulder * taper;
+  };
+  const cuts = 11;
+  for (let index = 0; index < cuts; index++) {
+    const y0 = index / cuts;
+    const y1 = (index + 1) / cuts;
+    const sag0 = -(y0 * y0) * 0.22;
+    const sag1 = -(y1 * y1) * 0.22;
+    const width0 = halfWidth(y0);
+    const width1 = halfWidth(y1);
+    const foldSign = index % 2 === 0 ? 1 : -1;
+    const fold0 = foldSign * 0.05 * width0;
+    const fold1 = -foldSign * 0.05 * width1;
+    addQuad(
+      new THREE.Vector3(0, y0, sag0),
+      new THREE.Vector3(-width0, y0, fold0 + sag0),
+      new THREE.Vector3(-width1, y1, fold1 + sag1),
+      new THREE.Vector3(0, y1, sag1),
+    );
+    addQuad(
+      new THREE.Vector3(0, y0, sag0),
+      new THREE.Vector3(0, y1, sag1),
+      new THREE.Vector3(width1, y1, -fold1 + sag1),
+      new THREE.Vector3(width0, y0, -fold0 + sag0),
+    );
+  }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
@@ -7438,6 +7537,12 @@ export const buildProcPlantTemplateFromGraph = (
       addTransformedGeometry(builder, geo, inst.matrix, inst.color, inst.sway);
       geo.dispose();
       leafCount++;
+    } else if (organ.kind === "fernFrond") {
+      const inst = fernFrondInstance(genome, organ);
+      const geo = createProcPlantFernFrondGeometry();
+      addTransformedGeometry(builder, geo, inst.matrix, inst.color, inst.sway);
+      geo.dispose();
+      leafCount++;
     } else if (organ.kind === "palmFrond") {
       const inst = palmFrondInstance(genome, organ);
       const geo = createProcPlantPalmFrondGeometry();
@@ -7539,29 +7644,54 @@ const geometryForCompiledInstance = (
   kind: ProcPlantInstance["kind"],
   genome: ProcPlantGenome,
 ): THREE.BufferGeometry => {
-  if (kind === "leaf") {
-    return createProcPlantLeafGeometry(
-      genome.leaf.shape,
-      genome.leaf.widthRatio,
-      genome.leaf.serration,
-      genome.leaf.curl,
-      genome.leaf.venation,
-    );
+  switch (kind) {
+    case "leaf":
+      return createProcPlantLeafGeometry(
+        genome.leaf.shape,
+        genome.leaf.widthRatio,
+        genome.leaf.serration,
+        genome.leaf.curl,
+        genome.leaf.venation,
+      );
+    case "grassBlade": return createProcPlantGrassBladeGeometry(genome.leaf.widthRatio, genome.leaf.curl);
+    case "coniferSpray": return createProcPlantConiferSprayGeometry();
+    case "fernFrond": return createProcPlantFernFrondGeometry();
+    case "palmFrond": return createProcPlantPalmFrondGeometry();
+    case "mossTuft": return createProcPlantMossTuftGeometry();
+    case "petal": return createProcPlantPetalGeometry();
+    case "flowerDisc": return createProcPlantFlowerDiscGeometry();
+    case "daylilyBloom": return createProcPlantDaylilyBloomGeometry();
+    case "hibiscusBloom": return createProcPlantHibiscusBloomGeometry();
+    case "flobotCupBloom": return createProcPlantFlobotCupBloomGeometry();
+    case "flobotPetal2Bloom": return createProcPlantFlobotPetal2BloomGeometry();
+    case "flobotPinkBloom": return createProcPlantFlobotPinkBloomGeometry();
+    case "foxgloveBloom": return createProcPlantFoxgloveBloomGeometry();
+    case "flowerCenter": return createProcPlantFlowerCenterGeometry();
+    case "fruit": return createProcPlantFruitGeometry();
+    case "berry": return createProcPlantBerryGeometry();
+    case "cone": return createProcPlantConeGeometry();
+    case "thorn": return createProcPlantThornGeometry();
+    case "aerialRoot": return createProcPlantAerialRootGeometry();
+    default: {
+      const unsupported: never = kind;
+      throw new Error(`Unsupported ProcPlant instance kind: ${String(unsupported)}`);
+    }
   }
-  if (kind === "grassBlade") return createProcPlantGrassBladeGeometry(genome.leaf.widthRatio, genome.leaf.curl);
-  if (kind === "coniferSpray") return createProcPlantConiferSprayGeometry();
-  if (kind === "palmFrond") return createProcPlantPalmFrondGeometry();
-  if (kind === "mossTuft") return createProcPlantMossTuftGeometry();
-  if (kind === "petal") return createProcPlantPetalGeometry();
-  if (kind === "flowerDisc") return createProcPlantFlowerDiscGeometry();
-  if (kind === "daylilyBloom") return createProcPlantDaylilyBloomGeometry();
-  if (kind === "hibiscusBloom") return createProcPlantHibiscusBloomGeometry();
-  if (kind === "flobotCupBloom") return createProcPlantFlobotCupBloomGeometry();
-  if (kind === "flobotPetal2Bloom") return createProcPlantFlobotPetal2BloomGeometry();
-  if (kind === "flobotPinkBloom") return createProcPlantFlobotPinkBloomGeometry();
-  if (kind === "foxgloveBloom") return createProcPlantFoxgloveBloomGeometry();
-  if (isAccessoryOrganKind(kind)) return geometryForAccessoryKind(kind);
-  return createProcPlantFlowerCenterGeometry();
+};
+
+/** Renderer-independent prototype geometry for every public instance kind. */
+export const buildProcPlantInstancePrototype = (
+  kind: ProcPlantSupportedInstanceKind,
+  genome: ProcPlantGenome,
+): ProcPlantTemplate => {
+  const geometry = geometryForCompiledInstance(kind, genome);
+  const builder = new TemplateBuilder();
+  try {
+    addTransformedGeometry(builder, geometry, new THREE.Matrix4(), new THREE.Color(0xffffff), 1);
+    return builder.build();
+  } finally {
+    geometry.dispose();
+  }
 };
 
 const materializeProcPlantParts = (
@@ -7605,14 +7735,76 @@ const templateBoundsAndColor = (template: ProcPlantTemplate) => {
   return { box, color };
 };
 
-const createPlantCardTemplate = (source: ProcPlantTemplate, crossed: boolean): ProcPlantTemplate => {
+type ProcPlantCardOrientation = "upright" | "ground-parallel";
+
+const PROCPLANT_GROUND_COVER_LOD_PRESETS = new Set([
+  "phiFern",
+  "brackenFernMat",
+  "cloverGroundcover",
+  "woodSorrelCarpet",
+  "woodlandAnemoneCarpet",
+  "creepingPhloxCarpet",
+  "wildStrawberryGroundcover",
+  "maidenhairFernPatch",
+  "woodlandVioletCarpet",
+  "trilliumPatch",
+  "horsetailColony",
+]);
+
+const plantCardOrientation = (
+  genome: ProcPlantGenome,
+  source: ProcPlantTemplate,
+): ProcPlantCardOrientation => {
+  if (!PROCPLANT_GROUND_COVER_LOD_PRESETS.has(genome.id)) return "upright";
+  const { box } = templateBoundsAndColor(source);
+  const size = box.getSize(new THREE.Vector3());
+  const footprint = Math.max(size.x, size.z);
+  const height = Math.max(0.08, size.y);
+  return footprint / height >= 3 ? "ground-parallel" : "upright";
+};
+
+const createPlantCardTemplate = (
+  source: ProcPlantTemplate,
+  crossed: boolean,
+  orientation: ProcPlantCardOrientation,
+): ProcPlantTemplate => {
   const { box, color } = templateBoundsAndColor(source);
   const center = box.getCenter(new THREE.Vector3());
   const size = box.getSize(new THREE.Vector3());
+  const builder = new TemplateBuilder();
+  if (orientation === "ground-parallel") {
+    const y = box.min.y + Math.min(0.06, size.y * 0.35);
+    const addGroundQuad = (
+      minX: number,
+      maxX: number,
+      minZ: number,
+      maxZ: number,
+      uv0: readonly [
+        readonly [number, number],
+        readonly [number, number],
+        readonly [number, number],
+        readonly [number, number],
+      ],
+    ) => builder.addQuad([
+      new THREE.Vector3(minX, y, minZ),
+      new THREE.Vector3(minX, y, maxZ),
+      new THREE.Vector3(maxX, y, maxZ),
+      new THREE.Vector3(maxX, y, minZ),
+    ], color, true, 0.2, uv0);
+    if (!crossed) {
+      addGroundQuad(box.min.x, box.max.x, box.min.z, box.max.z, [[0, 0], [0, 1], [1, 1], [1, 0]]);
+    } else if (size.x >= size.z) {
+      addGroundQuad(box.min.x, center.x, box.min.z, box.max.z, [[0, 0], [0, 1], [0.5, 1], [0.5, 0]]);
+      addGroundQuad(center.x, box.max.x, box.min.z, box.max.z, [[0.5, 0], [0.5, 1], [1, 1], [1, 0]]);
+    } else {
+      addGroundQuad(box.min.x, box.max.x, box.min.z, center.z, [[0, 0], [0, 0.5], [1, 0.5], [1, 0]]);
+      addGroundQuad(box.min.x, box.max.x, center.z, box.max.z, [[0, 0.5], [0, 1], [1, 1], [1, 0.5]]);
+    }
+    return builder.build();
+  }
   const halfWidth = Math.max(0.08, Math.max(size.x, size.z) * 0.5);
   const y0 = box.min.y;
   const y1 = Math.max(y0 + 0.08, box.max.y);
-  const builder = new TemplateBuilder();
   builder.addQuad([
     new THREE.Vector3(center.x - halfWidth, y0, center.z),
     new THREE.Vector3(center.x + halfWidth, y0, center.z),
@@ -7730,8 +7922,9 @@ export const compileProcPlantLods = (
   const clustered = reducedTriangles > 4 && reducedTriangles < fullTriangles
     ? reduced
     : createPlantClusterTemplate(full);
-  const billboard = createPlantCardTemplate(full, true);
-  const impostor = createPlantCardTemplate(full, false);
+  const cardOrientation = plantCardOrientation(genome, full);
+  const billboard = createPlantCardTemplate(full, true, cardOrientation);
+  const impostor = createPlantCardTemplate(full, false, cardOrientation);
   const treeScale = genome.habit === "tree" || genome.habit === "conifer" || genome.habit === "palm" ? 1.5 : 0.75;
   const rows: Array<[ProcPlantCompiledLod["level"], ProcPlantCompiledLod["label"], number, ProcPlantTemplate]> = [
     [0, "full", 0, full],

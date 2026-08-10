@@ -88,7 +88,7 @@ const normalizedSpec = (spec: ProcPlantOrganVariantSpec): ProcPlantOrganVariantS
 
 const isLeafLike = (kind: ProcPlantAttachmentKind) =>
   kind === "leaf" || kind === "leaf-site" || kind === "fernLeaflet" || kind === "grassBlade" ||
-  kind === "coniferSpray" || kind === "palmFrond" || kind === "mossTuft";
+  kind === "coniferSpray" || kind === "fernFrond" || kind === "palmFrond" || kind === "mossTuft";
 
 const isFlower = (kind: ProcPlantAttachmentKind) => kind === "flower";
 const isReproductive = (kind: ProcPlantAttachmentKind) =>

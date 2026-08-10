@@ -17,6 +17,19 @@ const IDS = [
   "trilliumPatch",
   "horsetailColony",
 ] as const;
+const GROUND_COVER_LOD_IDS = [
+  "phiFern",
+  "brackenFernMat",
+  "cloverGroundcover",
+  "woodSorrelCarpet",
+  "woodlandAnemoneCarpet",
+  "creepingPhloxCarpet",
+  "wildStrawberryGroundcover",
+  "maidenhairFernPatch",
+  "woodlandVioletCarpet",
+  "trilliumPatch",
+  "horsetailColony",
+] as const;
 const SEED = 0x6a09e667;
 const environment = { ...defaultPlantEnvironment(), light: 0.58, moisture: 0.78, crowding: 0.34 };
 
@@ -36,6 +49,16 @@ const templateBounds = (template: ProcPlantTemplate) => {
   }
   const size = box.getSize(new THREE.Vector3());
   return { x: size.x, y: size.y, z: size.z, coverage: Math.max(size.x, size.z) };
+};
+
+const axisRange = (template: ProcPlantTemplate, axis: 0 | 1 | 2) => {
+  let min = Infinity;
+  let max = -Infinity;
+  for (let offset = axis; offset < template.pos.length; offset += 3) {
+    min = Math.min(min, template.pos[offset]!);
+    max = Math.max(max, template.pos[offset]!);
+  }
+  return max - min;
 };
 
 const pointSegmentDistance = (point: THREE.Vector3, start: THREE.Vector3, end: THREE.Vector3) => {
@@ -103,6 +126,28 @@ const summaries = IDS.map((id) => {
 assert.equal(new Set(summaries.map((summary) => summary.hash)).size, IDS.length, "all four groundcovers need distinct deterministic geometry");
 assert.equal(new Set(IDS.map((id) => procPlantPresets[id]!.leaf.shape)).size, IDS.length, "all four groundcovers need distinct leaf silhouettes");
 assert.equal(new Set(IDS.map((id) => procPlantPresets[id]!.leaf.colorA)).size, IDS.length, "all four groundcovers need distinct foliage palettes");
+
+for (const id of GROUND_COVER_LOD_IDS) {
+  const genome = procPlantPresets[id]!;
+  const lods = compileProcPlantLods(genome, SEED, environment);
+  const fullBounds = templateBounds(lods[0]!.template);
+  const groundParallel = fullBounds.coverage / Math.max(0.08, fullBounds.y) >= 3;
+  for (const lod of [lods[2]!, lods[3]!]) {
+    const yRange = axisRange(lod.template, 1);
+    const horizontalNormal = Array.from(lod.template.nrm).every((value, index) => (
+      index % 3 === 1 ? Math.abs(value - 1) < 1e-6 : Math.abs(value) < 1e-6
+    ));
+    if (groundParallel) {
+      assert.ok(yRange < 1e-6, `${id} LOD${lod.level} flat-patch card must stay ground parallel`);
+      assert.equal(horizontalNormal, true, `${id} LOD${lod.level} flat-patch card normals must point up`);
+      assert.ok(axisRange(lod.template, 0) >= fullBounds.x - 1e-5, `${id} LOD${lod.level} must preserve X coverage`);
+      assert.ok(axisRange(lod.template, 2) >= fullBounds.z - 1e-5, `${id} LOD${lod.level} must preserve Z coverage`);
+    } else {
+      assert.ok(yRange >= Math.max(0.08, fullBounds.y) - 1e-5, `${id} LOD${lod.level} upright habit must preserve height`);
+      assert.equal(horizontalNormal, false, `${id} LOD${lod.level} upright habit cannot use a ground card`);
+    }
+  }
+}
 
 console.log(JSON.stringify(summaries, null, 2));
 console.log("procplant groundcover-variety tests passed");

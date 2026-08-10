@@ -52,7 +52,7 @@ import {
   toPersistedTellusProcPlantRegistryV2,
   toTellusProcPlantBiomeMix,
 } from "../src/tellus-export";
-import committedTellusContractFixture from "../fixtures/tellus-procplant-contract-v2.golden.json";
+import committedTellusContractFixture from "../fixtures/tellus-procplant-contract-v3.golden.json";
 import {
   buildTellusGoldenContractFixture,
   firstTellusFixtureDrift,
@@ -444,7 +444,7 @@ test("pruning retains selected branches with ancestors and repairs deterministic
   }, "pruning must not mutate the source graph");
 });
 
-test("Tellus contract-v2 golden fixture is deterministic and detects compact summary drift", () => {
+test("Tellus contract-v3 golden fixture is deterministic and detects compact summary drift", () => {
   const first = buildTellusGoldenContractFixture();
   assert.equal(first.schema, TELLUS_GOLDEN_FIXTURE_SCHEMA);
   assert.equal(first.fixtureVersion, TELLUS_GOLDEN_FIXTURE_VERSION);

@@ -9,6 +9,7 @@ import {
   createProcPlantFlobotCupBloomGeometry,
   createProcPlantFlobotPetal2BloomGeometry,
   createProcPlantFlobotPinkBloomGeometry,
+  createProcPlantFernFrondGeometry,
   createProcPlantFlowerCenterGeometry,
   createProcPlantFlowerDiscGeometry,
   createProcPlantFoxgloveBloomGeometry,
@@ -111,6 +112,7 @@ const geometryForKind = (kind: InstanceKind, genome: ProcPlantGenome): THREE.Buf
   }
   if (kind === "grassBlade") return createProcPlantGrassBladeGeometry(genome.leaf.widthRatio, genome.leaf.curl);
   if (kind === "coniferSpray") return createProcPlantConiferSprayGeometry();
+  if (kind === "fernFrond") return createProcPlantFernFrondGeometry();
   if (kind === "palmFrond") return createProcPlantPalmFrondGeometry();
   if (kind === "mossTuft") return createProcPlantMossTuftGeometry();
   if (kind === "fruit") return createProcPlantFruitGeometry();

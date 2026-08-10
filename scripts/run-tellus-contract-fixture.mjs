@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
 const projectRoot = resolve(import.meta.dirname, "..");
-const fixturePath = join(projectRoot, "fixtures", "tellus-procplant-contract-v2.golden.json");
+const fixturePath = join(projectRoot, "fixtures", "tellus-procplant-contract-v3.golden.json");
 const tempDirectory = await mkdtemp(join(tmpdir(), "procplants-contract-fixture-"));
 const outputFile = join(tempDirectory, "tellus-contract-fixture.mjs");
 const mode = process.argv.includes("--write") ? "write" : process.argv.includes("--print") ? "print" : "check";
