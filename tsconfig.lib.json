@@ -7,8 +7,17 @@
     "emitDeclarationOnly": true,
     "outDir": "dist-lib/types"
   },
-  "include": [
-    "src/index.ts",
-    "src/core.ts"
+  "include": ["src/**/*.ts"],
+  "exclude": [
+    "src/biome-mixer.ts",
+    "src/lab-bootstrap.ts",
+    "src/main.ts",
+    "src/procplant-authoring-tools.ts",
+    "src/procplant-contour-editor-ui.ts",
+    "src/procplant-crown-volume-tool.ts",
+    "src/procplant-graph-editor-ui.ts",
+    "src/procplant-impostor-three.ts",
+    "src/procplant-lab-authoring-imports.ts",
+    "src/tree-preview-worker.ts"
   ]
 }

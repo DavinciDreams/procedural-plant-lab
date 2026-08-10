@@ -96,6 +96,7 @@
     "test:tellus-contract": "node scripts/run-tellus-contract-fixture.mjs",
     "test:browser-smoke": "node scripts/run-browser-ui-smoke.mjs",
     "test:core-library": "node scripts/run-core-library-smoke.mjs",
+    "test:package-consumer": "node scripts/run-package-consumer-smoke.mjs",
     "write:tellus-contract": "node scripts/run-tellus-contract-fixture.mjs --write",
     "procplants": "node scripts/procplants-cli.mjs",
     "preview": "vite preview --host 127.0.0.1"
