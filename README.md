@@ -49,8 +49,9 @@ Good starting experiments:
 - Bounded deterministic prototype generation with instanced stems and organs, so dense previews do not regenerate every placement.
 - Exact export-readiness accounting for instanced triangles, vertices, draw calls, material slots, GPU bytes, and LOD budgets.
 - Stable segment/attachment IR with parent IDs, axial positions, right-handed branch frames, and sway weights.
-- Four deterministic geometry LODs (full, coherently reduced, crossed card, and single card).
-- A versioned renderer-independent four-tier runtime LOD contract combines normalized distance, projected height, hysteresis, and culling; runtime/Tellus packages and multi-LOD GLB extras carry the same stable tier IDs without claiming a Khronos extension.
+- Four deterministic default geometry LODs (full, coherently reduced, crossed card, and single card).
+- A versioned renderer-independent four-tier runtime LOD contract combines normalized distance, projected height, hysteresis, and culling; default runtime/Tellus packages and multi-LOD GLB extras carry the same stable tier IDs without claiming a Khronos extension.
+- An explicit version-2 five-tier contract adds separate atlas-backed crossed-tree-impostor LOD3 and baked billboard/hemisphere LOD4 tiers. It source-hash-binds a real atlas, fails closed instead of synthesizing a fake bake, preserves every default version-1 byte, and exports deterministic GLB extras plus an embedded PNG without inventing a Khronos extension.
 - Worker-backed hero LOD switching with hysteresis and cached compiled geometry.
 - Debug, pruning/trim, and GLB authoring tools load as one cold interaction chunk; default rendering does not execute or preload them.
 - GPU vertex wind for visible and shadow passes without per-frame instance-matrix updates.
@@ -153,6 +154,8 @@ After a production build, run the dependency-free headless Chrome UI smoke (grap
 ```bash
 npm run test:browser-smoke
 npm run test:impostor-three-webgl
+npm run test:lod5
+npm run test:lod5-browser
 ```
 
 Use the headless compiler for repeatable asset-pack work:
@@ -196,6 +199,7 @@ npm run test:tellus-contract
 - `src/procplant-impostor-channels.ts` composes aligned color/normal/depth and seasonal impostor view arrays.
 - `src/procplant-impostor-image.ts` encodes deterministic channel PNGs and embeds seasonal channel sets in GLB.
 - `src/procplant-impostor-three.ts` captures live Three.js views, installs textured billboards, and exports embedded-atlas GLB.
+- `src/procplant-five-tier-lod.ts` compiles and exports the opt-in, source-bound five-tier LOD contract.
 - `src/procplant-dense-impostor-pool.ts` batches dense static billboard placements into deterministic atlas-view buckets.
 - `src/procplant-generator-graph.ts` defines deterministic typed generator DAGs and serializable manual operations.
 - `src/procplant-authoring-graph.ts` derives a live nine-stage graph and preview from any authored genome.
