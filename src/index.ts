@@ -48,6 +48,7 @@ export * from "./procplant-uv0";
 export * from "./procplant-glb-material-binding";
 export * from "./procplant-instanced-export";
 export * from "./procplant-organ-placement-overrides";
+export * from "./procplant-placement-decal-three";
 export * from "./procplant-organ-variants";
 export * from "./procplant-instance-lod-pool";
 export * from "./procplant-impostor";

@@ -113,6 +113,7 @@ try {
       const initialResources = performance.getEntriesByType('resource').map((entry) => entry.name);
       const options = [...document.querySelectorAll('#placementKind option')].map((option) => option.value);
       const decalDisabled = document.querySelector('#placementKind option[value="decal"]')?.disabled;
+      const initialDecalLazy = initialResources.some((url) => url.includes('procplant-placement-decal-three'));
       const button = document.querySelector('#placementMode');
       const select = document.querySelector('#placementKind');
       const undo = document.querySelector('#undoPlacement');
@@ -140,20 +141,34 @@ try {
         return false;
       };
 
-      select.value = 'coniferSpray';
+      const imageCanvas = document.createElement('canvas');
+      imageCanvas.width = 8;
+      imageCanvas.height = 8;
+      const imageContext = imageCanvas.getContext('2d');
+      imageContext.fillStyle = '#5d2d18';
+      imageContext.fillRect(0, 0, 8, 8);
+      imageContext.fillStyle = 'rgba(231, 184, 117, 0.75)';
+      imageContext.fillRect(2, 1, 4, 6);
+      const imageBlob = await new Promise((resolve) => imageCanvas.toBlob(resolve, 'image/png'));
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([imageBlob], 'browser-scar.png', { type: 'image/png' }));
+      const decalInput = document.querySelector('#placementDecalFile');
+      decalInput.files = transfer.files;
+      decalInput.dispatchEvent(new Event('change', { bubbles: true }));
+      for (let i = 0; i < 120 && app.dataset.placementDecalBindingReady !== 'true'; i++) await wait(100);
+      await idle();
+      const decalEnabled = document.querySelector('#placementKind option[value="decal"]')?.disabled === false;
+      select.value = 'decal';
       select.dispatchEvent(new Event('change', { bubbles: true }));
-      const clusterPlaced = await clickUntilCount(1);
-      const clusterTriangles = Number(app.dataset.heroTemplateTriangles);
-      select.value = 'branch';
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-      const branchPlaced = await clickUntilCount(2);
-      const branchTriangles = Number(app.dataset.heroTemplateTriangles);
-      select.value = 'knot';
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-      const knotPlaced = await clickUntilCount(3);
-      const knotTriangles = Number(app.dataset.heroTemplateTriangles);
-      const applied = Number(app.dataset.organPlacementApplied ?? 0);
-      const unsupported = Number(app.dataset.organPlacementUnsupported ?? -1);
+      const decalPlaced = await clickUntilCount(1);
+      const decalTemplateTriangles = Number(app.dataset.heroTemplateTriangles);
+      const decalDraws = Number(app.dataset.placementDecalDraws ?? 0);
+      const decalTriangles = Number(app.dataset.placementDecalTriangles ?? 0);
+      const decalUv0Pairs = Number(app.dataset.placementDecalUv0Pairs ?? 0);
+
+      await wait(250);
+      const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+      const webglError = gl?.getError();
 
       let exportedBlob;
       const originalCreateObjectUrl = URL.createObjectURL;
@@ -166,6 +181,37 @@ try {
       HTMLAnchorElement.prototype.click = originalAnchorClick;
       const exported = JSON.parse(await exportedBlob.text());
       const exportedPlacements = exported.authoring.organPlacements;
+      const exportedDecalBinding = exported.authoring.placementDecalBinding;
+
+      let glbBlob;
+      URL.createObjectURL = (blob) => { glbBlob = blob; return originalCreateObjectUrl(blob); };
+      HTMLAnchorElement.prototype.click = function () {};
+      document.querySelector('#exportGlb').click();
+      await wait(250);
+      URL.createObjectURL = originalCreateObjectUrl;
+      HTMLAnchorElement.prototype.click = originalAnchorClick;
+      const glbRejectedStatus = document.querySelector('#saveStatus')?.textContent ?? null;
+
+      undo.click();
+      await idle();
+      const afterDecalUndo = Number(app.dataset.heroTemplateTriangles);
+      const afterDecalUndoDraws = Number(app.dataset.placementDecalDraws ?? -1);
+
+      select.value = 'coniferSpray';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      const clusterPlaced = await clickUntilCount(1);
+      const clusterTriangles = Number(app.dataset.heroTemplateTriangles);
+      select.value = 'branch';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      const branchPlaced = await clickUntilCount(2);
+      const branchTriangles = Number(app.dataset.heroTemplateTriangles);
+      select.value = 'knot';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      const knotPlaced = await clickUntilCount(3);
+      const knotTriangles = Number(app.dataset.heroTemplateTriangles);
+      await idle();
+      const applied = Number(app.dataset.organPlacementApplied ?? 0);
+      const unsupported = Number(app.dataset.organPlacementUnsupported ?? -1);
 
       undo.click();
       await idle();
@@ -179,6 +225,8 @@ try {
       return {
         options,
         decalDisabled,
+        initialDecalLazy,
+        decalEnabled,
         label: select.getAttribute('aria-label'),
         buttonText: button.textContent,
         initialLazy: initialResources.some((url) => url.includes('procplant-organ-placement-overrides')),
@@ -186,10 +234,20 @@ try {
         clusterPlaced,
         branchPlaced,
         knotPlaced,
+        decalPlaced,
         baselineTriangles,
         clusterTriangles,
         branchTriangles,
         knotTriangles,
+        decalTemplateTriangles,
+        decalDraws,
+        decalTriangles,
+        decalUv0Pairs,
+        webglError,
+        glbCreated: Boolean(glbBlob),
+        glbRejectedStatus,
+        afterDecalUndo,
+        afterDecalUndoDraws,
         afterKnotUndo,
         afterBranchUndo,
         resetTriangles,
@@ -197,6 +255,7 @@ try {
         unsupported,
         exportedVersion: exportedPlacements?.version,
         exportedKinds: exportedPlacements?.operations?.map((operation) => operation.kind),
+        exportedDecalBinding,
         status: document.querySelector('#saveStatus')?.textContent ?? null,
         finalCount: Number(app.dataset.organPlacementCount ?? -1),
       };
@@ -212,19 +271,38 @@ try {
   console.log(JSON.stringify(result));
   assert.deepEqual(result.options, ["leaf", "flower", "fruit", "berry", "cone", "thorn", "aerialRoot", "coniferSpray", "fernFrond", "palmFrond", "mossTuft", "branch", "knot", "decal"]);
   assert.equal(result.decalDisabled, true);
+  assert.equal(result.initialDecalLazy, false);
+  assert.equal(result.decalEnabled, true);
   assert.equal(result.label, "Plant part type");
   assert.equal(result.initialLazy, false);
   assert.equal(result.loadedLazy, true);
   assert.equal(result.clusterPlaced, true);
   assert.equal(result.branchPlaced, true);
   assert.equal(result.knotPlaced, true);
+  assert.equal(result.decalPlaced, true);
   assert.ok(result.clusterTriangles > result.baselineTriangles);
   assert.ok(result.branchTriangles > result.clusterTriangles);
   assert.ok(result.knotTriangles > result.branchTriangles);
+  assert.equal(result.decalTemplateTriangles, result.baselineTriangles, "separate decal draws must not inflate the plant template");
+  assert.equal(result.decalDraws, 1);
+  assert.equal(result.decalTriangles, 2);
+  assert.equal(result.decalUv0Pairs, 4);
+  assert.equal(result.webglError, 0);
+  assert.equal(result.glbCreated, false, "live bindings must fail closed instead of inventing GLB material adoption");
+  assert.match(result.glbRejectedStatus, /GLB export stopped: live placement decals/);
+  assert.equal(result.afterDecalUndo, result.baselineTriangles);
+  assert.equal(result.afterDecalUndoDraws, 0);
   assert.equal(result.applied, 3);
   assert.equal(result.unsupported, 0);
   assert.equal(result.exportedVersion, 2);
-  assert.deepEqual(result.exportedKinds, ["coniferSpray", "branch", "knot"]);
+  assert.deepEqual(result.exportedKinds, ["decal"]);
+  assert.equal(result.exportedDecalBinding?.ready, true);
+  assert.equal(result.exportedDecalBinding?.sourceFile, "browser-scar.png");
+  assert.equal(result.exportedDecalBinding?.width, 8);
+  assert.equal(result.exportedDecalBinding?.height, 8);
+  assert.equal(result.exportedDecalBinding?.liveDraws, 1);
+  assert.equal(result.exportedDecalBinding?.liveTriangles, 2);
+  assert.equal(result.exportedDecalBinding?.exportSupport, "metadata-only");
   assert.equal(result.afterKnotUndo, result.branchTriangles);
   assert.equal(result.afterBranchUndo, result.clusterTriangles);
   assert.equal(result.resetTriangles, result.baselineTriangles);

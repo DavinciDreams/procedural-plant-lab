@@ -75,6 +75,7 @@ import {
   createProcPlantWindShadowMaterials,
   createProcPlantWindUniforms,
   installProcPlantWindShader,
+  PROCPLANT_WIND_BAND_BRANCH,
   PROCPLANT_WIND_BAND_LEAF,
   PROCPLANT_WIND_BAND_TRUNK,
   PROCPLANT_WIND_PHASE_ATTRIBUTE,
@@ -114,9 +115,14 @@ import {
   type ProcPlantFreeformCrown,
 } from "./procplant-space-colonization";
 import type {
+  ProcPlantMaterializedPlacementDecal,
   ProcPlantOrganPlacementPackage,
   ProcPlantPlaceableOrganKind,
 } from "./procplant-organ-placement-overrides";
+import type {
+  ProcPlantThreePlacementDecalBindingHandle,
+  ProcPlantThreePlacementDecalDrawPackage,
+} from "./procplant-placement-decal-three";
 import type { ProcPlantBakedMaterialBundle } from "./procplant-material-bake";
 import type { ProcPlantThreeBakedMaterialSet } from "./procplant-three-material-adapter";
 import type { ProcPlantThreeMaterialShaderSetInstallation } from "./procplant-three-material-shader";
@@ -443,9 +449,14 @@ app.innerHTML = `
           <option value="mossTuft">Moss tuft cluster</option>
           <option value="branch">Branch</option>
           <option value="knot">Bark knot</option>
-          <option value="decal" disabled>Decal (texture binding required)</option>
+          <option value="decal" disabled>Decal (bind an image)</option>
         </select>
         <button id="undoPlacement" type="button" disabled>Undo Placement</button>
+      </div>
+      <div class="button-row">
+        <button id="importPlacementDecal" type="button">Bind Decal Image</button>
+        <button id="clearPlacementDecal" type="button" disabled>Clear Decal Binding</button>
+        <input id="placementDecalFile" type="file" accept="image/png,image/webp,image/jpeg" hidden />
       </div>
       <div class="button-row">
         <button id="inspectReadiness" type="button">Asset QA</button>
@@ -474,6 +485,7 @@ app.innerHTML = `
       </div>
       <output id="heroImportStatus" class="save-status" aria-live="polite"></output>
       <output id="materialBakeStatus" class="save-status" aria-live="polite"></output>
+      <output id="placementDecalStatus" class="save-status" aria-live="polite"></output>
       <section id="materialGraphEditor" class="graph-preview material-graph-editor" aria-live="polite" hidden></section>
       <details class="advanced-controls cutout-controls">
         <summary>Leaf cutout metadata</summary>
@@ -634,6 +646,7 @@ let biomeGroup: THREE.Group | null = null;
 let heroMesh: THREE.Mesh | null = null;
 interface HeroLodState {
   mesh: THREE.Mesh;
+  placementDecals: ProcPlantThreePlacementDecalDrawPackage | null;
   graph: ProcPlantGraph | null;
   weberPennTrim: ProcPlantWeberPennBuildMetadata | null;
   stats: ProcPlantStats;
@@ -714,6 +727,9 @@ let activeCutout: ProcPlantCutout | null = null;
 const pruneOperations = new Map<string, string[][]>();
 const weberPennTrimTargets = new Map<string, ProcPlantWeberPennTrimTarget>();
 const organPlacementPackages = new Map<string, ProcPlantOrganPlacementPackage>();
+let livePlacementDecalBinding: ProcPlantThreePlacementDecalBindingHandle | null = null;
+let livePlacementDecalFileName = "";
+const retiredPlacementDecalBindings: ProcPlantThreePlacementDecalBindingHandle[] = [];
 let pruneModeVisible = false;
 let placementModeVisible = false;
 let crownVolumeModeVisible = false;
@@ -914,6 +930,10 @@ const resetPruneButton = document.querySelector<HTMLButtonElement>("#resetPrune"
 const placementModeButton = document.querySelector<HTMLButtonElement>("#placementMode")!;
 const placementKindSelect = document.querySelector<HTMLSelectElement>("#placementKind")!;
 const undoPlacementButton = document.querySelector<HTMLButtonElement>("#undoPlacement")!;
+const importPlacementDecalButton = document.querySelector<HTMLButtonElement>("#importPlacementDecal")!;
+const clearPlacementDecalButton = document.querySelector<HTMLButtonElement>("#clearPlacementDecal")!;
+const placementDecalFileInput = document.querySelector<HTMLInputElement>("#placementDecalFile")!;
+const placementDecalStatus = document.querySelector<HTMLOutputElement>("#placementDecalStatus")!;
 const crownVolumeModeButton = document.querySelector<HTMLButtonElement>("#crownVolumeMode")!;
 const crownVolumeAddButton = document.querySelector<HTMLButtonElement>("#crownVolumeAdd")!;
 const crownVolumeSubtractButton = document.querySelector<HTMLButtonElement>("#crownVolumeSubtract")!;
@@ -1213,6 +1233,7 @@ type ProcPlantMaterialGraphEditorUiModule = typeof import("./procplant-material-
 type ProcPlantAuthoringToolsModule = typeof import("./procplant-authoring-tools");
 type ProcPlantCrownVolumeToolModule = typeof import("./procplant-crown-volume-tool");
 type ProcPlantOrganPlacementModule = typeof import("./procplant-organ-placement-overrides");
+type ProcPlantPlacementDecalThreeModule = typeof import("./procplant-placement-decal-three");
 type ProcPlantGeneratorGraphOperation = import("./procplant-generator-graph").ProcPlantGeneratorGraphOperation;
 let procPlantRulesModule: ProcPlantRulesModule | null = null;
 let procPlantRulesPromise: Promise<ProcPlantRulesModule> | null = null;
@@ -1229,6 +1250,8 @@ let procPlantCrownVolumeToolModule: ProcPlantCrownVolumeToolModule | null = null
 let procPlantCrownVolumeToolPromise: Promise<ProcPlantCrownVolumeToolModule> | null = null;
 let procPlantOrganPlacementModule: ProcPlantOrganPlacementModule | null = null;
 let procPlantOrganPlacementPromise: Promise<ProcPlantOrganPlacementModule> | null = null;
+let procPlantPlacementDecalThreeModule: ProcPlantPlacementDecalThreeModule | null = null;
+let procPlantPlacementDecalThreePromise: Promise<ProcPlantPlacementDecalThreeModule> | null = null;
 const graphOverrideOperations = new Map<string, ProcPlantGeneratorGraphOperation[]>();
 const loadProcPlantGraphEditorUi = () => {
   if (procPlantGraphEditorUiModule) return Promise.resolve(procPlantGraphEditorUiModule);
@@ -1302,6 +1325,18 @@ const loadProcPlantOrganPlacement = () => {
     procPlantOrganPlacementPromise = null;
   });
   return procPlantOrganPlacementPromise;
+};
+const loadProcPlantPlacementDecalThree = () => {
+  if (procPlantPlacementDecalThreeModule) return Promise.resolve(procPlantPlacementDecalThreeModule);
+  if (procPlantPlacementDecalThreePromise) return procPlantPlacementDecalThreePromise;
+  procPlantPlacementDecalThreePromise = import("./procplant-placement-decal-three").then((module) => {
+    procPlantPlacementDecalThreeModule = module;
+    app.dataset.placementDecalRendererLoaded = "true";
+    return module;
+  }).finally(() => {
+    procPlantPlacementDecalThreePromise = null;
+  });
+  return procPlantPlacementDecalThreePromise;
 };
 const loadProcPlantRules = () => {
   if (procPlantRulesModule) return Promise.resolve(procPlantRulesModule);
@@ -2599,6 +2634,7 @@ const disposeHeroLodState = (hero: HeroLodState | null) => {
     if (geometry !== hero.impostor?.geometry) geometry.dispose();
   }
   hero.impostor?.dispose();
+  hero.placementDecals?.dispose();
   scene.remove(hero.mesh);
 };
 
@@ -2800,14 +2836,21 @@ const syncPlacementButtons = () => {
   const flowerOption = placementKindSelect.querySelector<HTMLOptionElement>('option[value="flower"]');
   if (flowerOption) flowerOption.disabled = !genome.flower;
   if (!genome.flower && placementKindSelect.value === "flower") placementKindSelect.value = "leaf";
+  const decalOption = placementKindSelect.querySelector<HTMLOptionElement>('option[value="decal"]');
+  const decalReady = Boolean(livePlacementDecalBinding && !livePlacementDecalBinding.disposed);
+  if (decalOption) decalOption.disabled = !decalReady;
+  if (!decalReady && placementKindSelect.value === "decal") placementKindSelect.value = "leaf";
   placementModeButton.disabled = regenerationBusy || !graphAvailable;
   placementModeButton.setAttribute("aria-pressed", String(placementModeVisible));
   placementModeButton.textContent = placementModeVisible ? "Exit Place" : "Place Part";
   placementKindSelect.disabled = regenerationBusy || !graphAvailable;
   undoPlacementButton.disabled = regenerationBusy || (currentPlacementPackage()?.operations.length ?? 0) === 0;
+  importPlacementDecalButton.disabled = regenerationBusy;
+  clearPlacementDecalButton.disabled = regenerationBusy || !decalReady;
   app.dataset.organPlacementAvailable = String(graphAvailable);
   app.dataset.organPlacementActive = String(placementModeVisible && graphAvailable);
   app.dataset.organPlacementCount = String(currentPlacementPackage()?.operations.length ?? 0);
+  app.dataset.placementDecalBindingReady = String(decalReady);
 };
 
 const refreshHeroPlacementTool = async () => {
@@ -2883,6 +2926,7 @@ const installHeroImportPreview = (authored: ProcPlantLabHeroPreview, fileName: s
   };
   scene.add(authored.group);
   if (heroMesh) heroMesh.visible = false;
+  if (heroLodState?.placementDecals) heroLodState.placementDecals.root.visible = false;
   app.dataset.heroImportActive = "true";
   app.dataset.heroImportHash = authored.contentHash;
   app.dataset.heroImportVertices = String(authored.audit.vertexCount);
@@ -2917,6 +2961,7 @@ const disposeHeroImportPreview = () => {
   heroImportSpine = null;
   heroSpineEditorState = null;
   if (heroMesh) heroMesh.visible = true;
+  if (heroLodState?.placementDecals) heroLodState.placementDecals.root.visible = true;
   clearHeroGlbButton.disabled = true;
   delete app.dataset.heroImportActive;
   delete app.dataset.heroImportHash;
@@ -3338,6 +3383,7 @@ const performRegeneration = async (request: number) => {
     });
     heroBuild = buildProcPlantTemplateFromGraph(genome, pruned.graph, env);
   }
+  let materializedPlacementDecals: ProcPlantMaterializedPlacementDecal[] = [];
   if (heroBuild && authoredPlacements?.operations.length && !genome.weberPenn && !genome.branchModules && !genome.spaceColonization) {
     const placementModule = await placementModulePromise!;
     if (request !== regenerationRequest) {
@@ -3345,15 +3391,22 @@ const performRegeneration = async (request: number) => {
       return;
     }
     const source = placementModule.createProcPlantOrganPlacementTarget(genome.id, state.seed, heroBuild.graph);
-    const applied = placementModule.applyProcPlantOrganPlacementOverrides(heroBuild.graph, source, authoredPlacements);
+    const applied = placementModule.applyProcPlantOrganPlacementOverrides(heroBuild.graph, source, authoredPlacements, {
+      decalBindings: livePlacementDecalBinding && !livePlacementDecalBinding.disposed
+        ? [livePlacementDecalBinding.binding]
+        : [],
+    });
+    materializedPlacementDecals = applied.decals;
     app.dataset.organPlacementTargetMatched = String(applied.targetMatched);
     app.dataset.organPlacementApplied = String(applied.appliedOperationIds.length);
     app.dataset.organPlacementUnsupported = String(applied.unsupported.length);
+    app.dataset.placementDecalMaterialized = String(applied.decals.length);
     if (applied.changed) heroBuild = buildProcPlantTemplateFromGraph(genome, applied.graph, env);
   } else {
     delete app.dataset.organPlacementTargetMatched;
     delete app.dataset.organPlacementApplied;
     delete app.dataset.organPlacementUnsupported;
+    delete app.dataset.placementDecalMaterialized;
   }
   if (heroBuild && spatialForcesActive && validatedSpatialForces && spatialForceModule) {
     try {
@@ -3419,11 +3472,46 @@ const performRegeneration = async (request: number) => {
   nextHero.scale.setScalar(heroScale);
   nextHero.visible = heroImportPreview === null;
   configureWindMesh(nextHero);
+  let nextPlacementDecals: ProcPlantThreePlacementDecalDrawPackage | null = null;
+  if (materializedPlacementDecals.length > 0 && livePlacementDecalBinding && !livePlacementDecalBinding.disposed) {
+    try {
+      const decalRenderer = procPlantPlacementDecalThreeModule ?? await loadProcPlantPlacementDecalThree();
+      if (request !== regenerationRequest) {
+        for (const geometry of heroGeometries) geometry.dispose();
+        disposeGroup(biome.group);
+        return;
+      }
+      nextPlacementDecals = decalRenderer.createProcPlantThreePlacementDecalDraws(
+        materializedPlacementDecals,
+        livePlacementDecalBinding,
+      );
+      nextPlacementDecals.root.position.copy(nextHero.position);
+      nextPlacementDecals.root.quaternion.copy(nextHero.quaternion);
+      nextPlacementDecals.root.scale.copy(nextHero.scale);
+      nextPlacementDecals.root.visible = nextHero.visible;
+      nextPlacementDecals.root.traverse((object) => {
+        if (object instanceof THREE.Mesh) configureWindMesh(object, undefined, undefined, PROCPLANT_WIND_BAND_BRANCH);
+      });
+      app.dataset.placementDecalDraws = String(nextPlacementDecals.audit.draws);
+      app.dataset.placementDecalTriangles = String(nextPlacementDecals.audit.triangles);
+      app.dataset.placementDecalUv0Pairs = String(nextPlacementDecals.audit.uv0Pairs);
+    } catch (error) {
+      console.warn("[procplants] Placement decal draws rejected; rendering the plant without decals.", error);
+      app.dataset.placementDecalDraws = "0";
+      app.dataset.placementDecalRendererError = error instanceof Error ? error.message : String(error);
+    }
+  } else {
+    app.dataset.placementDecalDraws = "0";
+    delete app.dataset.placementDecalTriangles;
+    delete app.dataset.placementDecalUv0Pairs;
+    delete app.dataset.placementDecalRendererError;
+  }
   const weberPennTrim: ProcPlantWeberPennBuildMetadata | null = heroBuild && "weberPennTrim" in heroBuild
     ? (heroBuild.weberPennTrim as ProcPlantWeberPennBuildMetadata | null | undefined) ?? null
     : null;
   const nextHeroLodState: HeroLodState = {
     mesh: nextHero,
+    placementDecals: nextPlacementDecals,
     graph: heroBuild?.graph ?? null,
     weberPennTrim,
     stats: heroBuild?.stats ?? biome.heroStats ?? {
@@ -3471,9 +3559,11 @@ const performRegeneration = async (request: number) => {
   heroLodState = nextHeroLodState;
   biomePlacementLodState = null;
   scene.add(biomeGroup, heroMesh);
+  if (nextPlacementDecals) scene.add(nextPlacementDecals.root);
   disposeBiomePlacementLodState(previousBiomePlacementLodState);
   disposeGroup(previousBiome);
   disposeHeroLodState(previousHeroLodState);
+  while (retiredPlacementDecalBindings.length > 0) retiredPlacementDecalBindings.shift()!.dispose();
   while (retiredBakedMaterials.length > 0) {
     const retired = retiredBakedMaterials.shift()!;
     disposeLiveBakedMaterials?.(retired);
@@ -4278,8 +4368,10 @@ canvas.addEventListener("click", async (event) => {
     return;
   }
   if (kind === "decal") {
-    setSaveStatus("Decal placement requires an exact renderer-owned material and UV0 texture binding; no binding is active in the lab.");
-    return;
+    if (!livePlacementDecalBinding || livePlacementDecalBinding.disposed) {
+      setSaveStatus("Bind a decal image before placing an exact renderer-owned UV0 patch.");
+      return;
+    }
   }
   const placementScale: Record<ProcPlantPlaceableOrganKind, number> = {
     leaf: 1,
@@ -4311,6 +4403,9 @@ canvas.addEventListener("click", async (event) => {
     azimuth,
     scale: placementScale[kind],
     ...placementColors[kind],
+    ...(kind === "decal" && livePlacementDecalBinding
+      ? { decal: livePlacementDecalBinding.binding }
+      : {}),
   });
   if (!appended.operation) {
     setSaveStatus(
@@ -5061,6 +5156,13 @@ exportGlbButton.addEventListener("click", async () => {
     setSaveStatus("Generate a plant before exporting GLB.");
     return;
   }
+  const authoredDecals = currentPlacementPackage()?.operations.filter((operation) => operation.kind === "decal").length ?? 0;
+  if (authoredDecals > 0) {
+    app.dataset.lastGlbPlacementDecalsRejected = String(authoredDecals);
+    setSaveStatus("GLB export stopped: live placement decals use renderer-owned image bindings. Export JSON metadata or remove the decals; this path does not invent glTF material adoption.");
+    return;
+  }
+  delete app.dataset.lastGlbPlacementDecalsRejected;
   exportGlbButton.disabled = true;
   setSaveStatus("Preparing GLB with vertex color, sway, tintability, and contract metadata…");
   const activeLod = heroLodState.controller.active;
@@ -5227,6 +5329,16 @@ document.querySelector<HTMLButtonElement>("#exportJson")!.addEventListener("clic
       graphOperations: currentPruneOperations().map((segmentId) => ({ operation: "remove", segmentId })),
       graphOperationGroups: currentPruneHistory().map((segmentIds) => ({ operation: "remove", segmentIds: [...segmentIds] })),
       organPlacements: currentPlacementPackage(),
+      placementDecalBinding: livePlacementDecalBinding && !livePlacementDecalBinding.disposed
+        ? {
+            ...livePlacementDecalBinding.metadata,
+            sourceFile: livePlacementDecalFileName,
+            width: Number(app.dataset.placementDecalBindingWidth ?? 0),
+            height: Number(app.dataset.placementDecalBindingHeight ?? 0),
+            liveDraws: heroLodState?.placementDecals?.audit.draws ?? 0,
+            liveTriangles: heroLodState?.placementDecals?.audit.triangles ?? 0,
+          }
+        : null,
       weberPennTrim: heroLodState?.weberPennTrim
         ? {
             target: heroLodState.weberPennTrim.target,
@@ -5297,6 +5409,119 @@ document.querySelector<HTMLButtonElement>("#savePreset")!.addEventListener("clic
   flashButtonText(event.currentTarget as HTMLButtonElement, "Saved");
 });
 
+const placementDecalContentHash = async (bytes: ArrayBuffer) => {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return [...digest.slice(0, 8)].map((value) => value.toString(16).padStart(2, "0")).join("");
+};
+
+importPlacementDecalButton.addEventListener("click", () => placementDecalFileInput.click());
+
+placementDecalFileInput.addEventListener("change", async () => {
+  const file = placementDecalFileInput.files?.[0];
+  placementDecalFileInput.value = "";
+  if (!file) return;
+  importPlacementDecalButton.disabled = true;
+  placementDecalStatus.textContent = `Decoding ${file.name} into a renderer-owned UV0 decal binding...`;
+  let bitmap: ImageBitmap | null = null;
+  let texture: THREE.CanvasTexture | null = null;
+  let material: THREE.MeshStandardMaterial | null = null;
+  try {
+    if (!["image/png", "image/webp", "image/jpeg"].includes(file.type)) {
+      throw new Error("Decal bindings accept PNG, WebP, or JPEG images.");
+    }
+    if (file.size < 1 || file.size > 32 * 1024 * 1024) throw new Error("Decal image bytes must be between 1 byte and 32 MiB.");
+    const bytes = await file.arrayBuffer();
+    const [hash, decoded, decalRenderer] = await Promise.all([
+      placementDecalContentHash(bytes),
+      createImageBitmap(new Blob([bytes], { type: file.type })),
+      loadProcPlantPlacementDecalThree(),
+    ]);
+    bitmap = decoded;
+    if (bitmap.width < 1 || bitmap.height < 1 || bitmap.width > 4096 || bitmap.height > 4096 || bitmap.width * bitmap.height > 16_777_216) {
+      throw new Error("Decal images are limited to 4096x4096 (16 megapixels).");
+    }
+    const canvasSource = document.createElement("canvas");
+    canvasSource.width = bitmap.width;
+    canvasSource.height = bitmap.height;
+    const context = canvasSource.getContext("2d");
+    if (!context) throw new Error("This browser cannot create a decal texture canvas.");
+    context.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    bitmap = null;
+    texture = new THREE.CanvasTexture(canvasSource);
+    texture.name = `procplant-placement-decal-texture:${hash}`;
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
+    texture.needsUpdate = true;
+    material = installProcPlantWindShader(new THREE.MeshStandardMaterial({
+      name: `procplant-placement-decal-material:${hash}`,
+      map: texture,
+      color: 0xffffff,
+      roughness: 0.82,
+      metalness: 0,
+      alphaTest: file.type === "image/jpeg" ? 0 : 0.08,
+      side: THREE.DoubleSide,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    }), windUniforms, hierarchicalWindShaderOptions);
+    const nextBinding = decalRenderer.createProcPlantThreePlacementDecalBinding({
+      binding: {
+        contract: "procplants.placement-decal-binding",
+        version: 1,
+        materialId: `lab-decal-material-${hash}`,
+        textureId: `lab-decal-texture-${hash}`,
+        uvSet: 0,
+        uvRect: [0, 0, 1, 1],
+      },
+      material,
+      texture,
+      materialOwnership: "owned",
+      textureOwnership: "owned",
+    });
+    material = null;
+    texture = null;
+    if (livePlacementDecalBinding) retiredPlacementDecalBindings.push(livePlacementDecalBinding);
+    livePlacementDecalBinding = nextBinding;
+    livePlacementDecalFileName = file.name;
+    app.dataset.placementDecalBindingHash = hash;
+    app.dataset.placementDecalBindingMaterial = nextBinding.metadata.materialId;
+    app.dataset.placementDecalBindingTexture = nextBinding.metadata.textureId;
+    app.dataset.placementDecalBindingWidth = String(canvasSource.width);
+    app.dataset.placementDecalBindingHeight = String(canvasSource.height);
+    placementDecalStatus.textContent = `${file.name}: renderer-owned ${canvasSource.width}x${canvasSource.height} UV0 texture/material binding ready; live JSON export records metadata only.`;
+    syncPlacementButtons();
+    regenerate();
+  } catch (error) {
+    console.error("[procplants] Placement decal binding failed.", error);
+    placementDecalStatus.textContent = `Decal binding failed: ${error instanceof Error ? error.message : String(error)}`;
+    material?.dispose();
+    texture?.dispose();
+  } finally {
+    bitmap?.close();
+    importPlacementDecalButton.disabled = regenerationBusy;
+  }
+});
+
+clearPlacementDecalButton.addEventListener("click", () => {
+  if (!livePlacementDecalBinding) return;
+  retiredPlacementDecalBindings.push(livePlacementDecalBinding);
+  livePlacementDecalBinding = null;
+  livePlacementDecalFileName = "";
+  delete app.dataset.placementDecalBindingHash;
+  delete app.dataset.placementDecalBindingMaterial;
+  delete app.dataset.placementDecalBindingTexture;
+  delete app.dataset.placementDecalBindingWidth;
+  delete app.dataset.placementDecalBindingHeight;
+  placementDecalStatus.textContent = "Decal binding cleared. Existing decal authoring records remain in JSON and fail closed until their exact binding is restored.";
+  syncPlacementButtons();
+  regenerate();
+});
+
 const resize = () => {
   const w = window.innerWidth;
   const h = window.innerHeight;
@@ -5354,6 +5579,11 @@ window.addEventListener("pagehide", () => {
   disposeBiomePlacementLodState(biomePlacementLodState);
   disposeHeroImportPreview();
   disposeHeroDebugOverlay();
+  heroLodState?.placementDecals?.dispose();
+  livePlacementDecalBinding?.dispose();
+  livePlacementDecalBinding = null;
+  for (const retired of retiredPlacementDecalBindings) retired.dispose();
+  retiredPlacementDecalBindings.length = 0;
   if (liveBakedMaterials) disposeLiveBakedMaterials?.(liveBakedMaterials);
   for (const retired of retiredBakedMaterials) disposeLiveBakedMaterials?.(retired);
   retiredBakedMaterials.length = 0;
