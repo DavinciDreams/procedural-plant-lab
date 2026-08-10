@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
+const weberPennMode = process.argv.includes("--weber-penn");
 const appPort = Number(process.env.PROCPLANTS_PRODUCTION_DAG_SMOKE_PORT ?? 4199);
 const debugPort = Number(process.env.PROCPLANTS_PRODUCTION_DAG_SMOKE_DEBUG_PORT ?? 9249);
 const chromeCandidates = process.platform === "win32"
@@ -60,7 +61,9 @@ try {
   browser = spawn(chrome, [
     "--headless=new", "--disable-gpu", "--disable-crashpad", "--no-first-run", "--disable-extensions",
     `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profile}`,
-    `http://127.0.0.1:${appPort}/?p=understoryShrub&s=understoryShrub&seed=807026&d=0.15`,
+    weberPennMode
+      ? `http://127.0.0.1:${appPort}/?p=oakCanopy&s=oakCanopy&seed=807026&d=0.02`
+      : `http://127.0.0.1:${appPort}/?p=understoryShrub&s=understoryShrub&seed=807026&d=0.15`,
   ], { stdio: "ignore", windowsHide: true });
   const targets = await waitForJson(`http://127.0.0.1:${debugPort}/json`);
   const target = targets.find((entry) => entry.type === "page" && entry.url.includes(String(appPort)));
@@ -103,6 +106,7 @@ try {
   const evaluated = await command("Runtime.evaluate", {
     expression: `
       (async () => {
+        const weberPennMode = ${JSON.stringify(weberPennMode)};
         const wait = (ms) => new Promise((resolveWait) => setTimeout(resolveWait, ms));
         const app = document.querySelector('#app');
         const triangles = () => Number(document.querySelector('#triangles').textContent.replaceAll(',', ''));
@@ -128,15 +132,19 @@ try {
         const seededHash = app.dataset.productionDagHash;
         const seededArtifacts = Number(app.dataset.productionDagArtifacts);
 
-        foliage = rowFor('foliage');
-        const dependencySelect = foliage.querySelector('.graph-dependency-editor select');
-        const branchingOption = [...dependencySelect.options].find((option) => option.textContent === 'Branch hierarchy');
-        dependencySelect.value = branchingOption.value;
-        [...foliage.querySelectorAll('.graph-dependency-editor button')]
-          .find((button) => button.textContent === 'Remove input').click();
-        await waitForIdle();
-        const rewiredTriangles = triangles();
-        const rewiredHash = app.dataset.productionDagHash;
+        let rewiredTriangles = seededTriangles;
+        let rewiredHash = seededHash;
+        if (!weberPennMode) {
+          foliage = rowFor('foliage');
+          const dependencySelect = foliage.querySelector('.graph-dependency-editor select');
+          const branchingOption = [...dependencySelect.options].find((option) => option.textContent === 'Branch hierarchy');
+          dependencySelect.value = branchingOption.value;
+          [...foliage.querySelectorAll('.graph-dependency-editor button')]
+            .find((button) => button.textContent === 'Remove input').click();
+          await waitForIdle();
+          rewiredTriangles = triangles();
+          rewiredHash = app.dataset.productionDagHash;
+        }
 
         let exportedBlob = null;
         const originalCreateObjectUrl = URL.createObjectURL;
@@ -165,6 +173,7 @@ try {
           exportRecords: exported.authoring.productionDag?.records?.length,
           exportExecuted: exported.authoring.productionDag?.records?.filter((record) => record.status === 'executed').length,
           exportSeedRecord: exported.authoring.productionDag?.records?.find((record) => record.stage === 'foliage')?.seed,
+          exportFoliageArtifactKind: exported.authoring.productionDag?.records?.find((record) => record.stage === 'foliage')?.artifactKind,
           overrideKinds: exported.authoring.generatorOverrides.map((operation) => operation.op),
           foliageDependencies: exported.authoring.generatorGraph.nodes.find((node) => node.stage === 'foliage')?.dependsOn,
         };
@@ -180,13 +189,20 @@ try {
   assert.equal(result.exportExecuted, 8);
   assert.equal(result.exportSeedRecord, 1234);
   assert.equal(result.seededArtifacts, 8);
-  assert.notEqual(result.seededTriangles, result.baselineTriangles, "independent foliage seed must change live typed output");
-  assert.notEqual(result.rewiredTriangles, result.seededTriangles, "removing the branching input must change live typed output");
-  assert.notEqual(result.seededHash, result.rewiredHash);
   assert.ok(result.overrideKinds.includes("set-seed"));
-  assert.ok(result.overrideKinds.includes("remove-dependency"));
-  assert.ok(result.overrideKinds.includes("set-parent-scope"));
-  assert.equal(result.foliageDependencies.length, 1);
+  if (weberPennMode) {
+    assert.equal(result.exportFoliageArtifactKind, "weber-penn-parts");
+    assert.ok(result.seededTriangles > 0 && result.baselineTriangles > 0,
+      "both canonical and typed Weber-Penn browser paths must render geometry");
+    assert.equal(result.foliageDependencies.length, 2);
+  } else {
+    assert.notEqual(result.seededTriangles, result.baselineTriangles, "independent foliage seed must change live typed output");
+    assert.notEqual(result.rewiredTriangles, result.seededTriangles, "removing the branching input must change live typed output");
+    assert.notEqual(result.seededHash, result.rewiredHash);
+    assert.ok(result.overrideKinds.includes("remove-dependency"));
+    assert.ok(result.overrideKinds.includes("set-parent-scope"));
+    assert.equal(result.foliageDependencies.length, 1);
+  }
   assert.equal(result.resetTriangles, result.baselineTriangles, "reset must restore exact canonical live triangles");
   assert.equal(result.pathAfterReset, "legacy-canonical");
   console.log(JSON.stringify(result));
