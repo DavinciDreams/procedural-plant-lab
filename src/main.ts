@@ -33,8 +33,15 @@ import {
   type ProcPlantGenome,
   type ProcPlantGraph,
   type ProcPlantInstancedParts,
+  type ProcPlantStats,
   type ProcPlantTemplate,
+  type ProcPlantWeberPennBuildMetadata,
 } from "./procplants";
+import {
+  createProcPlantWeberPennTrimOperation,
+  createProcPlantWeberPennTrimOverrideSet,
+  type ProcPlantWeberPennTrimTarget,
+} from "./procplant-weber-penn-trim";
 import {
   allProcPlantPresetIds,
   installSavedProcPlantPresets,
@@ -351,6 +358,7 @@ app.innerHTML = `
         <button id="pruneMode" type="button" aria-pressed="false">Trim Mode</button>
         <button id="pruneSelected" type="button" disabled>Prune Selected</button>
         <button id="undoPrune" type="button" disabled>Undo Trim</button>
+        <button id="resetPrune" type="button" disabled>Reset Trim</button>
       </div>
       <div class="button-row">
         <button id="placementMode" type="button" aria-pressed="false" disabled>Place Organ</button>
@@ -541,6 +549,9 @@ let heroMesh: THREE.Mesh | null = null;
 interface HeroLodState {
   mesh: THREE.Mesh;
   graph: ProcPlantGraph | null;
+  weberPennTrim: ProcPlantWeberPennBuildMetadata | null;
+  stats: ProcPlantStats;
+  authoringGeometryLocked: boolean;
   lods: ProcPlantCompiledLod[];
   geometries: THREE.BufferGeometry[];
   controller: ProcPlantLodController;
@@ -612,6 +623,7 @@ interface ActiveCutoutSource {
 let activeCutoutSource: ActiveCutoutSource | null = null;
 let activeCutout: ProcPlantCutout | null = null;
 const pruneOperations = new Map<string, string[][]>();
+const weberPennTrimTargets = new Map<string, ProcPlantWeberPennTrimTarget>();
 const organPlacementPackages = new Map<string, ProcPlantOrganPlacementPackage>();
 let pruneModeVisible = false;
 let placementModeVisible = false;
@@ -805,6 +817,7 @@ const graphPreview = document.querySelector<HTMLElement>("#graphPreview")!;
 const pruneModeButton = document.querySelector<HTMLButtonElement>("#pruneMode")!;
 const pruneSelectedButton = document.querySelector<HTMLButtonElement>("#pruneSelected")!;
 const undoPruneButton = document.querySelector<HTMLButtonElement>("#undoPrune")!;
+const resetPruneButton = document.querySelector<HTMLButtonElement>("#resetPrune")!;
 const placementModeButton = document.querySelector<HTMLButtonElement>("#placementMode")!;
 const placementKindSelect = document.querySelector<HTMLSelectElement>("#placementKind")!;
 const undoPlacementButton = document.querySelector<HTMLButtonElement>("#undoPlacement")!;
@@ -2024,6 +2037,7 @@ const scatterBiome = async (genome: ProcPlantGenome, env: ProcPlantEnvironment, 
   return {
     group,
     heroTemplate: reusableTree?.stems,
+    heroStats: reusableTree?.stats,
     generatorBuilds: reusableTree ? 1 : prototypeCache.size,
     treeLodSource: lodPlacements.length > 1 && lodFallbackMeshes.length > 0
       ? {
@@ -2151,6 +2165,7 @@ const disposeHeroPruneTool = () => {
   if (!heroPruneTool) return;
   heroPruneTool.dispose();
   heroPruneTool = null;
+  delete app.dataset.heroPruneSelectedIds;
 };
 
 const syncPruneButtons = () => {
@@ -2158,28 +2173,69 @@ const syncPruneButtons = () => {
   pruneModeButton.textContent = pruneModeVisible ? "Exit Trim" : "Trim Mode";
   pruneSelectedButton.disabled = regenerationBusy || !heroPruneTool?.getSelectedSegment();
   undoPruneButton.disabled = regenerationBusy || currentPruneOperations().length === 0;
+  resetPruneButton.disabled = undoPruneButton.disabled;
 };
 
 const refreshHeroPruneTool = async () => {
   disposeHeroPruneTool();
   const request = ++heroPruneToolRequest;
   const target = heroLodState;
-  if (!pruneModeVisible || !target?.graph) {
-    app.dataset.heroPruneAvailable = String(Boolean(target?.graph));
+  if (!pruneModeVisible || !target) {
+    app.dataset.heroPruneAvailable = String(Boolean(target?.graph || target?.weberPennTrim));
     syncPruneButtons();
     return;
   }
   const { createProcPlantPruneTool } = await loadProcPlantAuthoringTools();
+  if (request !== heroPruneToolRequest || !pruneModeVisible || heroLodState !== target) return;
+  // The default Weber-Penn preview is worker-built. Materialize its exact
+  // signature-bound picker only when trim mode is requested, keeping startup
+  // and ordinary regeneration off the main thread.
+  if (!target.weberPennTrim && selectedGenome().weberPenn) {
+    setSaveStatus("Preparing stable Weber-Penn stem identities for trim mode…");
+    const built = buildProcPlantTemplate(selectedGenome(), selectedGeneratorSeed(), envFromState());
+    if (request !== heroPruneToolRequest || !pruneModeVisible || heroLodState !== target) return;
+    const sourceLod: ProcPlantCompiledLod = {
+      level: 0,
+      label: "full",
+      distance: 0,
+      template: built.template,
+      triangles: built.template.idx.length / 3,
+      vertices: built.template.pos.length / 3,
+    };
+    const sourceGeometry = templateToGeometry(built.template);
+    for (const geometry of target.geometries) geometry.dispose();
+    target.mesh.geometry = sourceGeometry;
+    target.lods = [sourceLod];
+    target.geometries = [sourceGeometry];
+    target.controller = new ProcPlantLodController(
+      [sourceLod],
+      camera.position.distanceTo(target.mesh.position) / target.scale,
+    );
+    target.graph = built.graph;
+    target.weberPennTrim = built.weberPennTrim ?? null;
+    target.stats = built.stats;
+    target.authoringGeometryLocked = true;
+    app.dataset.heroLod = "full";
+    app.dataset.heroLodLevel = "0";
+    app.dataset.heroLodPending = "false";
+    app.dataset.heroTemplateTriangles = String(sourceLod.triangles);
+    app.dataset.heroTemplateVertices = String(sourceLod.vertices);
+    refreshPreviewGeometryStats();
+  }
+  const pickerGraph = target.weberPennTrim?.pickerGraph ?? target.graph;
   // The request guard is what catches a mode toggled off and back on across the
   // import; heroLodState alone is unchanged in that case.
-  if (request !== heroPruneToolRequest || !pruneModeVisible || heroLodState !== target || !target.graph) return;
-  const tool = createProcPlantPruneTool(target.graph, { visible: true, opacity: 0.3, radiusScale: 2.2 });
+  if (request !== heroPruneToolRequest || !pruneModeVisible || heroLodState !== target || !pickerGraph) return;
+  const tool = createProcPlantPruneTool(pickerGraph, { visible: true, opacity: 0.3, radiusScale: 2.2 });
   tool.object.position.copy(target.mesh.position);
   tool.object.quaternion.copy(target.mesh.quaternion);
   tool.object.scale.copy(target.mesh.scale);
   heroPruneTool = tool;
   scene.add(tool.object);
   app.dataset.heroPruneAvailable = "true";
+  app.dataset.heroPruneBackend = target.weberPennTrim ? "weber-penn" : "graph";
+  if (target.weberPennTrim) app.dataset.heroPruneTargetSignature = target.weberPennTrim.target.topologySignature ?? "";
+  else delete app.dataset.heroPruneTargetSignature;
   syncPruneButtons();
 };
 
@@ -2460,7 +2516,7 @@ const installCompiledHeroLods = async (
   resultPromise: Promise<{ lods: ProcPlantCompiledLod[] | null; error: unknown }>,
 ) => {
   const result = await resultPromise;
-  if (request !== regenerationRequest || heroLodState !== target || biomeGroup !== targetGroup) return;
+  if (request !== regenerationRequest || heroLodState !== target || biomeGroup !== targetGroup || target.authoringGeometryLocked) return;
   if (!result.lods) {
     if (!(result.error instanceof DOMException && result.error.name === "AbortError")) {
       console.warn("[procplants] Hero LOD worker unavailable; keeping full geometry.", result.error);
@@ -2557,7 +2613,7 @@ const installCompiledHeroLods = async (
   // The dynamic imports above yield, so a newer regeneration may have taken over
   // while this run was suspended. Re-check before mutating any shared scene state:
   // proceeding here would dispose the live pool and blank the pooled cohort.
-  if (request !== regenerationRequest || heroLodState !== target || biomeGroup !== targetGroup) {
+  if (request !== regenerationRequest || heroLodState !== target || biomeGroup !== targetGroup || target.authoringGeometryLocked) {
     disposeBiomePlacementLodState(nextBiomePlacementLodState);
     for (const geometry of geometries) geometry.dispose();
     return;
@@ -2615,6 +2671,17 @@ const performRegeneration = async (request: number) => {
 
   currentStats = { triangles: 0, plants: 0, leaves: 0, draws: 0 };
   const authoredPrunes = currentPruneOperations();
+  const pruneKey = currentPruneKey();
+  const weberPennTrimTarget = genome.weberPenn ? weberPennTrimTargets.get(pruneKey) : undefined;
+  const weberPennTrimOverrides = weberPennTrimTarget && authoredPrunes.length > 0
+    ? createProcPlantWeberPennTrimOverrideSet(
+        weberPennTrimTarget,
+        [createProcPlantWeberPennTrimOperation("remove", {
+          kind: "segment-ids",
+          segmentIds: authoredPrunes,
+        })],
+      )
+    : undefined;
   const authoredPlacements = currentPlacementPackage();
   const authoringToolsPromise = authoredPrunes.length > 0 ? loadProcPlantAuthoringTools() : null;
   const placementModulePromise = authoredPlacements?.operations.length ? loadProcPlantOrganPlacement() : null;
@@ -2633,7 +2700,9 @@ const performRegeneration = async (request: number) => {
 
   // Finish both replacements before removing the visible scene. This keeps a
   // failed or superseded build from leaving a partially-empty preview.
-  let heroBuild = biome.heroTemplate ? null : buildProcPlantTemplate(genome, generatorSeed, env);
+  let heroBuild = biome.heroTemplate && !weberPennTrimOverrides
+    ? null
+    : buildProcPlantTemplate(genome, generatorSeed, env, { trimOverrides: weberPennTrimOverrides });
   if (heroBuild && authoredPrunes.length > 0 && !genome.weberPenn && !genome.branchModules) {
     const { pruneProcPlantGraph } = await authoringToolsPromise!;
     if (request !== regenerationRequest) {
@@ -2663,7 +2732,7 @@ const performRegeneration = async (request: number) => {
     delete app.dataset.organPlacementApplied;
     delete app.dataset.organPlacementUnsupported;
   }
-  const template = biome.heroTemplate ?? heroBuild!.template;
+  const template = heroBuild?.template ?? biome.heroTemplate!;
   const heroLods: ProcPlantCompiledLod[] = [{
     level: 0,
     label: "full",
@@ -2696,6 +2765,14 @@ const performRegeneration = async (request: number) => {
   const nextHeroLodState: HeroLodState = {
     mesh: nextHero,
     graph: heroBuild?.graph ?? null,
+    weberPennTrim: heroBuild?.weberPennTrim ?? null,
+    stats: heroBuild?.stats ?? biome.heroStats ?? {
+      stems: 0,
+      leaves: 0,
+      flowers: 0,
+      triangles: template.idx.length / 3,
+    },
+    authoringGeometryLocked: Boolean(heroBuild?.weberPennTrim),
     lods: heroLods,
     geometries: heroGeometries,
     controller: nextController,
@@ -2706,6 +2783,25 @@ const performRegeneration = async (request: number) => {
     impostorBaseQuaternion: nextHero.quaternion.clone(),
     impostorFacing: false,
   };
+
+  const trimAudit = nextHeroLodState.weberPennTrim?.trimAudit;
+  if (trimAudit) {
+    app.dataset.weberPennTrimStatus = trimAudit.status;
+    app.dataset.weberPennTrimSourceSignature = trimAudit.sourceTopologySignature;
+    app.dataset.weberPennTrimResultSignature = trimAudit.resultTopologySignature;
+    app.dataset.weberPennTrimRemovedStems = String(trimAudit.removedStemIds.length);
+    app.dataset.weberPennTrimRemovedLeaves = String(trimAudit.removedLeafIds.length);
+    app.dataset.weberPennTrimBeforeTriangles = String(trimAudit.beforeBranchTriangles + trimAudit.beforeNativeLeafTriangles);
+    app.dataset.weberPennTrimAfterTriangles = String(trimAudit.afterBranchTriangles + trimAudit.afterNativeLeafTriangles);
+  } else {
+    delete app.dataset.weberPennTrimStatus;
+    delete app.dataset.weberPennTrimSourceSignature;
+    delete app.dataset.weberPennTrimResultSignature;
+    delete app.dataset.weberPennTrimRemovedStems;
+    delete app.dataset.weberPennTrimRemovedLeaves;
+    delete app.dataset.weberPennTrimBeforeTriangles;
+    delete app.dataset.weberPennTrimAfterTriangles;
+  }
 
   const previousBiome = biomeGroup;
   const previousHeroLodState = heroLodState;
@@ -2767,6 +2863,8 @@ const performRegeneration = async (request: number) => {
   growthStatus.dataset.buildMs = (performance.now() - startedAt).toFixed(1);
   app.dataset.heroLod = nextController.active.label;
   app.dataset.heroLodLevel = String(nextController.active.level);
+  app.dataset.heroTemplateTriangles = String(template.idx.length / 3);
+  app.dataset.heroTemplateVertices = String(template.pos.length / 3);
   app.dataset.heroLodPending = String(shouldCompileHeroLods);
   syncImpostorButtons();
   syncCrownVolumeButton();
@@ -2808,6 +2906,7 @@ const setRegenerationBusy = (busy: boolean) => {
   if (busy) {
     pruneSelectedButton.disabled = true;
     undoPruneButton.disabled = true;
+    resetPruneButton.disabled = true;
   } else {
     syncPruneButtons();
   }
@@ -3118,7 +3217,7 @@ pruneModeButton.addEventListener("click", () => {
   void refreshHeroPruneTool();
   setSaveStatus(
     pruneModeVisible
-      ? heroLodState?.graph
+      ? heroLodState?.graph || selectedGenome().weberPenn
         ? "Trim mode: click, drag a pruning stroke, or Shift-drag a lasso; Ctrl/Command adds to selection."
         : "Trim mode is unavailable for this baked worker-backed tree; choose a graph-backed plant."
       : "Trim mode closed.",
@@ -3177,6 +3276,19 @@ const clearPruneGesture = () => {
   pruneGestureOverlay.classList.remove("active", "lasso");
 };
 
+const stablePruneIdsForPickerSelection = (pickedIds: readonly string[]) => {
+  const trimMetadata = heroLodState?.weberPennTrim;
+  return trimMetadata
+    ? [...new Set(pickedIds.flatMap((pickId) => trimMetadata.pickerStemIds[pickId] ?? []))].sort()
+    : [...pickedIds];
+};
+
+const syncPruneSelectionDataset = () => {
+  const stableIds = stablePruneIdsForPickerSelection(heroPruneTool?.getSelectedSegments() ?? []);
+  if (stableIds.length > 0) app.dataset.heroPruneSelectedIds = stableIds.join(",");
+  else delete app.dataset.heroPruneSelectedIds;
+};
+
 canvas.addEventListener("pointerdown", (event) => {
   if (!pruneModeVisible || !heroPruneTool || event.button !== 0) return;
   const rect = canvas.getBoundingClientRect();
@@ -3215,6 +3327,7 @@ const finishPruneGesture = (event: PointerEvent) => {
       ? heroPruneTool.selectSegmentsFromNdcLasso(points, camera, { mode, edgeToleranceNdc: tolerance * 0.35 })
       : heroPruneTool.selectSegmentsFromNdcStroke(points, camera, { mode, radiusNdc: tolerance });
     suppressPruneClick = true;
+    syncPruneSelectionDataset();
     syncPruneButtons();
     setSaveStatus(
       result.matchedSegmentIds.length > 0
@@ -3240,6 +3353,7 @@ canvas.addEventListener("click", (event) => {
   const rect = canvas.getBoundingClientRect();
   const hit = heroPruneTool.pickFromScreen(event.clientX, event.clientY, rect, camera);
   heroPruneTool.setSelectedSegment(hit?.segmentId ?? null);
+  syncPruneSelectionDataset();
   syncPruneButtons();
   setSaveStatus(hit ? `Selected ${hit.segmentId}.` : "No branch segment selected.");
 });
@@ -3329,15 +3443,22 @@ canvas.addEventListener("click", async (event) => {
 });
 
 pruneSelectedButton.addEventListener("click", () => {
-  const segmentIds = heroPruneTool?.getSelectedSegments() ?? [];
-  if (segmentIds.length === 0) return;
+  const pickedIds = heroPruneTool?.getSelectedSegments() ?? [];
+  if (pickedIds.length === 0) return;
   const key = currentPruneKey();
   const history = pruneOperations.get(key) ?? [];
   const alreadyPruned = new Set(history.flat());
+  const trimMetadata = heroLodState?.weberPennTrim;
+  const segmentIds = stablePruneIdsForPickerSelection(pickedIds);
+  if (trimMetadata && segmentIds.length === 0) {
+    setSaveStatus("The selected picker spans do not map to stable Weber-Penn stem identities; no trim was saved.");
+    return;
+  }
   const group = segmentIds.filter((segmentId) => !alreadyPruned.has(segmentId));
   if (group.length === 0) return;
   history.push(group);
   pruneOperations.set(key, history);
+  if (trimMetadata) weberPennTrimTargets.set(key, trimMetadata.target);
   setSaveStatus(`Pruning ${group.length} selected segment${group.length === 1 ? "" : "s"} and descendants…`);
   regenerate();
 });
@@ -3347,9 +3468,21 @@ undoPruneButton.addEventListener("click", () => {
   const history = pruneOperations.get(key);
   if (!history?.length) return;
   history.pop();
-  if (history.length === 0) pruneOperations.delete(key);
+  if (history.length === 0) {
+    pruneOperations.delete(key);
+    weberPennTrimTargets.delete(key);
+  }
   else pruneOperations.set(key, history);
   setSaveStatus("Restoring the last procedural trim…");
+  regenerate();
+});
+
+resetPruneButton.addEventListener("click", () => {
+  const key = currentPruneKey();
+  if (!pruneOperations.has(key)) return;
+  pruneOperations.delete(key);
+  weberPennTrimTargets.delete(key);
+  setSaveStatus("Resetting all procedural trims to the exact generated source…");
   regenerate();
 });
 
@@ -3380,6 +3513,21 @@ inspectReadinessButton.addEventListener("click", async () => {
         ? [{ id: String(activeCutout.id), width: activeCutout.width, height: activeCutout.height }]
         : undefined,
       providesUvs: Boolean(activeCutout),
+      ...(heroLodState
+        ? {
+            structuralParts: {
+              stems: heroLodState.controller.active.template,
+              instances: [],
+              graph: heroLodState.graph ?? { stems: [], segments: [], organs: [], segmentRecords: [], attachments: [] },
+              stats: {
+                ...heroLodState.stats,
+                triangles: heroLodState.controller.active.template.idx.length / 3,
+                stemTriangles: heroLodState.controller.active.template.idx.length / 3,
+                instances: 0,
+              },
+            },
+          }
+        : {}),
     });
     const structural = report.structural;
     const memoryMb = structural.geometry.estimatedGpuBytes / (1024 * 1024);
@@ -3399,6 +3547,8 @@ inspectReadinessButton.addEventListener("click", async () => {
     ].join(" · ");
     app.dataset.readinessScore = String(report.score);
     app.dataset.readinessReady = String(report.ready);
+    app.dataset.readinessTriangles = String(structural.geometry.triangles);
+    app.dataset.readinessVertices = String(structural.geometry.vertices);
     readinessStatus.dataset.kind = "qa";
   } catch (error) {
     console.error("[procplants] Asset QA failed.", error);
@@ -4016,6 +4166,19 @@ exportGlbButton.addEventListener("click", async () => {
         lodLabel: activeLod.label,
         lodDistance: activeLod.distance,
         previewScale: heroLodState.scale,
+        authoredTriangles: activeLod.triangles,
+        authoredVertices: activeLod.vertices,
+        ...(heroLodState.weberPennTrim?.trimAudit
+          ? {
+              weberPennTrimContract: "procplants.weber-penn-trim-overrides",
+              weberPennTrimStatus: heroLodState.weberPennTrim.trimAudit.status,
+              weberPennTrimSourceSignature: heroLodState.weberPennTrim.trimAudit.sourceTopologySignature,
+              weberPennTrimResultSignature: heroLodState.weberPennTrim.trimAudit.resultTopologySignature,
+              weberPennTrimOperations: heroLodState.weberPennTrim.trimAudit.operations.length,
+              weberPennTrimRemovedStems: heroLodState.weberPennTrim.trimAudit.removedStemIds.length,
+              weberPennTrimRemovedLeaves: heroLodState.weberPennTrim.trimAudit.removedLeafIds.length,
+            }
+          : {}),
       },
     } as const;
     const authoring = await loadProcPlantAuthoringTools();
@@ -4126,6 +4289,21 @@ document.querySelector<HTMLButtonElement>("#exportJson")!.addEventListener("clic
         : null,
       graphOperations: currentPruneOperations().map((segmentId) => ({ operation: "remove", segmentId })),
       graphOperationGroups: currentPruneHistory().map((segmentIds) => ({ operation: "remove", segmentIds: [...segmentIds] })),
+      weberPennTrim: heroLodState?.weberPennTrim
+        ? {
+            target: heroLodState.weberPennTrim.target,
+            operations: currentPruneOperations().length > 0
+              ? createProcPlantWeberPennTrimOverrideSet(
+                  heroLodState.weberPennTrim.target,
+                  [createProcPlantWeberPennTrimOperation("remove", {
+                    kind: "segment-ids",
+                    segmentIds: currentPruneOperations(),
+                  })],
+                )
+              : null,
+            audit: heroLodState.weberPennTrim.trimAudit,
+          }
+        : null,
       generatorGraph,
       generatorOverrides,
       generatorApplyAudit: {

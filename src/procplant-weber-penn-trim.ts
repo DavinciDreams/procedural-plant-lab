@@ -676,6 +676,22 @@ export const applyProcPlantWeberPennBakedTrimOverrides = (
     });
   }
 
+  if (![...retainedStems].some((index) => stemByIndex.get(index)?.baked)) {
+    const last = audits.at(-1);
+    if (last) {
+      last.status = "unsupported";
+      last.removedStemIds = [];
+      last.removedLeafIds = [];
+      last.reason = "Trim would remove the complete baked branch skeleton and leave no exportable plant geometry.";
+    }
+    return unchangedBakedAudit(
+      source,
+      "unsupported",
+      "Baked trim is atomic; removing the complete branch skeleton is not exportable and left the source unchanged.",
+      audits,
+    );
+  }
+
   const baked = filterBakedTreeGeometry(source.baked, retainedStems, retainedLeaves);
   const removedStemIds = source.baked.topology.stems.filter((stem) => !retainedStems.has(stem.stemIndex)).map((stem) => stemId(stem.stemIndex)).sort(stableCompare);
   const removedLeafIds = source.baked.topology.leaves.filter((leaf) => !retainedLeaves.has(leaf.leafIndex)).map((leaf) => leaf.attachmentId).sort(stableCompare);

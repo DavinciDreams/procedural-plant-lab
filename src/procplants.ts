@@ -24,6 +24,13 @@ import {
   PROCPLANT_BRANCH_TINTABLE_ATTRIBUTE,
 } from "./procplant-tube";
 import { declareProcPlantGeometryUv0 } from "./procplant-uv0";
+import {
+  applyProcPlantWeberPennBakedTrimOverrides,
+  bindProcPlantWeberPennTrimTarget,
+  type ProcPlantWeberPennBakedTrimAudit,
+  type ProcPlantWeberPennTrimOverrideSet,
+  type ProcPlantWeberPennTrimTarget,
+} from "./procplant-weber-penn-trim";
 
 export interface ProcPlantTemplate {
   pos: Float32Array;
@@ -333,6 +340,29 @@ export interface ProcPlantStats {
   flowers: number;
   accessories?: number;
   triangles: number;
+}
+
+export interface ProcPlantWeberPennBuildOptions {
+  /** Signature-bound baked trim operations. Unsupported or stale sets fail closed. */
+  trimOverrides?: ProcPlantWeberPennTrimOverrideSet;
+}
+
+export interface ProcPlantWeberPennBuildMetadata {
+  /** Binding for future trim operations against the exact unedited source bake. */
+  target: ProcPlantWeberPennTrimTarget;
+  /** Picker-only graph whose segment IDs map losslessly to stable source stem IDs. */
+  pickerGraph: ProcPlantGraph;
+  /** Stable picker segment ID to native stem ID mapping. */
+  pickerStemIds: Readonly<Record<string, string>>;
+  /** Present whenever a caller supplied an override set, including fail-closed audits. */
+  trimAudit: ProcPlantWeberPennBakedTrimAudit | null;
+}
+
+export interface ProcPlantBuildResult {
+  template: ProcPlantTemplate;
+  graph: ProcPlantGraph;
+  stats: ProcPlantStats;
+  weberPennTrim?: ProcPlantWeberPennBuildMetadata;
 }
 
 export type ProcPlantBiomeId =
@@ -6220,6 +6250,8 @@ const transformTemplate = (template: ProcPlantTemplate, matrix: THREE.Matrix4): 
 };
 
 interface WeberPennFoliageAnchor {
+  id: string;
+  ownerStemIndex: number;
   position: THREE.Vector3;
   direction: THREE.Vector3;
   right: THREE.Vector3;
@@ -6374,6 +6406,7 @@ const addWeberPennFoliageMass = (
   source: ProcPlantTemplate,
   branchVerts: number,
   fillAnchors: WeberPennFoliageAnchor[] = [],
+  retainedAnchorIds?: ReadonlySet<string>,
 ) => {
   if (!isWeberPennCrownFillEnabled(genome)) return 0;
   const leafVerts = source.pos.length / 3 - branchVerts;
@@ -6462,6 +6495,10 @@ const addWeberPennFoliageMass = (
       normal,
       new THREE.Vector3(scale, scale, scale),
     );
+    // Generate against the complete source-anchor sequence so surviving crown
+    // fill remains byte-stable; removed owner anchors simply suppress their
+    // already-determined organ instead of redistributing it elsewhere.
+    if (anchor && retainedAnchorIds && !retainedAnchorIds.has(anchor.id)) continue;
     addTransformedGeometry(builder, sprayGeometry, matrix, color, 0.38 + t * 0.58);
     added++;
   }
@@ -6799,7 +6836,8 @@ export const buildWeberPennProcPlantTemplate = (
   genome: ProcPlantGenome,
   seed = 1,
   env: ProcPlantEnvironment = defaultPlantEnvironment(),
-): { template: ProcPlantTemplate; graph: ProcPlantGraph; stats: ProcPlantStats } => {
+  options: ProcPlantWeberPennBuildOptions = {},
+): ProcPlantBuildResult => {
   if (!genome.weberPenn) {
     return buildProcPlantTemplate({ ...genome, weberPenn: undefined }, seed, env);
   }
@@ -6813,14 +6851,25 @@ export const buildWeberPennProcPlantTemplate = (
     generateLeaves,
     bakeOptions.maxBranchDepth,
   );
-  const baked = bakeTree(treeData, bakeOptions);
+  const sourceBaked = bakeTree(treeData, bakeOptions);
+  const target = bindProcPlantWeberPennTrimTarget({
+    backend: "weber-penn",
+    genomeId: genome.id,
+    seed: seed >>> 0,
+  }, sourceBaked);
+  const trimmed = options.trimOverrides
+    ? applyProcPlantWeberPennBakedTrimOverrides({ target, baked: sourceBaked }, options.trimOverrides)
+    : null;
+  const baked = trimmed?.baked ?? sourceBaked;
   const barkColor = new THREE.Color(genome.weberPenn.barkColor ?? 0x5d4327);
   const leafColor = new THREE.Color(genome.weberPenn.leafColor ?? genome.leaf.colorA);
-  const height = Math.max(1e-4, baked.max.y - baked.min.y);
+  // Keep normalization bound to the source bake so removing an outer branch
+  // cannot make the remaining tree jump or invalidate the bound picker.
+  const height = Math.max(1e-4, sourceBaked.max.y - sourceBaked.min.y);
   const scale = 1 / height;
-  const cx = (baked.min.x + baked.max.x) * 0.5;
-  const cz = (baked.min.z + baked.max.z) * 0.5;
-  const baseY = baked.min.y;
+  const cx = (sourceBaked.min.x + sourceBaked.max.x) * 0.5;
+  const cz = (sourceBaked.min.z + sourceBaked.max.z) * 0.5;
+  const baseY = sourceBaked.min.y;
   const branchVerts = baked.branches.positions.length / 3;
   const leafVerts = baked.leaves.positions.length / 3;
   const totalVerts = branchVerts + leafVerts;
@@ -6862,30 +6911,25 @@ export const buildWeberPennProcPlantTemplate = (
     p.add(bendDir.clone().multiplyScalar(Math.pow(h, 1.35) * bendAmount));
     return p;
   };
-  const makeLeafSiteAnchors = (tree: TreeData): WeberPennFoliageAnchor[] => {
-    let leaves = tree.leaves;
-    if (leaves.length > (bakeOptions.maxLeaves ?? Infinity)) {
-      const step = leaves.length / Math.max(1, bakeOptions.maxLeaves ?? 1);
-      const sampled: typeof leaves = [];
-      for (let i = 0; i < (bakeOptions.maxLeaves ?? 0); i++) {
-        sampled.push(leaves[Math.floor(i * step)]!);
-      }
-      leaves = sampled;
-    }
-    return leaves.map((leaf, index) => {
+  const makeLeafSiteAnchors = (tree: TreeData, topology = baked.topology): WeberPennFoliageAnchor[] => {
+    return topology.leaves.map((range) => {
+      const leaf = tree.leaves[range.leafIndex]!;
+      const attachmentIndex = Number(range.attachmentId.slice(range.attachmentId.lastIndexOf(":") + 1));
       const leafYUp = new THREE.Vector3(leaf.position.x, leaf.position.z, -leaf.position.y);
       const ny = (leafYUp.y - baseY) * scale;
       const position = warpPosition(
         (leafYUp.x - cx) * scale,
         ny,
         (leafYUp.z - cz) * scale,
-        seed + index * 31,
+        seed + attachmentIndex * 31,
         true,
       );
       const direction = new THREE.Vector3(leaf.direction.x, leaf.direction.z, -leaf.direction.y);
       if (direction.lengthSq() < 0.0001) direction.set(position.x, 0.1, position.z);
       direction.normalize();
       return {
+        id: range.attachmentId,
+        ownerStemIndex: range.parentStemIndex,
         position,
         direction,
         right: tangentBasis(direction).right,
@@ -6894,7 +6938,7 @@ export const buildWeberPennProcPlantTemplate = (
       };
     });
   };
-  const makeBranchTipAnchors = (tree: TreeData): WeberPennFoliageAnchor[] => {
+  const makeBranchTipAnchors = (tree: TreeData, topology = baked.topology): WeberPennFoliageAnchor[] => {
     const maxDepth = bakeOptions.maxBranchDepth ?? Infinity;
     let stems = maxDepth < Infinity
       ? tree.stems.filter((stem) => stem.depth <= maxDepth)
@@ -6905,8 +6949,10 @@ export const buildWeberPennProcPlantTemplate = (
         .slice(0, bakeOptions.maxStems);
     }
     const included = new Set(stems.map((stem) => tree.stems.indexOf(stem)));
+    const retainedStemIndices = new Set(topology.stems.map((stem) => stem.stemIndex));
     const anchors = stems
       .map((stem, index) => ({ stem, index }))
+      .filter(({ stem }) => retainedStemIndices.has(stem.index))
       .filter(({ stem }) => stem.points.length >= 2)
       .filter(({ stem, index }) => stem.depth > 0 || !stems.some((candidate) => candidate.depth > 0))
       .filter(({ stem }) => !stem.childIndices.some((child) => included.has(child)))
@@ -6935,6 +6981,8 @@ export const buildWeberPennProcPlantTemplate = (
         if (direction.lengthSq() < 0.0001) direction.set(position.x, 0.1, position.z);
         direction.normalize();
         return {
+          id: `weber-penn:branch-tip:${index}`,
+          ownerStemIndex: stem.index,
           position,
           direction,
           right: tangentBasis(direction).right,
@@ -6945,12 +6993,12 @@ export const buildWeberPennProcPlantTemplate = (
     if (anchors.length > 0) return anchors;
     return [];
   };
-  const makeFoliageAnchors = (tree: TreeData): WeberPennFoliageAnchor[] => {
+  const makeFoliageAnchors = (tree: TreeData, topology = baked.topology): WeberPennFoliageAnchor[] => {
     if ((genome.weberPenn?.fillAnchor ?? "leaf-sites") === "branch-tips") {
-      return makeBranchTipAnchors(tree);
+      return makeBranchTipAnchors(tree, topology);
     }
-    const leafSiteAnchors = makeLeafSiteAnchors(tree);
-    return leafSiteAnchors.length > 0 ? leafSiteAnchors : makeBranchTipAnchors(tree);
+    const leafSiteAnchors = makeLeafSiteAnchors(tree, topology);
+    return leafSiteAnchors.length > 0 ? leafSiteAnchors : makeBranchTipAnchors(tree, topology);
   };
   const varyColor = (color: THREE.Color, vertexSeed: number, amount = realism.colorVariance) => {
     const out = color.clone();
@@ -7034,7 +7082,9 @@ export const buildWeberPennProcPlantTemplate = (
 
   const baseTemplate: ProcPlantTemplate = { pos, nrm, uv0, col, tintable, sway, idx };
   const massBuilder = new TemplateBuilder();
-  const foliageAnchors = makeFoliageAnchors(treeData);
+  const sourceFoliageAnchors = makeFoliageAnchors(treeData, sourceBaked.topology);
+  const foliageAnchors = makeFoliageAnchors(treeData, baked.topology);
+  const retainedFoliageAnchorIds = new Set(foliageAnchors.map((anchor) => anchor.id));
   const massLeaves = addWeberPennFoliageMass(
     massBuilder,
     genome,
@@ -7042,7 +7092,8 @@ export const buildWeberPennProcPlantTemplate = (
     env,
     baseTemplate,
     branchVerts,
-    foliageAnchors,
+    sourceFoliageAnchors,
+    retainedFoliageAnchorIds,
   );
   const template = combineTemplates(baseTemplate, massBuilder.build());
   const graph = emptyGraph();
@@ -7061,7 +7112,7 @@ export const buildWeberPennProcPlantTemplate = (
       throw new Error(`Invalid Weber-Penn attachment frame: ${anchor.kind}:${index}`);
     }
     return {
-      id: `weber-penn:${anchor.kind}:${index}`,
+      id: anchor.id,
       // The vendor tree exposes stable sites and tangents, but its baked branch
       // indices do not provide a lossless segment-parent mapping.
       parentSegmentId: null,
@@ -7076,6 +7127,57 @@ export const buildWeberPennProcPlantTemplate = (
       organIndex: null,
     };
   });
+  const pickerGraph = emptyGraph();
+  const pickerStemIds: Record<string, string> = {};
+  const retainedBakedStemIndices = new Set(
+    baked.topology.stems.filter((stem) => stem.baked).map((stem) => stem.stemIndex),
+  );
+  const lastPickerSegmentByStem = new Map<number, string>();
+  for (const sourceStem of treeData.stems) {
+    if (!retainedBakedStemIndices.has(sourceStem.index) || sourceStem.points.length < 2) continue;
+    let previousNodeIndex: number | null = null;
+    for (let pointIndex = 0; pointIndex < sourceStem.points.length; pointIndex++) {
+      const point = sourceStem.points[pointIndex]!;
+      const yUp = new THREE.Vector3(point.position.x, point.position.z, -point.position.y);
+      const ny = (yUp.y - baseY) * scale;
+      const position = warpPosition(
+        (yUp.x - cx) * scale,
+        ny,
+        (yUp.z - cz) * scale,
+        seed + sourceStem.index * 977 + pointIndex * 17,
+        false,
+      );
+      const nodeIndex = pickerGraph.stems.length;
+      pickerGraph.stems.push({
+        position,
+        direction: new THREE.Vector3(0, 1, 0),
+        radius: Math.max(0.001, point.radius * scale),
+        depth: sourceStem.depth,
+        t: pointIndex / Math.max(1, sourceStem.points.length - 1),
+        index: nodeIndex,
+      });
+      if (previousNodeIndex !== null) {
+        const pickId = `weber-penn:pick:stem:${sourceStem.index}:span:${pointIndex - 1}`;
+        const ownerId = `weber-penn:stem:${sourceStem.index}`;
+        const parentSegmentId = pointIndex === 1
+          ? sourceStem.parentIndex === null ? null : lastPickerSegmentByStem.get(sourceStem.parentIndex) ?? null
+          : `weber-penn:pick:stem:${sourceStem.index}:span:${pointIndex - 2}`;
+        pickerGraph.segments.push([previousNodeIndex, nodeIndex]);
+        pickerGraph.segmentRecords.push({
+          id: pickId,
+          parentSegmentId,
+          startNodeIndex: previousNodeIndex,
+          endNodeIndex: nodeIndex,
+          depth: sourceStem.depth,
+          axialStart: (pointIndex - 1) / Math.max(1, sourceStem.points.length - 1),
+          axialEnd: pointIndex / Math.max(1, sourceStem.points.length - 1),
+        });
+        pickerStemIds[pickId] = ownerId;
+        lastPickerSegmentByStem.set(sourceStem.index, pickId);
+      }
+      previousNodeIndex = nodeIndex;
+    }
+  }
   return {
     template,
     graph,
@@ -7084,6 +7186,12 @@ export const buildWeberPennProcPlantTemplate = (
       leaves: (nativeLeaves ? Math.round(baked.leaves.indices.length / 6) : 0) + massLeaves,
       flowers: 0,
       triangles: template.idx.length / 3,
+    },
+    weberPennTrim: {
+      target,
+      pickerGraph,
+      pickerStemIds,
+      trimAudit: trimmed?.audit ?? null,
     },
   };
 };
@@ -7486,7 +7594,8 @@ export const buildProcPlantTemplate = (
   genome: ProcPlantGenome,
   seed = 1,
   env: ProcPlantEnvironment = defaultPlantEnvironment(),
-): { template: ProcPlantTemplate; graph: ProcPlantGraph; stats: ProcPlantStats } => {
+  options: ProcPlantWeberPennBuildOptions = {},
+): ProcPlantBuildResult => {
   if (genome.spaceColonization) {
     const parts = buildSpaceColonizedProcPlantParts(genome, seed, env);
     const template = materializeProcPlantParts(genome, parts);
@@ -7502,7 +7611,7 @@ export const buildProcPlantTemplate = (
     };
   }
   if (genome.branchModules) return buildBranchModuleGraphTemplate(genome, seed, env);
-  if (genome.weberPenn) return buildWeberPennProcPlantTemplate(genome, seed, env);
+  if (genome.weberPenn) return buildWeberPennProcPlantTemplate(genome, seed, env, options);
   const graph = buildProcPlantGraph(genome, seed, env);
   return buildProcPlantTemplateFromGraph(genome, graph, env);
 };

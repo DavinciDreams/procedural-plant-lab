@@ -35,6 +35,7 @@
     "test:webgpu-visibility": "node scripts/run-webgpu-visibility-tests.mjs",
     "test:prune-selection": "node scripts/run-prune-tool-selection-tests.mjs",
     "test:weber-penn-trim": "node scripts/run-weber-penn-trim-tests.mjs",
+    "test:weber-penn-trim-browser": "node scripts/run-weber-penn-trim-browser-smoke.mjs",
     "test:organ-placement": "node scripts/run-organ-placement-override-tests.mjs",
     "test:organ-variants": "node scripts/run-organ-variant-tests.mjs",
     "test:cli": "node scripts/run-cli-tests.mjs",
